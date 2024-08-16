@@ -1,0 +1,11 @@
+[package]
+name = "api_server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytes = "1.7.1"
+http-body-util = "0.1.2"
+hyper = { version = "1.4.1", features = ["full"] }
+hyper-util = { version = "0.1.7", features = ["full"] }
+tokio = { version = "1.39.2", features = ["full"] }

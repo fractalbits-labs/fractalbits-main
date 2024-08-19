@@ -1,102 +1,32 @@
-#![deny(warnings)]
-
 use api_server::{nss_get_inode, nss_ops, nss_put_inode};
-use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper::{body::Body, Method, Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
-use prost::Message;
-use std::net::SocketAddr;
-use tokio::net::TcpListener;
+use axum::{routing::post, Router};
+// TODO: use axum_extra::protobuf::Protobuf;
 
-/// This is our service handler. It receives a Request, routes on its
-/// path, and returns a Future of a Response.
-async fn echo(
-    req: Request<hyper::body::Incoming>,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
-    match (req.method(), req.uri().path()) {
-        (&Method::POST, "/put_obj") => {
-            // To protect our server, reject requests with bodies larger than
-            // 64kbs of data.
-            let max = req.body().size_hint().upper().unwrap_or(u64::MAX);
-            if max > 1024 * 64 {
-                let mut resp = Response::new(full("Body too big"));
-                *resp.status_mut() = hyper::StatusCode::PAYLOAD_TOO_LARGE;
-                return Ok(resp);
-            }
-
-            let key = req.collect().await?.to_bytes();
-            let value = key.iter().rev().cloned().collect::<Vec<u8>>();
-            nss_put_inode(
-                std::str::from_utf8(&key).unwrap().to_string(),
-                std::str::from_utf8(&value).unwrap().to_string(),
-            )
-            .await;
-            Ok(Response::new(empty()))
-        }
-
-        (&Method::POST, "/get_obj") => {
-            // To protect our server, reject requests with bodies larger than
-            // 64kbs of data.
-            let max = req.body().size_hint().upper().unwrap_or(u64::MAX);
-            if max > 1024 * 64 {
-                let mut resp = Response::new(full("Body too big"));
-                *resp.status_mut() = hyper::StatusCode::PAYLOAD_TOO_LARGE;
-                return Ok(resp);
-            }
-
-            let key = req.collect().await?.to_bytes();
-            let resp = nss_get_inode(std::str::from_utf8(&key).unwrap().to_string())
-                .await
-                .result;
-            if let Some(nss_ops::get_inode_response::Result::Ok(value)) = resp {
-                let value_body = value.encode_to_vec();
-                Ok(Response::new(full(value_body)))
-            } else {
-                todo!()
-            }
-        }
-
-        // Return the 404 Not Found for other routes.
-        _ => {
-            let mut not_found = Response::new(empty());
-            *not_found.status_mut() = StatusCode::NOT_FOUND;
-            Ok(not_found)
-        }
+// async fn get_obj() -> Protobuf<nss_ops::GetInodeResponse> {
+async fn get_obj() -> String {
+    let resp = nss_get_inode("hello".into()).await.result;
+    if let Some(nss_ops::get_inode_response::Result::Ok(value)) = resp {
+        value
+    } else {
+        todo!()
     }
 }
 
-fn empty() -> BoxBody<Bytes, hyper::Error> {
-    Empty::<Bytes>::new()
-        .map_err(|never| match never {})
-        .boxed()
-}
-
-fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
-    Full::new(chunk.into())
-        .map_err(|never| match never {})
-        .boxed()
+// async fn put_obj() -> Protobuf<nss_ops::PutInodeResponse> {
+async fn put_obj() -> () {
+    let key: String = "hello".into();
+    let value: String = key.chars().rev().collect();
+    _ = nss_put_inode(key, value).await;
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+async fn main() {
+    tracing_subscriber::fmt::init();
 
-    let listener = TcpListener::bind(addr).await?;
-    println!("Listening on http://{}", addr);
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let io = TokioIo::new(stream);
+    let app = Router::new()
+        .route("/get_obj", post(get_obj))
+        .route("/put_obj", post(put_obj));
 
-        tokio::task::spawn(async move {
-            if let Err(err) = http1::Builder::new()
-                .serve_connection(io, service_fn(echo))
-                .await
-            {
-                println!("Error serving connection: {:?}", err);
-            }
-        });
-    }
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }

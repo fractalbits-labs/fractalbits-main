@@ -1,14 +1,25 @@
-use api_server::{nss_get_inode, nss_put_inode};
-use axum::{extract::Path, routing::get, Router};
+use axum::{extract::Path, http::StatusCode, routing::get, Router};
 
-async fn get_obj(Path(key): Path<String>) -> String {
-    let resp = nss_get_inode(key).await;
-    serde_json::to_string_pretty(&resp).unwrap()
+async fn get_obj(Path(key): Path<String>) -> Result<String, (StatusCode, String)> {
+    let resp = api_server::nss_get_inode(key).await;
+    match serde_json::to_string_pretty(&resp.result) {
+        Ok(resp) => Ok(resp),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("internal server error: {e}"),
+        )),
+    }
 }
 
-async fn put_obj(Path(key): Path<String>, value: String) -> String {
-    let resp = nss_put_inode(key, value).await;
-    serde_json::to_string_pretty(&resp).unwrap()
+async fn put_obj(Path(key): Path<String>, value: String) -> Result<String, (StatusCode, String)> {
+    let resp = api_server::nss_put_inode(key, value).await;
+    match serde_json::to_string_pretty(&resp.result) {
+        Ok(resp) => Ok(resp),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("internal server error: {e}"),
+        )),
+    }
 }
 
 #[tokio::main]

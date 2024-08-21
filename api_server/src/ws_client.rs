@@ -1,7 +1,8 @@
 use crate::utils;
+use bytes::Buf;
 use std::collections::HashMap;
 use std::io::Result;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::BufReader;
@@ -12,9 +13,9 @@ use tokio::{
 use web_socket::*;
 
 pub struct RpcClient {
-    requests: Arc<RwLock<HashMap<u32, oneshot::Sender<Box<[u8]>>>>>,
+    requests: Arc<RwLock<HashMap<u64, oneshot::Sender<Box<[u8]>>>>>,
     ws: Arc<RwLock<WebSocket<BufReader<TcpStream>>>>,
-    next_id: AtomicU32,
+    next_id: AtomicU64,
 }
 
 impl RpcClient {
@@ -33,8 +34,10 @@ impl RpcClient {
                     match tokio::time::timeout(Duration::from_millis(10), ws.recv()).await {
                         Ok(Ok(Event::Data { ty, data })) => {
                             assert!(matches!(ty, DataType::Complete(MessageType::Text)));
+                            let mut buf = bytes::BytesMut::from_iter(data.iter());
+                            let request_id = RpcClient::extract_request_id(&mut buf);
                             let tx: oneshot::Sender<Box<[u8]>> =
-                                requests_clone.write().await.remove(&0).unwrap();
+                                requests_clone.write().await.remove(&request_id).unwrap();
                             _ = tx.send(data);
                         }
                         _ => {
@@ -48,16 +51,15 @@ impl RpcClient {
         Ok(Self {
             requests,
             ws,
-            next_id: AtomicU32::new(1),
+            next_id: AtomicU64::new(1),
         })
     }
 
-    pub async fn send_request(&self, _id: u32, msg: &[u8]) -> Result<String> {
+    pub async fn send_request(&self, id: u64, msg: &[u8]) -> Result<String> {
         let rx = {
             self.ws.write().await.send(msg).await?;
             let (tx, rx) = oneshot::channel();
-            // FIXME: track inflight request with actual id
-            self.requests.write().await.insert(0, tx);
+            self.requests.write().await.insert(id, tx);
             rx
         };
 
@@ -65,10 +67,17 @@ impl RpcClient {
         Ok(std::str::from_utf8(&*response).unwrap().to_string())
     }
 
-    pub fn gen_request_id(&self) -> u32 {
+    pub fn gen_request_id(&self) -> u64 {
         let request_id = self.next_id.load(std::sync::atomic::Ordering::SeqCst);
         self.next_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         request_id
+    }
+
+    fn extract_request_id(buf: &mut impl Buf) -> u64 {
+        let (tag, wire_type) = prost::encoding::decode_key(buf).unwrap();
+        assert_eq!(1, tag);
+        assert_eq!(prost::encoding::WireType::Varint, wire_type);
+        prost::encoding::decode_varint(buf).unwrap()
     }
 }

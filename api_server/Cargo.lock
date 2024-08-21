@@ -39,6 +39,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "base64",
+ "bytes",
  "prost 0.13.1",
  "prost-build",
  "prost-wkt",

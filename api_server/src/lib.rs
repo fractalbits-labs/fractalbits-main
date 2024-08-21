@@ -16,11 +16,12 @@ pub mod nss_ops {
 }
 
 pub async fn nss_put_inode(rpc_client: &RpcClient, key: String, value: String) -> PutInodeResponse {
-    let mut request = PutInodeRequest::default();
-    request.method = Method::PutInode.into();
-    request.id = rpc_client.gen_request_id();
-    request.key = key;
-    request.value = value;
+    let request = PutInodeRequest {
+        method: Method::PutInode.into(),
+        id: rpc_client.gen_request_id(),
+        key,
+        value,
+    };
     let mut request_bytes = Vec::<u8>::new();
     request.encode(&mut request_bytes).unwrap();
 
@@ -32,10 +33,11 @@ pub async fn nss_put_inode(rpc_client: &RpcClient, key: String, value: String) -
 }
 
 pub async fn nss_get_inode(rpc_client: &RpcClient, key: String) -> GetInodeResponse {
-    let mut request = GetInodeRequest::default();
-    request.method = Method::GetInode.into();
-    request.id = rpc_client.gen_request_id();
-    request.key = key;
+    let request = GetInodeRequest {
+        method: Method::GetInode.into(),
+        id: rpc_client.gen_request_id(),
+        key,
+    };
     let mut request_bytes = Vec::<u8>::new();
     request.encode(&mut request_bytes).unwrap();
 

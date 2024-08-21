@@ -56,13 +56,9 @@ impl RpcClient {
     }
 
     pub async fn send_request(&self, id: u64, msg: &[u8]) -> impl Buf {
-        let rx = {
-            self.ws.write().await.send(msg).await.unwrap();
-            let (tx, rx) = oneshot::channel();
-            self.requests.write().await.insert(id, tx);
-            rx
-        };
-
+        self.ws.write().await.send(msg).await.unwrap();
+        let (tx, rx) = oneshot::channel();
+        self.requests.write().await.insert(id, tx);
         rx.await.unwrap()
     }
 

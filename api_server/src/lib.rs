@@ -29,7 +29,9 @@ pub async fn nss_put_inode(rpc_client: &RpcClient, key: String, value: String) -
     let resp_bytes = rpc_client
         .send_request(request.id, request_bytes.as_ref())
         .await;
-    Message::decode(resp_bytes).unwrap()
+    let mut resp: PutInodeResponse = Message::decode(resp_bytes).unwrap();
+    resp.id = request.id; // id has already been decoded and verified in ws_client receiving task
+    resp
 }
 
 pub async fn nss_get_inode(rpc_client: &RpcClient, key: String) -> GetInodeResponse {
@@ -42,5 +44,7 @@ pub async fn nss_get_inode(rpc_client: &RpcClient, key: String) -> GetInodeRespo
     request.encode(&mut request_bytes).unwrap();
 
     let resp_bytes = rpc_client.send_request(request.id, &request_bytes).await;
-    Message::decode(resp_bytes).unwrap()
+    let mut resp: GetInodeResponse = Message::decode(resp_bytes).unwrap();
+    resp.id = request.id; // id has already been decoded and verified in ws_client receiving task
+    resp
 }

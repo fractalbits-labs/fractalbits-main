@@ -48,6 +48,7 @@ pub struct RpcClient {
 impl RpcClient {
     pub async fn new(url: &str) -> Result<Self, WebSocketError> {
         let socket = TcpStream::connect(url).await?;
+        socket.set_nodelay(true)?;
         let mut client = Client::new(socket.compat(), url, "/");
         let (sender, receiver) = match client.handshake().await {
             Ok(ServerResponse::Accepted { .. }) => client.into_builder().finish(),

@@ -1,0 +1,8 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cmd_lib = "1.9.4"
+structopt = "0.3.26"

@@ -89,6 +89,10 @@ impl RpcClient {
         loop {
             let mut buffer = [0; 1024];
             let n = receiver.read(&mut buffer).await.unwrap();
+            if n == 0 {
+                // socket is closed
+                break Ok(());
+            }
             let mut bytes = Bytes::copy_from_slice(&buffer[0..n]);
             let request_id = RpcClient::extract_request_id_from_header(&mut bytes)?;
             let tx: oneshot::Sender<Bytes> = match requests.write().await.remove(&request_id) {

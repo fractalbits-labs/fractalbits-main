@@ -59,7 +59,7 @@ fn main() -> CmdResult {
     run_cmd! {
         info "starting benchmark ...";
         cd ./api_server/benches/rewrk;
-        cargo run --release -- -t 24 -c 500 -d 30s -h $uri -m post --pct;
+        cargo run --release -- -t 24 -c 1 -d 30s -h $uri -m post --pct;
     }?;
 
     Ok(())

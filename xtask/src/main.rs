@@ -14,12 +14,20 @@ enum Cmd {
         )]
         with_flame_graph: bool,
     },
+    #[structopt(about = "Service stop/start/restart")]
+    Service { action: String },
 }
 
 #[cmd_lib::main]
 fn main() -> CmdResult {
-    let Cmd::Bench { with_flame_graph } = Cmd::from_args();
+    match Cmd::from_args() {
+        Cmd::Bench { with_flame_graph } => run_cmd_bench(with_flame_graph)?,
+        Cmd::Service { action } => run_cmd_service(&action)?,
+    }
+    Ok(())
+}
 
+fn run_cmd_bench(with_flame_graph: bool) -> CmdResult {
     if !Path::new("./api_server").exists() {
         error!("Could not find `api_server` in current directory.");
         error!("You need to run the command (cargo xtask ...) in the root source direcotry.");
@@ -35,11 +43,7 @@ fn main() -> CmdResult {
         cargo build --release;
     }?;
 
-    run_cmd! {
-        info "killing previous servers (if any) ...";
-        ignore killall nss_server;
-        ignore killall api_server;
-    }?;
+    run_cmd_service("stop")?;
 
     let nss_wait_secs = 10;
     run_cmd! {
@@ -92,4 +96,12 @@ fn main() -> CmdResult {
     }
 
     Ok(())
+}
+
+fn run_cmd_service(_action: &str) -> CmdResult {
+    run_cmd! {
+        info "killing previous servers (if any) ...";
+        ignore killall nss_server;
+        ignore killall api_server;
+    }
 }

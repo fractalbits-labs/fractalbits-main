@@ -4,15 +4,21 @@ use structopt::StructOpt;
 
 #[derive(StructOpt)]
 #[structopt(name = "xtask", about = "Misc project related tasks")]
-struct Opt {
-    #[structopt(short, default_value = "bench")]
-    op: String,
+enum Cmd {
+    #[structopt(about = "Run benchmark")]
+    Bench {
+        #[structopt(
+            short = "f",
+            long,
+            long_help = "Run with perf tool and generate flamegraph"
+        )]
+        with_flame_graph: bool,
+    },
 }
 
 #[cmd_lib::main]
 fn main() -> CmdResult {
-    let Opt { op } = Opt::from_args();
-    let _ = op; // we are only doing benchmark for now
+    let Cmd::Bench { with_flame_graph } = Cmd::from_args();
 
     if !Path::new("./api_server").exists() {
         error!("Could not find `api_server` in current directory.");
@@ -55,12 +61,35 @@ fn main() -> CmdResult {
     let api_server_pid = run_fun!(pidof api_server)?;
     info!("api server(pid={api_server_pid}) started");
 
+    let perf_handle = if with_flame_graph {
+        run_cmd! {
+            info "start perf in the background ...";
+            sudo bash -c "echo 0 > /proc/sys/kernel/kptr_restrict";
+            sudo bash -c "echo -1 > /proc/sys/kernel/perf_event_paranoid";
+        }?;
+        Some(spawn!(perf record -a -g -F 99 sleep 35)?)
+    } else {
+        None
+    };
+
     let uri = "http://127.0.0.1:3000";
     run_cmd! {
         info "starting benchmark ...";
         cd ./api_server/benches/rewrk;
         cargo run --release -- -t 24 -c 500 -d 30s -h $uri -m post --pct;
     }?;
+
+    if let Some(mut handle) = perf_handle {
+        handle.wait()?;
+        let flamegraph_path = "/home/linuxbrew/.linuxbrew/Cellar/flamegraph/1.0_1/bin/";
+        run_cmd! {
+            info "post-processing perf data ...";
+            perf script > out.perf;
+            ${flamegraph_path}/stackcollapse-perf.pl out.perf > out.folded;
+            ${flamegraph_path}/flamegraph.pl out.folded > out_perf.svg;
+            info "flamegraph \"out_perf.svg\" is generated";
+        }?;
+    }
 
     Ok(())
 }

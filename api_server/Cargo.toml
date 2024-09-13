@@ -21,6 +21,10 @@ thiserror = "1.0.63"
 tracing = "0.1.40"
 tower-http = { version = "0.5.2", features = ["trace"] }
 bytemuck = { version = "1.18.0", features = ["derive"] }
+console-subscriber = "0.4.0"
+crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
+tokio-util = { version = "0.7.12", features = ["codec"] }
+tokio-stream = "0.1.16"
 
 [build-dependencies]
 prost-build = "0.13"

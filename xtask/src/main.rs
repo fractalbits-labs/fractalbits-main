@@ -62,7 +62,17 @@ fn run_cmd_bench(with_flame_graph: bool) -> CmdResult {
         info "waiting ${api_server_wait_secs}s for server up";
         sleep $api_server_wait_secs;
     }?;
-    let api_server_pid = run_fun!(pidof api_server)?;
+    let api_server_pid = match run_fun!(pidof api_server) {
+        Ok(pid) => pid,
+        Err(e) => {
+            run_cmd! {
+                error "Could not find api_server service";
+                info "Tailing api_server.log:";
+                tail api_server.log;
+            }?;
+            return Err(e);
+        }
+    };
     info!("api server(pid={api_server_pid}) started");
 
     let perf_handle = if with_flame_graph {

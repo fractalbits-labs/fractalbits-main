@@ -1,9 +1,8 @@
-use crate::frame::{self, Frame};
-
+use crate::codec::{MessageFrame, MesssageCodec};
 use bytes::{Buf, BytesMut};
 use std::io::{self, Cursor};
-use tokio::io::{AsyncReadExt, ReadHalf};
-use tokio::net::TcpStream;
+use tokio::io::AsyncReadExt;
+use tokio::net::tcp::OwnedReadHalf;
 
 /// Receive `Frame` values from a remote peer.
 ///
@@ -20,7 +19,7 @@ pub struct ReceiveConnection {
     // The `TcpStream`. It is decorated with a `BufWriter`, which provides write
     // level buffering. The `BufWriter` implementation provided by Tokio is
     // sufficient for our needs.
-    stream: ReadHalf<TcpStream>,
+    pub stream: OwnedReadHalf,
 
     // The buffer for reading frames.
     buffer: BytesMut,
@@ -28,11 +27,11 @@ pub struct ReceiveConnection {
 
 impl ReceiveConnection {
     /// Create a new `Connection`, backed by `socket`. Read buffers are initialized.
-    pub fn new(socket: ReadHalf<TcpStream>) -> Self {
+    pub fn new(socket: OwnedReadHalf) -> Self {
         Self {
             stream: socket,
             // TODO: tune for better performance
-            buffer: BytesMut::with_capacity(4 * 1024 * 1024),
+            buffer: BytesMut::with_capacity(4096),
         }
     }
 

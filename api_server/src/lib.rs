@@ -1,5 +1,4 @@
-pub mod connection;
-pub mod frame;
+pub mod codec;
 pub mod message;
 pub mod rpc_client;
 pub mod nss_ops {

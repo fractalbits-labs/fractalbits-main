@@ -32,7 +32,8 @@ async fn get_obj(
     key.push('\0');
     let resp = api_server::nss_get_inode(&state.rpc_clients[hash], key)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        .unwrap();
     match serde_json::to_string_pretty(&resp.result) {
         Ok(resp) => Ok(resp),
         Err(e) => Err((
@@ -52,7 +53,8 @@ async fn put_obj(
     key.push('\0');
     let resp = api_server::nss_put_inode(&state.rpc_clients[hash], key, value)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        .unwrap();
     match serde_json::to_string_pretty(&resp.result) {
         Ok(resp) => Ok(resp),
         Err(e) => Err((

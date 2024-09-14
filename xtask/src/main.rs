@@ -15,14 +15,23 @@ enum Cmd {
         with_flame_graph: bool,
     },
     #[structopt(about = "Service stop/start/restart")]
-    Service { action: String },
+    Service {
+        #[structopt(parse(from_str), long_help = "stop/start/restart")]
+        action: String,
+    },
 }
 
 #[cmd_lib::main]
 fn main() -> CmdResult {
     match Cmd::from_args() {
         Cmd::Bench { with_flame_graph } => run_cmd_bench(with_flame_graph)?,
-        Cmd::Service { action } => run_cmd_service(&action)?,
+        Cmd::Service { action } => match action.as_str() {
+            "stop" | "start" | "restart" => run_cmd_service(&action)?,
+            _ => {
+                Cmd::clap().print_help().unwrap();
+                println!();
+            }
+        },
     }
     Ok(())
 }
@@ -57,37 +66,7 @@ fn run_cmd_bench(with_flame_graph: bool) -> CmdResult {
         cargo build --release;
     }?;
 
-    run_cmd_service("stop")?;
-
-    let nss_wait_secs = 10;
-    run_cmd! {
-        info "starting nss server ...";
-        bash -c "nohup ./zig-out/bin/nss_server &> nss_server.log &";
-        info "waiting ${nss_wait_secs}s for server up";
-        sleep $nss_wait_secs;
-    }?;
-    let nss_server_pid = run_fun!(pidof nss_server)?;
-    info!("nss server(pid={nss_server_pid}) started");
-
-    let api_server_wait_secs = 5;
-    run_cmd! {
-        info "starting api server ...";
-        bash -c "nohup ./target/release/api_server &> api_server.log &";
-        info "waiting ${api_server_wait_secs}s for server up";
-        sleep $api_server_wait_secs;
-    }?;
-    let api_server_pid = match run_fun!(pidof api_server) {
-        Ok(pid) => pid,
-        Err(e) => {
-            run_cmd! {
-                error "Could not find api_server service";
-                info "Tailing api_server.log:";
-                tail api_server.log;
-            }?;
-            return Err(e);
-        }
-    };
-    info!("api server(pid={api_server_pid}) started");
+    run_cmd_service("restart")?;
 
     let perf_handle = if with_flame_graph {
         run_cmd! {
@@ -120,13 +99,61 @@ fn run_cmd_bench(with_flame_graph: bool) -> CmdResult {
         }?;
     }
 
+    // stop service after benchmark to save cpu power
+    run_cmd_service("stop")?;
+
     Ok(())
 }
 
-fn run_cmd_service(_action: &str) -> CmdResult {
+fn run_cmd_service(action: &str) -> CmdResult {
+    match action {
+        "stop" => stop_service(),
+        "start" => start_service(),
+        "restart" => {
+            stop_service()?;
+            start_service()
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn stop_service() -> CmdResult {
     run_cmd! {
         info "killing previous servers (if any) ...";
         ignore killall nss_server;
         ignore killall api_server;
     }
+}
+
+fn start_service() -> CmdResult {
+    let nss_wait_secs = 10;
+    run_cmd! {
+        info "starting nss server ...";
+        bash -c "nohup ./zig-out/bin/nss_server &> nss_server.log &";
+        info "waiting ${nss_wait_secs}s for server up";
+        sleep $nss_wait_secs;
+    }?;
+    let nss_server_pid = run_fun!(pidof nss_server)?;
+    info!("nss server(pid={nss_server_pid}) started");
+
+    let api_server_wait_secs = 5;
+    run_cmd! {
+        info "starting api server ...";
+        bash -c "nohup ./target/release/api_server &> api_server.log &";
+        info "waiting ${api_server_wait_secs}s for server up";
+        sleep $api_server_wait_secs;
+    }?;
+    let api_server_pid = match run_fun!(pidof api_server) {
+        Ok(pid) => pid,
+        Err(e) => {
+            run_cmd! {
+                error "Could not find api_server service";
+                info "Tailing api_server.log:";
+                tail api_server.log;
+            }?;
+            return Err(e);
+        }
+    };
+    info!("api server(pid={api_server_pid}) started");
+    Ok(())
 }

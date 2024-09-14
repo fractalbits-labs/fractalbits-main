@@ -20,7 +20,7 @@ pub async fn nss_put_inode(
 
     let mut request_header = MessageHeader::default();
     request_header.id = rpc_client.gen_request_id();
-    request_header.command = Command::PutInode.into();
+    request_header.command = Command::PutInode;
     request_header.size = (MessageHeader::encode_len() + request_body.encoded_len()) as u32;
 
     let mut request_bytes = BytesMut::with_capacity(request_header.size as usize);
@@ -44,7 +44,7 @@ pub async fn nss_get_inode(
 
     let mut request_header = MessageHeader::default();
     request_header.id = rpc_client.gen_request_id();
-    request_header.command = Command::GetInode.into();
+    request_header.command = Command::GetInode;
     request_header.size = (MessageHeader::encode_len() + request_body.encoded_len()) as u32;
 
     let mut request_bytes = BytesMut::with_capacity(request_header.size as usize);

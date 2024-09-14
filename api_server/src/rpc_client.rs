@@ -81,7 +81,7 @@ impl RpcClient {
         receiver: OwnedReadHalf,
         requests: Arc<RwLock<HashMap<u32, oneshot::Sender<Bytes>>>>,
     ) -> Result<(), RpcError> {
-        let decoder = MesssageCodec::new();
+        let decoder = MesssageCodec::default();
         let mut reader = FramedRead::new(receiver, decoder);
         while let Some(frame) = reader.next().await {
             let frame = frame?;
@@ -93,7 +93,7 @@ impl RpcClient {
             let _ = tx.send(frame.body);
         }
         tracing::warn!("connection closed, receive_message_task quit");
-        return Ok(());
+        Ok(())
     }
 
     async fn send_message_task(

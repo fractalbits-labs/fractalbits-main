@@ -7,12 +7,8 @@ pub struct MessageFrame {
     pub body: Bytes,
 }
 
+#[derive(Default)]
 pub struct MesssageCodec {}
-impl MesssageCodec {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
 
 const MAX: usize = 2 * 1024 * 1024;
 

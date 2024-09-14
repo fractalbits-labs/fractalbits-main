@@ -3,3 +3,6 @@ xtask = "run --manifest-path ./xtask/Cargo.toml --"
 
 [build]
 rustflags = ["--cfg", "tokio_unstable"]
+
+[profile.release]
+debug = true

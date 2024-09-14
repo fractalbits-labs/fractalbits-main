@@ -34,12 +34,26 @@ fn run_cmd_bench(with_flame_graph: bool) -> CmdResult {
         std::process::exit(1);
     }
 
+    if run_cmd!(bash -c "type addr2line" | grep -q .cargo).is_err() {
+        // From https://github.com/iced-rs/iced/issues/2394
+        run_cmd! {
+            info "Try to install addr2line to make perf script work with rust binary ...";
+            cargo install  addr2line --features="bin";
+        }?;
+    }
+
     run_cmd! {
         info "building nss server ...";
         zig build --release=safe;
-
+    }?;
+    run_cmd! {
         info "building api_server ...";
         cd api_server;
+        cargo build --release;
+    }?;
+    run_cmd! {
+        info "building benchmark tool `rewrk` ...";
+        cd ./api_server/benches/rewrk;
         cargo build --release;
     }?;
 
@@ -52,8 +66,8 @@ fn run_cmd_bench(with_flame_graph: bool) -> CmdResult {
         info "waiting ${nss_wait_secs}s for server up";
         sleep $nss_wait_secs;
     }?;
-    let nss_pid = run_fun!(pidof nss_server)?;
-    info!("nss server(pid={nss_pid}) started");
+    let nss_server_pid = run_fun!(pidof nss_server)?;
+    info!("nss server(pid={nss_server_pid}) started");
 
     let api_server_wait_secs = 5;
     run_cmd! {
@@ -81,7 +95,8 @@ fn run_cmd_bench(with_flame_graph: bool) -> CmdResult {
             sudo bash -c "echo 0 > /proc/sys/kernel/kptr_restrict";
             sudo bash -c "echo -1 > /proc/sys/kernel/perf_event_paranoid";
         }?;
-        Some(spawn!(perf record -a -g -F 99 sleep 35)?)
+        // Some(spawn!(perf record -F 99 --call-graph dwarf -p $api_server_pid -g -- sleep 30)?)
+        Some(spawn!(perf record -F 99 --call-graph dwarf -a -g -- sleep 30)?)
     } else {
         None
     };
@@ -90,7 +105,7 @@ fn run_cmd_bench(with_flame_graph: bool) -> CmdResult {
     run_cmd! {
         info "starting benchmark ...";
         cd ./api_server/benches/rewrk;
-        cargo run --release -- -t 1 -c 8 -d 30s -h $uri -m post --pct;
+        ./target/release/rewrk -t 1 -c 8 -d 30s -h $uri -m post --pct;
     }?;
 
     if let Some(mut handle) = perf_handle {

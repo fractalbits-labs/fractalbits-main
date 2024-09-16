@@ -1,15 +1,10 @@
-pub mod codec;
-pub mod message;
-pub mod rpc_client;
-pub mod nss_ops {
-    include!(concat!(env!("OUT_DIR"), "/nss_ops.rs"));
-}
-
 use bytes::BytesMut;
-use message::MessageHeader;
-use nss_ops::*;
+use nss_rpc_client::{
+    message::MessageHeader,
+    nss_ops::*,
+    rpc_client::{RpcClient, RpcError},
+};
 use prost::Message;
-use rpc_client::{RpcClient, RpcError};
 
 pub async fn nss_put_inode(
     rpc_client: &RpcClient,

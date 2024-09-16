@@ -2,13 +2,13 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use api_server::rpc_client::RpcClient;
 use axum::{
     extract::{ConnectInfo, MatchedPath, Path, Request, State},
     http::StatusCode,
     routing::get,
     Router,
 };
+use nss_rpc_client::rpc_client::RpcClient;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 

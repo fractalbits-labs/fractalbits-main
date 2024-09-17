@@ -114,7 +114,7 @@ async fn run(settings: BenchmarkSettings) -> Result<()> {
 
     combiner.display_latencies();
     combiner.display_requests();
-    combiner.display_transfer();
+    // TODO: combiner.display_transfer();
 
     if settings.display_percentile {
         combiner.display_percentile_table();

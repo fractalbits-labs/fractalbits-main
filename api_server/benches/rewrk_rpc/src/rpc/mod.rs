@@ -73,13 +73,13 @@ async fn benchmark(
     // Futures must not be awaited without timeout.
     loop {
         // Create request from **parsed** data.
-        let key: String = faker.fake_with_rng(rng);
+        let key: String = format!("/{}\0", faker.fake_with_rng::<String, _>(rng));
+        let value = key.clone();
 
         // ResponseFuture of send_request might return channel closed error instead of real error
         // in the case of connection_task being finished. This future will check if connection_task
         // is finished first.
-        let future =
-            async { nss_rpc_client::nss_put_inode(&mut rpc_client, key.clone(), key).await };
+        let future = async { nss_rpc_client::nss_put_inode(&mut rpc_client, key, value).await };
 
         let request_start = Instant::now();
 

@@ -1,0 +1,18 @@
+[package]
+name = "rewrk_rpc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.89"
+bytes = "1.7.1"
+clap = "2"
+colored = "2"
+futures-util = "0.3"
+nss_rpc_client = { path = "../../../nss_rpc_client" }
+regex = "1.10.6"
+tokio = { version = "1.40.0", features = ["full"] }
+fake = "2.9.2"
+rand = "0.8"
+serde_json = "1"
+pin-project-lite = "0.2"

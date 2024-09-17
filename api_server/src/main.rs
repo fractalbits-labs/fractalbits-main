@@ -32,7 +32,7 @@ async fn get_obj(
     let hash = calculate_hash(&addr) % MAX_NSS_CONNECTION;
     let mut key = format!("/{key}");
     key.push('\0');
-    let resp = api_server::nss_get_inode(&state.rpc_clients[hash], key)
+    let resp = nss_rpc_client::nss_get_inode(&state.rpc_clients[hash], key)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
         .unwrap();
@@ -54,7 +54,7 @@ async fn put_obj(
     let hash = calculate_hash(&addr) % MAX_NSS_CONNECTION;
     let mut key = format!("/{key}");
     key.push('\0');
-    let resp = api_server::nss_put_inode(&state.rpc_clients[hash], key, value)
+    let resp = nss_rpc_client::nss_put_inode(&state.rpc_clients[hash], key, value)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
         .unwrap();

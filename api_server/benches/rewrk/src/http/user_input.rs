@@ -32,9 +32,11 @@ pub(crate) struct UserInput {
     pub(crate) scheme: Scheme,
     pub(crate) host: String,
     pub(crate) host_header: HeaderValue,
+    #[allow(unused)]
     pub(crate) uri: Uri,
     pub(crate) method: Method,
     pub(crate) headers: HeaderMap,
+    #[allow(unused)]
     pub(crate) body: Bytes,
 }
 

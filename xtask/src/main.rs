@@ -97,7 +97,7 @@ fn run_precheckin() -> CmdResult {
 
     run_cmd! {
         info "Cleaning up test logs ...";
-        rm -f $rand_log $fat_log;
+        //rm -f $rand_log $fat_log;
         info "Precheckin is OK";
     }?;
 

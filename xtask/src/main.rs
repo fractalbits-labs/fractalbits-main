@@ -95,12 +95,17 @@ fn run_precheckin() -> CmdResult {
         e
     })?;
 
+    let async_art_log = "test_async_art.log";
     run_cmd! {
-        info "Cleaning up test logs ...";
-        //rm -f $rand_log $fat_log;
-        info "Precheckin is OK";
-    }?;
+        info "Running async art tests with log $async_art_log ...";
+        ./zig-out/bin/test_async_art &> $async_art_log;
+    }
+    .map_err(|e| {
+        run_cmd!(tail $async_art_log).unwrap();
+        e
+    })?;
 
+    info!("Precheckin is OK");
     Ok(())
 }
 

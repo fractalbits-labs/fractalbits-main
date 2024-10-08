@@ -100,6 +100,7 @@ fn run_precheckin() -> CmdResult {
         info "Running async art tests with log $async_art_log ...";
         ./zig-out/bin/test_async_art --fresh -p 20 &> $async_art_log;
         ./zig-out/bin/test_async_art -p 20 &>> $async_art_log;
+        ./zig-out/bin/test_async_art -p 20 &>> $async_art_log;
     }
     .map_err(|e| {
         run_cmd!(tail $async_art_log).unwrap();

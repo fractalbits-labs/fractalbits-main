@@ -12,7 +12,7 @@ use nss_rpc_client::rpc_client::RpcClient;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-const MAX_NSS_CONNECTION: usize = 19;
+const MAX_NSS_CONNECTION: usize = 8;
 
 struct AppState {
     rpc_clients: Vec<RpcClient>,

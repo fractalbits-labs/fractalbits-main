@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 // use anyhow::{anyhow, Result};
 use fake::{Fake, StringFaker};
+use futures::future::join_all;
 use futures_util::stream::FuturesUnordered;
 use nss_rpc_client::rpc_client::RpcClient;
 use rand::rngs::StdRng;
@@ -24,6 +25,7 @@ pub async fn start_tasks(
     connections: usize,
     uri_string: String,
     _predicted_size: usize,
+    io_depth: usize,
 ) -> anyhow::Result<FuturesUnordered<Handle>> {
     let deadline = Instant::now() + time_for;
     let user_input = uri_string;
@@ -43,7 +45,12 @@ pub async fn start_tasks(
     );
 
     for i in 0..connections {
-        let handle = tokio::spawn(benchmark(deadline, user_input.clone(), seed_ts + i as u64));
+        let handle = tokio::spawn(benchmark(
+            deadline,
+            user_input.clone(),
+            seed_ts + i as u64,
+            io_depth,
+        ));
 
         handles.push(handle);
     }
@@ -56,10 +63,11 @@ async fn benchmark(
     deadline: Instant,
     user_input: String,
     seed: u64,
+    io_depth: usize,
 ) -> anyhow::Result<WorkerResult> {
     let benchmark_start = Instant::now();
     let connector = RewrkConnector::new(deadline, user_input);
-    let mut rpc_client = connector.connect().await.unwrap();
+    let rpc_client = connector.connect().await.unwrap();
 
     let mut request_times = Vec::new();
     let mut error_map = HashMap::new();
@@ -72,36 +80,41 @@ async fn benchmark(
     // Benchmark loop.
     // Futures must not be awaited without timeout.
     loop {
-        // Create request from **parsed** data.
-        let key: String = format!("/{}\0", faker.fake_with_rng::<String, _>(rng));
-        let value = key.clone();
-
         // ResponseFuture of send_request might return channel closed error instead of real error
         // in the case of connection_task being finished. This future will check if connection_task
         // is finished first.
-        let future = async { nss_rpc_client::nss_put_inode(&mut rpc_client, key, value).await };
 
+        let mut futures = Vec::new();
+        for _ in 0..io_depth {
+            // Create request from **parsed** data.
+            let key: String = format!("/{}\0", faker.fake_with_rng::<String, _>(rng));
+            let value = key.clone();
+            let future = async { nss_rpc_client::nss_put_inode(&rpc_client, key, value).await };
+            futures.push(future);
+        }
         let request_start = Instant::now();
 
         // Try to resolve future before benchmark deadline is elapsed.
-        if let Ok(result) = timeout_at(deadline, future).await {
-            if let Err(e) = result {
-                let error = e.to_string();
+        if let Ok(results) = timeout_at(deadline, join_all(futures)).await {
+            for result in results.iter() {
+                if let Err(e) = result {
+                    let error = e.to_string();
 
-                // Insert/add error string to error log.
-                match error_map.get_mut(&error) {
-                    Some(count) => *count += 1,
-                    None => {
-                        error_map.insert(error, 1);
+                    // Insert/add error string to error log.
+                    match error_map.get_mut(&error) {
+                        Some(count) => *count += 1,
+                        None => {
+                            error_map.insert(error, 1);
+                        }
                     }
+                } else {
+                    request_times.push(request_start.elapsed());
                 }
             }
         } else {
             // Benchmark deadline is elapsed. Break the loop.
             break;
         }
-
-        request_times.push(request_start.elapsed());
     }
 
     Ok(WorkerResult {

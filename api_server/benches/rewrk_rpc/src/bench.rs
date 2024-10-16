@@ -33,6 +33,9 @@ pub struct BenchmarkSettings {
 
     /// The number of rounds to repeat.
     pub rounds: usize,
+
+    /// The number of concurrent requests for one connection
+    pub io_depth: usize,
 }
 
 /// Builds the runtime with the given settings and blocks on the main future.
@@ -76,6 +79,7 @@ async fn run(settings: BenchmarkSettings) -> Result<()> {
         settings.connections,
         settings.host.trim().to_string(),
         predict_size as usize,
+        settings.io_depth,
     )
     .await;
 

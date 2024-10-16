@@ -63,6 +63,13 @@ fn main() {
         .parse::<usize>()
         .unwrap_or(1);
 
+    let io_depth: usize = args
+        .value_of("io_depth")
+        .unwrap_or("1")
+        .trim()
+        .parse::<usize>()
+        .unwrap_or(1);
+
     let settings = bench::BenchmarkSettings {
         threads,
         connections: conns,
@@ -71,6 +78,7 @@ fn main() {
         display_percentile: pct,
         display_json: json,
         rounds,
+        io_depth,
     };
 
     bench::start_benchmark(settings);
@@ -179,6 +187,14 @@ fn parse_args() -> ArgMatches<'static> {
                 .long("rounds")
                 .short("r")
                 .help("Repeats the benchmarks n amount of times")
+                .takes_value(true)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("io_depth")
+                .long("io_depth")
+                .short("D")
+                .help("IO depth (number of concurrent rpc requests for one connection)")
                 .takes_value(true)
                 .required(false),
         )

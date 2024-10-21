@@ -1,0 +1,26 @@
+[package]
+name = "nss_rpc_client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# to debug protobuf as json
+# TODO: remove them once the apis are stable
+prost-wkt = "0.6"
+prost-wkt-types = "0.6"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.125"
+
+tokio = { version = "1.39.2", features = ["full"] }
+prost = "0.13"
+bytes = "1.7.1"
+thiserror = "1.0.63"
+tracing = "0.1.40"
+bytemuck = { version = "1.18.0", features = ["derive"] }
+tokio-util = { version = "0.7.12", features = ["codec"] }
+tokio-stream = "0.1.16"
+
+[build-dependencies]
+prost-build = "0.13"
+prost-wkt-build = "0.6"
+

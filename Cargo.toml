@@ -1,10 +1,10 @@
 [workspace]
 members = [
-    "nss_rpc_client",
     "api_server",
-    "xtask",
     "api_server/benches/rewrk",
     "api_server/benches/rewrk_rpc",
+    "api_server/nss_rpc_client",
+    "xtask",
 ]
 resolver = "2"
 

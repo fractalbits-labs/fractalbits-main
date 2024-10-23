@@ -11,16 +11,13 @@ where
 {
     fn into_response(self) -> Response {
         let mut xml = r#"<?xml version="1.0" encoding="UTF-8"?>"#.to_string();
-        match quick_xml::se::to_string(&self.0) {
-            Ok(bytes) => (
+        match quick_xml::se::to_writer(&mut xml, &self.0) {
+            Ok(()) => (
                 [(
                     header::CONTENT_TYPE,
                     HeaderValue::from_static("application/xml"),
                 )],
-                {
-                    xml.push_str(&bytes);
-                    xml
-                },
+                xml,
             )
                 .into_response(),
             Err(err) => (

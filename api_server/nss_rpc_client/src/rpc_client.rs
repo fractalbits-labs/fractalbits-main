@@ -85,7 +85,7 @@ impl RpcClient {
         let mut reader = FramedRead::new(receiver, decoder);
         while let Some(frame) = reader.next().await {
             let frame = frame?;
-            tracing::debug!("sending response for {}", frame.header.id);
+            tracing::debug!("sending response: request_id={}", frame.header.id);
             let tx: oneshot::Sender<Bytes> = match requests.write().await.remove(&frame.header.id) {
                 Some(tx) => tx,
                 None => continue, // we may have received the response already

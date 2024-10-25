@@ -1,12 +1,8 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use api_server::{
-    handler::{any_handler, MAX_NSS_CONNECTION},
-    AppState,
-};
+use api_server::{handler::any_handler, AppState};
 use axum::{extract::Request, routing};
-use nss_rpc_client::rpc_client::RpcClient;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -21,18 +17,13 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let mut rpc_clients = Vec::with_capacity(MAX_NSS_CONNECTION);
-    for _i in 0..MAX_NSS_CONNECTION {
-        let rpc_client = match RpcClient::new("127.0.0.1:9224").await {
-            Ok(rpc_client) => rpc_client,
-            Err(e) => {
-                tracing::error!("failed to start rpc client: {e}");
-                return;
-            }
-        };
-        rpc_clients.push(rpc_client);
-    }
-    let shared_state = Arc::new(AppState { rpc_clients });
+    let app_state = match AppState::new("127.0.0.1:9224").await {
+        Ok(state) => state,
+        Err(e) => {
+            tracing::error!("Failed to start rpc clients: {e}");
+            return;
+        }
+    };
 
     let app = routing::any(any_handler)
         .layer(
@@ -48,20 +39,20 @@ async fn main() {
                 // logging of errors so disable that
                 .on_failure(()),
         )
-        .with_state(shared_state)
+        .with_state(Arc::new(app_state))
         .into_make_service_with_connect_info::<SocketAddr>();
 
     let addr = "0.0.0.0:3000";
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(listener) => listener,
         Err(e) => {
-            tracing::error!("failed to bind addr {addr}: {e}");
+            tracing::error!("Failed to bind addr {addr}: {e}");
             return;
         }
     };
 
-    tracing::info!("server started");
+    tracing::info!("Server started");
     if let Err(e) = axum::serve(listener, app).tcp_nodelay(true).await {
-        tracing::error!("server stopped: {e}");
+        tracing::error!("Server stopped: {e}");
     }
 }

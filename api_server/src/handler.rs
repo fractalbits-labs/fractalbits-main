@@ -4,26 +4,21 @@ mod list;
 mod put;
 mod session;
 
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use super::extract::{api_command::Api, bucket_name::BucketName, key::Key};
+use super::AppState;
+use crate::extract::api_command::ApiCommand;
 use axum::http::Method;
 use axum::{
     extract::{ConnectInfo, Request, State},
     response::{IntoResponse, Response},
 };
-
-use crate::extract::api_command::ApiCommand;
-
-use super::extract::{api_command::Api, bucket_name::BucketName, key::Key};
-use super::AppState;
 use nss_rpc_client::rpc_client::RpcClient;
 
-pub const MAX_NSS_CONNECTION: usize = 8;
-
 pub async fn any_handler(
-    State(state): State<Arc<AppState>>,
+    State(app): State<Arc<AppState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     BucketName(bucket_name): BucketName,
     Api(api_command): Api,
@@ -31,22 +26,12 @@ pub async fn any_handler(
     request: Request,
 ) -> Response {
     tracing::debug!(%bucket_name);
-    let rpc_client = get_rpc_client(&state, addr);
+    let rpc_client = app.get_rpc_client(addr);
     match request.method() {
         &Method::GET => get_handler(request, api_command, key, rpc_client).await,
         &Method::PUT => put_handler(request, api_command, key, rpc_client).await,
         method => panic!("TODO: method {method}"),
     }
-}
-
-fn get_rpc_client(app_state: &AppState, addr: SocketAddr) -> &RpcClient {
-    fn calculate_hash<T: Hash>(t: &T) -> usize {
-        let mut s = DefaultHasher::new();
-        t.hash(&mut s);
-        s.finish() as usize
-    }
-    let hash = calculate_hash(&addr) % MAX_NSS_CONNECTION;
-    &app_state.rpc_clients[hash]
 }
 
 async fn get_handler(

@@ -164,7 +164,9 @@ fn run_cmd_bench(with_flame_graph: bool, server: &str) -> CmdResult {
             sudo bash -c "echo 0 > /proc/sys/kernel/kptr_restrict";
             sudo bash -c "echo -1 > /proc/sys/kernel/perf_event_paranoid";
         }?;
-        // Some(spawn!(perf record -F 99 --call-graph dwarf -p $api_server_pid -g -- sleep 30)?)
+
+        // let server_pid = run_fun!(pidof nss_server)?;
+        // Some(spawn!(perf record -F 99 --call-graph dwarf -p $server_pid -g -- sleep 30)?)
         Some(spawn!(perf record -F 99 --call-graph dwarf -a -g -- sleep $duration_secs)?)
     } else {
         None

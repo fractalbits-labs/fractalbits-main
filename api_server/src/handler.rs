@@ -15,7 +15,7 @@ use axum::{
     extract::{ConnectInfo, Request, State},
     response::{IntoResponse, Response},
 };
-use nss_rpc_client::rpc_client::RpcClient;
+use rpc_client::rpc_client::RpcClient;
 
 pub async fn any_handler(
     State(app): State<Arc<AppState>>,

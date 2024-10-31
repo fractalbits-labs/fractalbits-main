@@ -4,7 +4,7 @@ use axum::{
     response::{self, IntoResponse},
     RequestExt,
 };
-use nss_rpc_client::{nss_ops::get_inode_response, rpc_client::RpcClient};
+use rpc_client::{nss_ops::get_inode_response, rpc_client::RpcClient};
 use serde::Deserialize;
 
 #[allow(dead_code)]
@@ -29,7 +29,7 @@ pub async fn get_object(
     rpc_client: &RpcClient,
 ) -> response::Result<String> {
     let Query(_get_obj_opts): Query<GetObjectOptions> = request.extract_parts().await?;
-    let resp = nss_rpc_client::nss_get_inode(rpc_client, key)
+    let resp = rpc_client::nss_get_inode(rpc_client, key)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
     match resp.result.unwrap() {

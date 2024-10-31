@@ -3,7 +3,7 @@ members = [
     "api_server",
     "api_server/benches/rewrk",
     "api_server/benches/rewrk_rpc",
-    "api_server/nss_rpc_client",
+    "api_server/rpc_client",
     "xtask",
 ]
 resolver = "2"

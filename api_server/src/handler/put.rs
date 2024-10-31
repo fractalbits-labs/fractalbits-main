@@ -4,11 +4,14 @@ use axum::{
     response::{IntoResponse, Result},
     RequestExt,
 };
-use nss_rpc_client::rpc_client::RpcClient;
+use rpc_client::rpc_client::RpcClient;
 
 pub async fn put_object(request: Request, key: String, rpc_client: &RpcClient) -> Result<()> {
     let value: String = request.extract().await?;
-    let _resp = nss_rpc_client::nss_put_inode(rpc_client, key, value)
+
+    // Write data at first
+
+    let _resp = rpc_client::nss_put_inode(rpc_client, key, value)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
     // serde_json::to_string_pretty(&resp.result)

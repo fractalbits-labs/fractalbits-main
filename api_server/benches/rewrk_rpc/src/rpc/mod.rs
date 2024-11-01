@@ -8,9 +8,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use fake::{Fake, StringFaker};
 use futures::future::join_all;
 use futures_util::stream::FuturesUnordered;
+use nss_rpc_client::rpc_client::RpcClient;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use rpc_client::rpc_client::RpcClient;
 use tokio::task::JoinHandle;
 use tokio::time::{timeout_at, Instant};
 
@@ -134,7 +134,7 @@ async fn benchmark_read(
             };
             key.push('\0');
 
-            let future = async { rpc_client::nss::nss_get_inode(&rpc_client, key).await };
+            let future = async { nss_rpc_client::nss::nss_get_inode(&rpc_client, key).await };
             futures.push(future);
         }
         if futures.is_empty() {
@@ -216,7 +216,8 @@ async fn benchmark_write(
             key.push('\0');
 
             let value = key.clone();
-            let future = async { rpc_client::nss::nss_put_inode(&rpc_client, key, value).await };
+            let future =
+                async { nss_rpc_client::nss::nss_put_inode(&rpc_client, key, value).await };
             futures.push(future);
         }
         if futures.is_empty() {

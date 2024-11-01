@@ -2,7 +2,7 @@ mod extract;
 pub mod handler;
 mod response_xml;
 
-use rpc_client::rpc_client::{RpcClient, RpcError};
+use nss_rpc_client::rpc_client::{RpcClient, RpcError};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::net::SocketAddr;
 

@@ -15,7 +15,8 @@ bytes = "1.7.1"
 tracing = "0.1.40"
 tower-http = { version = "0.5.2", features = ["trace"] }
 console-subscriber = "0.4.0"
-rpc_client = { path = "rpc_client" }
+nss_rpc_client = { path = "rpc_client/nss" }
+storage_server_rpc_client = { path = "rpc_client/storage_server" }
 tower = "0.5.1"
 strum = { version = "0.26.3", features = ["derive"] }
 quick-xml = { version = "0.36.2", features = ["serialize"] }

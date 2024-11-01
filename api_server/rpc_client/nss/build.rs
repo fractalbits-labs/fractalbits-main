@@ -17,13 +17,7 @@ fn main() {
         .extern_path(".google.protobuf.Timestamp", "::prost_wkt_types::Timestamp")
         .extern_path(".google.protobuf.Value", "::prost_wkt_types::Value")
         .file_descriptor_set_path(&descriptor_file)
-        .compile_protos(
-            &[
-                "src/proto/nss_ops.proto",
-                "src/proto/storage_server_ops.proto",
-            ],
-            &["proto/"],
-        )
+        .compile_protos(&["src/proto/nss_ops.proto"], &["proto/"])
         .unwrap();
 
     let descriptor_bytes = std::fs::read(descriptor_file).unwrap();

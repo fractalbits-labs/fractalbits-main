@@ -1,5 +1,5 @@
 [package]
-name = "rpc_client"
+name = "storage_server_rpc_client"
 version = "0.1.0"
 edition = "2021"
 
@@ -25,6 +25,6 @@ prost-build = "0.13"
 prost-wkt-build = "0.6"
 
 [features]
-default = ["nss"]
-nss = []
+default = ["storage_server"]
 storage_server = []
+nss = []

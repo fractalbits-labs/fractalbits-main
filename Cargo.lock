@@ -50,11 +50,12 @@ dependencies = [
  "bytes",
  "console-subscriber",
  "http-body-util",
+ "nss_rpc_client",
  "prost 0.13.3",
  "quick-xml",
- "rpc_client",
  "serde",
  "serde_json",
+ "storage_server_rpc_client",
  "strum",
  "tokio",
  "tower 0.5.1",
@@ -1084,6 +1085,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "nss_rpc_client"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "bytes",
+ "prost 0.13.3",
+ "prost-build",
+ "prost-wkt",
+ "prost-wkt-build",
+ "prost-wkt-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1584,32 +1605,12 @@ dependencies = [
  "fake",
  "futures",
  "futures-util",
+ "nss_rpc_client",
  "pin-project-lite",
  "rand",
  "regex",
- "rpc_client",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "rpc_client"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "bytes",
- "prost 0.13.3",
- "prost-build",
- "prost-wkt",
- "prost-wkt-build",
- "prost-wkt-types",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
 ]
 
 [[package]]
@@ -1772,6 +1773,26 @@ checksum = "ce305eb0b4296696835b71df73eb912e0f1ffd2556a501fcede6e0c50349191c"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "storage_server_rpc_client"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "bytes",
+ "prost 0.13.3",
+ "prost-build",
+ "prost-wkt",
+ "prost-wkt-build",
+ "prost-wkt-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

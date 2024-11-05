@@ -10,7 +10,11 @@ pub struct MessageFrame {
 #[derive(Default)]
 pub struct MesssageCodec {}
 
+#[cfg(feature = "nss")]
 const MAX: usize = 2 * 1024 * 1024;
+
+#[cfg(feature = "storage_server")]
+const MAX: usize = 5 * 1024 * 1024 * 1024;
 
 impl Decoder for MesssageCodec {
     type Item = MessageFrame;

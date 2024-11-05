@@ -17,7 +17,7 @@ pub async fn nss_put_blob(
     let mut request_header = MessageHeader::default();
     request_header.id = rpc_client.gen_request_id();
     request_header.command = Command::PutBlob;
-    request_header.size = (MessageHeader::encode_len() + request_body.encoded_len()) as u32;
+    request_header.size = (MessageHeader::encode_len() + request_body.encoded_len()) as u64;
 
     let mut request_bytes = BytesMut::with_capacity(request_header.size as usize);
     request_header.encode(&mut request_bytes);
@@ -41,7 +41,7 @@ pub async fn nss_get_blob(
     let mut request_header = MessageHeader::default();
     request_header.id = rpc_client.gen_request_id();
     request_header.command = Command::GetBlob;
-    request_header.size = (MessageHeader::encode_len() + request_body.encoded_len()) as u32;
+    request_header.size = (MessageHeader::encode_len() + request_body.encoded_len()) as u64;
 
     let mut request_bytes = BytesMut::with_capacity(request_header.size as usize);
     request_header.encode(&mut request_bytes);

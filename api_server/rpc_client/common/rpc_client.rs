@@ -15,7 +15,7 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 
-use crate::codec::MesssageCodec;
+use crate::codec::{MessageFrame, MesssageCodec};
 
 #[derive(Error, Debug)]
 #[error(transparent)]
@@ -39,7 +39,7 @@ impl From<io::Error> for RpcError {
 }
 
 pub struct RpcClient {
-    requests: Arc<RwLock<HashMap<u32, oneshot::Sender<Bytes>>>>,
+    requests: Arc<RwLock<HashMap<u32, oneshot::Sender<MessageFrame>>>>,
     sender: Sender<Bytes>,
     next_id: AtomicU32,
 }
@@ -81,18 +81,19 @@ impl RpcClient {
 
     async fn receive_message_task(
         receiver: OwnedReadHalf,
-        requests: Arc<RwLock<HashMap<u32, oneshot::Sender<Bytes>>>>,
+        requests: Arc<RwLock<HashMap<u32, oneshot::Sender<MessageFrame>>>>,
     ) -> Result<(), RpcError> {
         let decoder = MesssageCodec::default();
         let mut reader = FramedRead::new(receiver, decoder);
         while let Some(frame) = reader.next().await {
             let frame = frame?;
-            tracing::debug!("sending response: request_id={}", frame.header.id);
-            let tx: oneshot::Sender<Bytes> = match requests.write().await.remove(&frame.header.id) {
-                Some(tx) => tx,
-                None => continue, // we may have received the response already
-            };
-            let _ = tx.send(frame.body);
+            tracing::debug!("receiving response: request_id={}", frame.header.id);
+            let tx: oneshot::Sender<MessageFrame> =
+                match requests.write().await.remove(&frame.header.id) {
+                    Some(tx) => tx,
+                    None => continue, // we may have received the response already
+                };
+            let _ = tx.send(frame);
         }
         tracing::warn!("connection closed, receive_message_task quit");
         Ok(())
@@ -108,7 +109,7 @@ impl RpcClient {
         Ok(())
     }
 
-    pub async fn send_request(&self, id: u32, msgs: &[Bytes]) -> Result<Bytes, RpcError> {
+    pub async fn send_request(&self, id: u32, msgs: &[Bytes]) -> Result<MessageFrame, RpcError> {
         tracing::debug!("sending {} msgs", msgs.len());
         let mut permit = self.sender.reserve_many(msgs.len()).await.unwrap();
         for msg in msgs {

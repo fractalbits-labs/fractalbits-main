@@ -22,9 +22,8 @@ pub async fn nss_put_blob(
     request_header.encode(&mut header_bytes);
     let msgs = vec![header_bytes.freeze(), content];
 
-    let mut resp_bytes = rpc_client.send_request(request_header.id, &msgs).await?;
-    let resp = MessageHeader::decode(&mut resp_bytes);
-    Ok(resp.size as usize)
+    let resp = rpc_client.send_request(request_header.id, &msgs).await?;
+    Ok(resp.header.result as usize)
 }
 
 pub async fn nss_get_blob(
@@ -40,9 +39,8 @@ pub async fn nss_get_blob(
     let mut request_bytes = BytesMut::with_capacity(request_header.size as usize);
     request_header.encode(&mut request_bytes);
 
-    let mut resp_bytes = rpc_client
+    let resp = rpc_client
         .send_request(request_header.id, &vec![request_bytes.freeze()])
         .await?;
-    let resp = MessageHeader::decode(&mut resp_bytes);
-    Ok(resp.size as usize)
+    Ok(resp.header.result as usize)
 }

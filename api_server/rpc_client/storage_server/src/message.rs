@@ -29,6 +29,9 @@ pub struct MessageHeader {
     /// Response result
     pub result: u64,
 
+    /// Errno which can be converted into `std::io::Error`(`from_raw_os_error()`)
+    pub errno: i32,
+
     /// Every request would be sent with a unique id, so the client can get the right response
     pub id: u32,
 
@@ -45,7 +48,7 @@ pub struct MessageHeader {
     /// Blob Id
     blob_id: [u8; 16],
 
-    reserved0: [u8; 22],
+    reserved0: [u8; 18],
     reserved1: [u8; 32],
     reserved2: [u8; 32],
     reserved3: [u8; 32],

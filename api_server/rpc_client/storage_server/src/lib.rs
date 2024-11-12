@@ -7,14 +7,16 @@ use crate::{
     rpc_client::{RpcClient, RpcError},
 };
 use bytes::{Bytes, BytesMut};
+use uuid::Uuid;
 
 pub async fn nss_put_blob(
     rpc_client: &RpcClient,
-    _key: String,
+    blob_id: Uuid,
     content: Bytes,
 ) -> Result<usize, RpcError> {
     let mut request_header = MessageHeader::default();
     request_header.id = rpc_client.gen_request_id();
+    request_header.blob_id = blob_id.into_bytes();
     request_header.command = Command::PutBlob;
     request_header.size = (MessageHeader::encode_len() + content.len()) as u64;
 
@@ -28,11 +30,12 @@ pub async fn nss_put_blob(
 
 pub async fn nss_get_blob(
     rpc_client: &RpcClient,
-    _key: String,
+    blob_id: Uuid,
     content: &mut Bytes,
 ) -> Result<usize, RpcError> {
     let mut request_header = MessageHeader::default();
     request_header.id = rpc_client.gen_request_id();
+    request_header.blob_id = blob_id.into_bytes();
     request_header.command = Command::GetBlob;
     request_header.size = MessageHeader::encode_len() as u64;
 

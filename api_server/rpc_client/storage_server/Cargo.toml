@@ -11,6 +11,7 @@ tracing = "0.1.40"
 bytemuck = { version = "1.18.0", features = ["derive"] }
 tokio-util = { version = "0.7.12", features = ["codec"] }
 tokio-stream = "0.1.16"
+uuid = { version = "1.11.0", features = ["v7"] }
 
 [features]
 default = ["storage_server"]

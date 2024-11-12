@@ -42,13 +42,13 @@ pub struct MessageHeader {
     pub command: Command,
 
     /// The version of the protocol implementation that originated this message.
-    protocol: u16,
+    pub protocol: u16,
 
     /// Bucket Id
-    bucket_id: [u8; 16],
+    pub bucket_id: [u8; 16],
 
     /// Blob Id
-    blob_id: [u8; 16],
+    pub blob_id: [u8; 16],
 
     /// Reserved parts for padding
     // Note rust arrays of sizes from 0 to 32 (inclusive) implement the Default trait if the element

@@ -257,13 +257,24 @@ fn run_cmd_service(action: &str) -> CmdResult {
 
 fn stop_services() -> CmdResult {
     info!("Killing previous services (if any) ...");
+    run_cmd!(sync)?;
+
     for service in [
         "bss_server",
         "nss_server",
         "api_server",
         "sample_web_server",
     ] {
-        run_cmd!(ignore killall $service &>/dev/null)?;
+        for _ in 0..3 {
+            if run_fun!(pidof $service).is_ok() {
+                run_cmd! {
+                    ignore killall $service &>/dev/null;
+                    sleep 1;
+                }?;
+            }
+        }
+
+        // killall failed, try with `kill -9`
         if let Ok(pids) = run_fun!(pidof $service) {
             for pid in pids.split_whitespace() {
                 run_cmd! {
@@ -273,6 +284,7 @@ fn stop_services() -> CmdResult {
                 }?;
             }
         }
+
         // make sure the process is really being killed
         if let Ok(pid) = run_fun!(pidof $service) {
             cmd_die!("failed to stop $service: service is still running (pid=$pid)");

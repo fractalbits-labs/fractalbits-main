@@ -7,6 +7,12 @@ pub struct MessageFrame {
     pub body: Bytes,
 }
 
+impl MessageFrame {
+    pub fn new(header: MessageHeader, body: Bytes) -> Self {
+        Self { header, body }
+    }
+}
+
 #[derive(Default)]
 pub struct MesssageCodec {}
 

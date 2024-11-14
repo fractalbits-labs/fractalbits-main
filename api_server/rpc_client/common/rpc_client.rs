@@ -1,4 +1,4 @@
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
 use std::io::{self};
 use std::sync::atomic::AtomicU32;
@@ -16,6 +16,7 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 
 use crate::codec::{MessageFrame, MesssageCodec};
+use crate::message::MessageHeader;
 
 #[derive(Error, Debug)]
 #[error(transparent)]
@@ -38,9 +39,14 @@ impl From<io::Error> for RpcError {
     }
 }
 
+pub enum Message {
+    Frame(MessageFrame),
+    Bytes(Bytes),
+}
+
 pub struct RpcClient {
     requests: Arc<RwLock<HashMap<u32, oneshot::Sender<MessageFrame>>>>,
-    sender: Sender<Bytes>,
+    sender: Sender<Message>,
     next_id: AtomicU32,
 }
 
@@ -101,20 +107,29 @@ impl RpcClient {
 
     async fn send_message_task(
         mut sender: OwnedWriteHalf,
-        mut input: Receiver<Bytes>,
+        mut input: Receiver<Message>,
     ) -> Result<(), RpcError> {
-        while let Some(mut message) = input.recv().await {
-            sender.write_buf(&mut message).await.unwrap();
+        while let Some(message) = input.recv().await {
+            match message {
+                Message::Bytes(mut bytes) => {
+                    sender.write_buf(&mut bytes).await.unwrap();
+                }
+                Message::Frame(mut frame) => {
+                    let mut header_bytes =
+                        BytesMut::with_capacity(MessageHeader::encode_len() + frame.body.len());
+                    frame.header.encode(&mut header_bytes);
+                    sender.write_buf(&mut header_bytes).await.unwrap();
+                    if !frame.body.is_empty() {
+                        sender.write_buf(&mut frame.body).await.unwrap();
+                    }
+                }
+            }
         }
         Ok(())
     }
 
-    pub async fn send_request(&self, id: u32, msgs: &[Bytes]) -> Result<MessageFrame, RpcError> {
-        tracing::debug!("sending {} msgs", msgs.len());
-        let mut permit = self.sender.reserve_many(msgs.len()).await.unwrap();
-        for msg in msgs {
-            permit.next().unwrap().send(msg.clone());
-        }
+    pub async fn send_request(&self, id: u32, msg: Message) -> Result<MessageFrame, RpcError> {
+        self.sender.send(msg).await.unwrap();
         tracing::debug!("request sent from handler: request_id={id}");
 
         let (tx, rx) = oneshot::channel();

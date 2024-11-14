@@ -1,47 +1,39 @@
 use crate::{
+    codec::MessageFrame,
     message::{Command, MessageHeader},
-    rpc_client::{RpcClient, RpcError},
+    rpc_client::{Message, RpcClient, RpcError},
 };
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use uuid::Uuid;
 
 impl RpcClient {
-    pub async fn put_blob(self: &Self, blob_id: Uuid, content: Bytes) -> Result<usize, RpcError> {
-        let mut request_header = MessageHeader::default();
-        request_header.id = self.gen_request_id();
-        request_header.blob_id = blob_id.into_bytes();
-        request_header.command = Command::PutBlob;
-        request_header.size = (MessageHeader::encode_len() + content.len()) as u64;
+    pub async fn put_blob(self: &Self, blob_id: Uuid, body: Bytes) -> Result<usize, RpcError> {
+        let mut header = MessageHeader::default();
+        header.id = self.gen_request_id();
+        header.blob_id = blob_id.into_bytes();
+        header.command = Command::PutBlob;
+        header.size = (MessageHeader::encode_len() + body.len()) as u64;
 
-        let mut header_bytes = BytesMut::with_capacity(MessageHeader::encode_len() + content.len());
-        request_header.encode(&mut header_bytes);
-        // TODO: reduce content copying
-        header_bytes.put_slice(&content);
-        let msgs = vec![header_bytes.freeze()];
-
-        let resp = self.send_request(request_header.id, &msgs).await?;
+        let msg_frame = MessageFrame::new(header, body);
+        let resp = self
+            .send_request(header.id, Message::Frame(msg_frame))
+            .await?;
         Ok(resp.header.result as usize)
     }
 
-    pub async fn get_blob(
-        self: &Self,
-        blob_id: Uuid,
-        content: &mut Bytes,
-    ) -> Result<usize, RpcError> {
-        let mut request_header = MessageHeader::default();
-        request_header.id = self.gen_request_id();
-        request_header.blob_id = blob_id.into_bytes();
-        request_header.command = Command::GetBlob;
-        request_header.size = MessageHeader::encode_len() as u64;
+    pub async fn get_blob(self: &Self, blob_id: Uuid, body: &mut Bytes) -> Result<usize, RpcError> {
+        let mut header = MessageHeader::default();
+        header.id = self.gen_request_id();
+        header.blob_id = blob_id.into_bytes();
+        header.command = Command::GetBlob;
+        header.size = MessageHeader::encode_len() as u64;
 
-        let mut request_bytes = BytesMut::with_capacity(request_header.size as usize);
-        request_header.encode(&mut request_bytes);
-
+        let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp = self
-            .send_request(request_header.id, &vec![request_bytes.freeze()])
+            .send_request(header.id, Message::Frame(msg_frame))
             .await?;
         let size = resp.header.result;
-        *content = resp.body;
+        *body = resp.body;
         Ok(size as usize)
     }
 }

@@ -68,6 +68,7 @@ pub enum Command {
     GetBlob = 2,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for Command {
     fn default() -> Self {
         Command::Invalid

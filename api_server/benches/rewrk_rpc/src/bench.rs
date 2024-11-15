@@ -67,6 +67,7 @@ pub fn start_benchmark(settings: BenchmarkSettings) {
                 return;
             }
         } else {
+            #[allow(clippy::collapsible_else_if)]
             if let Err(e) = rt.block_on(run_for_bss(settings.clone())) {
                 eprintln!();
                 eprintln!("{}", e);

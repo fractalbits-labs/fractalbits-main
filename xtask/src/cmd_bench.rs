@@ -38,14 +38,11 @@ pub fn run_cmd_bench(workload: String, with_flame_graph: bool, server: &str) -> 
             build_bss_nss_server()?;
             build_rewrk_rpc()?;
             // format for write test
-            match workload.as_str() {
-                "write" => {
-                    run_cmd! {
-                        info "formatting..";
-                        ./zig-out/bin/mkfs;
-                    }?;
-                }
-                _ =>  {}
+            if workload.as_str() == "write" {
+                run_cmd! {
+                    info "Formatting ...";
+                    ./zig-out/bin/mkfs;
+                }?;
             }
             start_nss_service()?;
             uri = "127.0.0.1:9224";
@@ -92,8 +89,6 @@ pub fn run_cmd_bench(workload: String, with_flame_graph: bool, server: &str) -> 
             sudo bash -c "echo -1 > /proc/sys/kernel/perf_event_paranoid";
         }?;
 
-        // let server_pid = run_fun!(pidof nss_server)?;
-        // Some(spawn!(perf record -F 99 --call-graph dwarf -p $server_pid -g -- sleep 30)?)
         Some(spawn!(perf record -F 99 --call-graph dwarf -a -g -- sleep $duration_secs)?)
     } else {
         None

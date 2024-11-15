@@ -9,7 +9,7 @@ include!(concat!(env!("OUT_DIR"), "/nss_ops.rs"));
 
 impl RpcClient {
     pub async fn put_inode(
-        self: &Self,
+        &self,
         key: String,
         value: Vec<u8>,
     ) -> Result<PutInodeResponse, RpcError> {
@@ -34,7 +34,7 @@ impl RpcClient {
         Ok(resp)
     }
 
-    pub async fn get_inode(self: &Self, key: String) -> Result<GetInodeResponse, RpcError> {
+    pub async fn get_inode(&self, key: String) -> Result<GetInodeResponse, RpcError> {
         let body = GetInodeRequest { key };
 
         let mut header = MessageHeader::default();

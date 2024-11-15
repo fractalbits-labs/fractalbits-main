@@ -1,6 +1,6 @@
 use cmd_lib::*;
 
-const ZIG_BUILD_OPTS: &'static str = "--release=safe"; // or "" for debugging
+const ZIG_BUILD_OPTS: &str = "--release=safe"; // or "" for debugging
 
 pub fn build_rewrk() -> CmdResult {
     run_cmd! {

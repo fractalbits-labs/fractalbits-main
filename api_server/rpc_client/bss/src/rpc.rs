@@ -7,7 +7,7 @@ use bytes::Bytes;
 use uuid::Uuid;
 
 impl RpcClient {
-    pub async fn put_blob(self: &Self, blob_id: Uuid, body: Bytes) -> Result<usize, RpcError> {
+    pub async fn put_blob(&self, blob_id: Uuid, body: Bytes) -> Result<usize, RpcError> {
         let mut header = MessageHeader::default();
         header.id = self.gen_request_id();
         header.blob_id = blob_id.into_bytes();
@@ -21,7 +21,7 @@ impl RpcClient {
         Ok(resp.header.result as usize)
     }
 
-    pub async fn get_blob(self: &Self, blob_id: Uuid, body: &mut Bytes) -> Result<usize, RpcError> {
+    pub async fn get_blob(&self, blob_id: Uuid, body: &mut Bytes) -> Result<usize, RpcError> {
         let mut header = MessageHeader::default();
         header.id = self.gen_request_id();
         header.blob_id = blob_id.into_bytes();

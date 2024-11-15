@@ -281,7 +281,7 @@ impl WorkerResult {
                 "requests_avg": null,
             });
 
-            println!("{}", out.to_string());
+            println!("{}", out);
             return;
         }
 
@@ -304,6 +304,6 @@ impl WorkerResult {
             "requests_avg": avg_request_per_sec,
         });
 
-        println!("{}", out.to_string())
+        println!("{}", out)
     }
 }

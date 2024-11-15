@@ -11,7 +11,7 @@ pub fn div_mod(main: u64, divider: u64) -> (u64, u64) {
 }
 
 pub fn format_data(data_size: f64) -> String {
-    if data_size > GIGABYTE as f64 {
+    if data_size > GIGABYTE {
         format!("{:.2} GB", data_size / GIGABYTE)
     } else if data_size > MEGABYTE as f64 {
         format!("{:.2} MB", data_size / MEGABYTE)

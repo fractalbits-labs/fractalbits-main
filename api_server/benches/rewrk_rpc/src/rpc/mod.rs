@@ -21,14 +21,19 @@ mod user_input;
 
 pub type Handle = JoinHandle<anyhow::Result<WorkerResult>>;
 
-fn read_keys(filename: &str, num_tasks: usize) -> Vec<VecDeque<String>> {
+fn read_keys(filename: &str, num_tasks: usize, keys_limit: usize) -> Vec<VecDeque<String>> {
     let file = File::open(filename).unwrap();
     let mut res = vec![VecDeque::new(); num_tasks];
     let mut i = 0;
+    let mut total = 0;
     for line in BufReader::new(file).lines() {
         if let Ok(line) = line {
             res[i].push_back(line);
             i = (i + 1) % num_tasks;
+            total += 1;
+        }
+        if total >= keys_limit {
+            break;
         }
     }
     res
@@ -36,6 +41,7 @@ fn read_keys(filename: &str, num_tasks: usize) -> Vec<VecDeque<String>> {
 
 pub async fn start_tasks_for_nss(
     time_for: Duration,
+    keys_limit: usize,
     connections: usize,
     uri_string: String,
     io_depth: usize,
@@ -47,7 +53,7 @@ pub async fn start_tasks_for_nss(
     let handles = FuturesUnordered::new();
 
     println!("Fetching keys from {input} for {connections} connections, io_depth={io_depth}");
-    let mut gen_keys = read_keys(&input, connections)
+    let mut gen_keys = read_keys(&input, connections, keys_limit)
         .into_iter()
         .collect::<Vec<_>>();
 
@@ -70,6 +76,7 @@ pub async fn start_tasks_for_nss(
 
 pub async fn start_tasks_for_bss(
     time_for: Duration,
+    keys_limit: usize,
     connections: usize,
     uri_string: String,
     io_depth: usize,
@@ -81,7 +88,7 @@ pub async fn start_tasks_for_bss(
     let handles = FuturesUnordered::new();
 
     println!("Fetching uuids from {input} for {connections} connections, io_depth={io_depth}");
-    let mut gen_uuids = read_keys(&input, connections)
+    let mut gen_uuids = read_keys(&input, connections, keys_limit)
         .into_iter()
         .collect::<Vec<_>>();
 

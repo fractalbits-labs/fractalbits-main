@@ -25,6 +25,9 @@ pub struct BenchmarkSettings {
     /// The duration of the benchmark.
     pub duration: Duration,
 
+    /// The limit number of input keys
+    pub keys_limit: usize,
+
     /// Display the percentile table.
     pub display_percentile: bool,
 
@@ -93,6 +96,7 @@ async fn run_for_nss(settings: BenchmarkSettings) -> Result<()> {
 
     let handles = rpc::start_tasks_for_nss(
         settings.duration,
+        settings.keys_limit,
         settings.connections,
         settings.host.trim().to_string(),
         settings.io_depth,
@@ -159,6 +163,7 @@ async fn run_for_bss(settings: BenchmarkSettings) -> Result<()> {
 
     let handles = rpc::start_tasks_for_bss(
         settings.duration,
+        settings.keys_limit,
         settings.connections,
         settings.host.trim().to_string(),
         settings.io_depth,

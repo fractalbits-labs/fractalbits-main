@@ -22,6 +22,7 @@ pub fn run_cmd_bench(workload: String, with_flame_graph: bool, server: &str) -> 
     let uri;
     let bench_exe;
     let mut bench_opts = Vec::new();
+    let keys_limit = 10_000_000.to_string();
     match server {
         "api_server" => {
             build_bss_nss_server()?;
@@ -49,7 +50,16 @@ pub fn run_cmd_bench(workload: String, with_flame_graph: bool, server: &str) -> 
             start_nss_service()?;
             uri = "127.0.0.1:9224";
             bench_exe = "./target/release/rewrk_rpc";
-            bench_opts.extend_from_slice(&["-t", "24", "-c", "500", "-w", &workload]);
+            bench_opts.extend_from_slice(&[
+                "-t",
+                "24",
+                "-c",
+                "500",
+                "-w",
+                &workload,
+                "-k",
+                &keys_limit,
+            ]);
         }
         "bss_rpc" => {
             build_bss_nss_server()?;
@@ -58,7 +68,18 @@ pub fn run_cmd_bench(workload: String, with_flame_graph: bool, server: &str) -> 
             start_bss_service()?;
             uri = "127.0.0.1:9225";
             bench_exe = "./target/release/rewrk_rpc";
-            bench_opts.extend_from_slice(&["-t", "24", "-c", "500", "-w", &workload, "-p", "bss"]);
+            bench_opts.extend_from_slice(&[
+                "-t",
+                "24",
+                "-c",
+                "500",
+                "-w",
+                &workload,
+                "-p",
+                "bss",
+                "-k",
+                &keys_limit,
+            ]);
         }
         _ => unreachable!(),
     }

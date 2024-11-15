@@ -45,6 +45,7 @@ fn main() {
     };
 
     let json: bool = args.is_present("json");
+
     let duration: &str = args.value_of("duration").unwrap_or("60s");
     let duration = match parse_duration(duration) {
         Ok(dur) => dur,
@@ -53,6 +54,14 @@ fn main() {
             return;
         }
     };
+
+    let keys_limit: usize = args
+        .value_of("keys_limit")
+        .unwrap_or("10000000")
+        .trim()
+        .parse::<usize>()
+        .unwrap_or(10_000_000);
+
     let pct: bool = args.is_present("pct");
 
     let rounds: usize = args
@@ -87,6 +96,7 @@ fn main() {
         connections: conns,
         host: host.to_string(),
         duration,
+        keys_limit,
         display_percentile: pct,
         display_json: json,
         rounds,
@@ -180,6 +190,14 @@ fn parse_args() -> ArgMatches<'static> {
                 .short("d")
                 .long("duration")
                 .help("Set the duration of the benchmark.")
+                .takes_value(true)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("keys_limit")
+                .short("k")
+                .long("keys_limit")
+                .help("Number of keys limit.")
                 .takes_value(true)
                 .required(false),
         )

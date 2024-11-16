@@ -55,15 +55,15 @@ fn read_keys(filename: &str, num_tasks: usize) -> Vec<VecDeque<String>> {
     let file = File::open(filename).unwrap();
     let mut res = vec![VecDeque::new(); num_tasks];
     let mut i = 0;
-    for line in BufReader::new(file).lines() {
-        if let Ok(line) = line {
-            res[i].push_back(line);
-            i = (i + 1) % num_tasks;
-        }
+    #[allow(clippy::lines_filter_map_ok)]
+    for line in BufReader::new(file).lines().flatten() {
+        res[i].push_back(line);
+        i = (i + 1) % num_tasks;
     }
     res
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn start_tasks(
     time_for: Duration,
     connections: usize,
@@ -132,13 +132,7 @@ async fn benchmark(
 
     // Benchmark loop.
     // Futures must not be awaited without timeout.
-    loop {
-        // Create request from **parsed** data.
-        let key: String = match keys.pop_front() {
-            Some(key) => key,
-            None => break,
-        };
-
+    while let Some(key) = keys.pop_front() {
         let mut request = Request::new(match user_input.method {
             Method::GET => Body::empty(),
             Method::PUT => Body::from(vec![0; 4096 - 256]),

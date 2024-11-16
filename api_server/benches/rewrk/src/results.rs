@@ -224,7 +224,7 @@ impl WorkerResult {
         let total = self.total_transfer() as f64;
         let rate = self.avg_transfer();
 
-        let display_total = format_data(total as f64);
+        let display_total = format_data(total);
         let display_rate = format_data(rate);
 
         println!("  Transfer:");
@@ -311,7 +311,7 @@ impl WorkerResult {
                 "requests_avg": null,
             });
 
-            println!("{}", out.to_string());
+            println!("{}", out);
             return;
         }
 
@@ -340,6 +340,6 @@ impl WorkerResult {
             "requests_avg": avg_request_per_sec,
         });
 
-        println!("{}", out.to_string())
+        println!("{}", out)
     }
 }

@@ -27,7 +27,7 @@ pub async fn put_object(
     assert_eq!(content_len + MessageHeader::encode_len(), usize);
 
     let _resp = rpc_client_nss
-        .put_inode(key, blob_id.as_bytes().into())
+        .put_inode(key, blob_id.as_bytes().to_vec())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
     Ok(())

@@ -32,7 +32,7 @@ pub async fn get_object(
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
 ) -> response::Result<Bytes> {
-    let Query(_get_obj_opts): Query<GetObjectOptions> = request.extract_parts().await?;
+    let Query(_opts): Query<GetObjectOptions> = request.extract_parts().await?;
     let resp = rpc_client_nss
         .get_inode(key)
         .await

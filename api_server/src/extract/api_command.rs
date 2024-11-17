@@ -10,7 +10,7 @@ use axum::{
 use strum::EnumString;
 
 #[derive(Debug, EnumString, Copy, Clone, strum::Display)]
-#[strum(serialize_all = "kebab-case")]
+#[strum(serialize_all = "camelCase")]
 pub enum ApiCommand {
     Accelerate,
     Acl,
@@ -45,10 +45,10 @@ pub enum ApiCommand {
     Website,
 }
 
-pub struct Api(pub Option<ApiCommand>);
+pub struct ApiCommandFromQuery(pub Option<ApiCommand>);
 
 #[async_trait]
-impl<S> FromRequestParts<S> for Api
+impl<S> FromRequestParts<S> for ApiCommandFromQuery
 where
     S: Send + Sync,
 {
@@ -62,14 +62,14 @@ where
             .filter_map(|cmd| ApiCommand::from_str(cmd.as_ref()).ok())
             .collect();
         if api_commands.is_empty() {
-            Ok(Api(None))
+            Ok(ApiCommandFromQuery(None))
         } else {
             if api_commands.len() > 1 {
                 tracing::debug!(
                     "Multiple api command found: {api_commands:?}, pick up the first one"
                 );
             }
-            Ok(Api(Some(api_commands[0])))
+            Ok(ApiCommandFromQuery(Some(api_commands[0])))
         }
     }
 }
@@ -85,7 +85,7 @@ mod tests {
         Router::new().route("/*key", get(handler))
     }
 
-    async fn handler(Api(api_command): Api) -> String {
+    async fn handler(ApiCommandFromQuery(api_command): ApiCommandFromQuery) -> String {
         match api_command {
             Some(api_command) => api_command.to_string(),
             None => "".into(),

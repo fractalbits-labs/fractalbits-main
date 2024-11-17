@@ -74,21 +74,25 @@ async fn get_handler(
         }
         None => {
             if key == "/" {
-                if api_signature.list_type.is_some() {
-                    list::list_objects_v2(request, rpc_client_nss)
+                match api_signature.list_type {
+                    Some(_) => list::list_objects_v2(request, rpc_client_nss)
                         .await
-                        .into_response()
-                } else {
-                    (
+                        .into_response(),
+                    None => (
                         StatusCode::BAD_REQUEST,
                         "Legacy listObjects api not supported!",
                     )
-                        .into_response()
+                        .into_response(),
                 }
             } else {
-                get::get_object(request, key, rpc_client_nss, rpc_client_bss)
-                    .await
-                    .into_response()
+                match api_signature.upload_id {
+                    Some(_) => list::list_parts(request, key, rpc_client_nss)
+                        .await
+                        .into_response(),
+                    None => get::get_object(request, key, rpc_client_nss, rpc_client_bss)
+                        .await
+                        .into_response(),
+                }
             }
         }
     }

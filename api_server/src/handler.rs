@@ -11,6 +11,7 @@ use super::extract::{api_command::ApiCommandFromQuery, bucket_name::BucketName, 
 use super::AppState;
 use crate::extract::api_command::ApiCommand;
 use crate::extract::api_signature::ApiSignature;
+use axum::http::status::StatusCode;
 use axum::http::Method;
 use axum::{
     extract::{ConnectInfo, Request, State},
@@ -54,7 +55,7 @@ pub async fn any_handler(
             )
             .await
         }
-        method => panic!("TODO: method {method}"),
+        method => (StatusCode::BAD_REQUEST, format!("TODO: method {method}")).into_response(),
     }
 }
 
@@ -68,7 +69,9 @@ async fn get_handler(
 ) -> Response {
     match api_command {
         Some(ApiCommand::Session) => session::create_session(request).await,
-        Some(api_command) => panic!("TODO: {api_command}"),
+        Some(api_command) => {
+            (StatusCode::BAD_REQUEST, format!("TODO: {api_command}")).into_response()
+        }
         None => {
             if key.is_empty() {
                 if api_signature.list_type.is_some() {
@@ -76,7 +79,11 @@ async fn get_handler(
                         .await
                         .into_response()
                 } else {
-                    "Legacy listObjects api is not supported!".into_response()
+                    (
+                        StatusCode::BAD_REQUEST,
+                        "Legacy listObjects api not supported!",
+                    )
+                        .into_response()
                 }
             } else {
                 get::get_object(request, key, rpc_client_nss, rpc_client_bss)
@@ -96,7 +103,9 @@ async fn put_handler(
     rpc_client_bss: &RpcClientBss,
 ) -> Response {
     match api_command {
-        Some(api_command) => panic!("TODO: {api_command}"),
+        Some(api_command) => {
+            (StatusCode::BAD_REQUEST, format!("TODO: {api_command}")).into_response()
+        }
         None => put::put_object(request, key, rpc_client_nss, rpc_client_bss)
             .await
             .into_response(),

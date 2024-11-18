@@ -49,7 +49,7 @@ enum ToolKind {
     #[structopt(name = "gen_uuids")]
     GenUuids {
         #[structopt(short = "n", long_help = "Number of uuids", default_value = "1000000")]
-        num: u32,
+        num: usize,
 
         #[structopt(short = "f", long_help = "File output", default_value = "uuids.data")]
         file: String,

@@ -8,5 +8,5 @@ pub async fn delete_object(
     _rpc_client_nss: &RpcClientNss,
     _rpc_client_bss: &RpcClientBss,
 ) -> response::Result<()> {
-    return Ok(());
+    Ok(())
 }

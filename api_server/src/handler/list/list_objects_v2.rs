@@ -26,12 +26,12 @@ struct ListObjectsV2Options {
 #[serde(rename_all = "PascalCase")]
 struct ListBucketResult {
     is_truncated: bool,
-    contents: Contents,
+    contents: Vec<Contents>,
     name: String,
     prefix: String,
     delimiter: String,
     max_keys: usize,
-    common_prefixes: CommonPrefixes,
+    common_prefixes: Vec<CommonPrefixes>,
     encoding_type: String,
     key_count: usize,
     continuation_token: String,
@@ -77,8 +77,12 @@ pub async fn list_objects_v2(
     _rpc_client_nss: &RpcClientNss,
 ) -> response::Result<Response> {
     let Query(opts): Query<ListObjectsV2Options> = request.extract_parts().await?;
+    tracing::debug!("list_objects_v2 {opts:?}");
     if opts.list_type != Some("2".into()) {
         return Err((StatusCode::BAD_REQUEST, "list-type wrong").into());
+    }
+    if opts.encoding_type != Some("url".into()) {
+        return Err((StatusCode::BAD_REQUEST, "invalid encoding-type").into());
     }
     Ok(Xml(ListBucketResult::default()).into_response())
 }

@@ -140,7 +140,7 @@ async fn benchmark(
         });
         *request.method_mut() = user_input.method.clone();
 
-        let uri_string = format!("http://mybucket.localhost:3000/{key}");
+        let uri_string = format!("http://mybucket.localhost:3000{key}");
         *request.uri_mut() = Uri::try_from(&uri_string)?;
 
         *request.headers_mut() = request_headers.clone();

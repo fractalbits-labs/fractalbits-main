@@ -331,7 +331,7 @@ async fn benchmark_nss_write(
             };
             key.push('\0');
 
-            let value = key.clone().as_bytes().into();
+            let value = Bytes::from(key.clone());
             let future = async { rpc_client.put_inode(key, value).await };
             futures.push(future);
         }

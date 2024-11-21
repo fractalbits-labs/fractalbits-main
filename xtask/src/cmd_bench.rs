@@ -39,7 +39,7 @@ pub fn run_cmd_bench(workload: String, with_flame_graph: bool, server: &str) -> 
             run_cmd_service("restart")?;
             uri = "http://mybucket.localhost:3000";
             bench_exe = "./target/release/rewrk";
-            keys_limit = 1_600_000.to_string(); // api server is slower
+            keys_limit = 1_500_000.to_string(); // api server is slower
             bench_opts.extend_from_slice(&[
                 "-t",
                 "24",

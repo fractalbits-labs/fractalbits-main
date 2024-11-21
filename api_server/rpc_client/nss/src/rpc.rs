@@ -2,17 +2,13 @@ use crate::{
     message::MessageHeader,
     rpc_client::{Message, RpcClient, RpcError},
 };
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use prost::Message as PbMessage;
 
 include!(concat!(env!("OUT_DIR"), "/nss_ops.rs"));
 
 impl RpcClient {
-    pub async fn put_inode(
-        &self,
-        key: String,
-        value: Vec<u8>,
-    ) -> Result<PutInodeResponse, RpcError> {
+    pub async fn put_inode(&self, key: String, value: Bytes) -> Result<PutInodeResponse, RpcError> {
         let body = PutInodeRequest { key, value };
 
         let mut header = MessageHeader::default();

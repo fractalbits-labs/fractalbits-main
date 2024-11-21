@@ -75,10 +75,10 @@ fn main() {
 
     let keys_limit: usize = args
         .value_of("keys_limit")
-        .unwrap_or("1600000")
+        .unwrap_or("1500000")
         .trim()
         .parse::<usize>()
-        .unwrap_or(1_600_000);
+        .unwrap_or(1_500_000);
 
     let pct: bool = args.is_present("pct");
 

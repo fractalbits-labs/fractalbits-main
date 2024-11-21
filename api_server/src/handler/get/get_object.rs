@@ -5,7 +5,7 @@ use axum::{
     RequestExt,
 };
 use bytes::Bytes;
-use rkyv::{self, rancor::Error, util::AlignedVec};
+use rkyv::{self, rancor::Error};
 use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::{rpc::get_inode_response, RpcClientNss};
 use serde::Deserialize;
@@ -49,11 +49,7 @@ pub async fn get_object(
         }
     };
 
-    let mut object_bytes_aligned = AlignedVec::<{ ObjectLayout::ALIGNMENT }>::new();
-    object_bytes_aligned.extend_from_slice(&object_bytes);
-    let object =
-        rkyv::access::<rkyv::Archived<ObjectLayout>, Error>(&object_bytes_aligned).unwrap();
-
+    let object = rkyv::from_bytes::<ObjectLayout, Error>(&object_bytes).unwrap();
     let mut content = Bytes::new();
     let _size = rpc_client_bss
         .get_blob(object.blob_id, &mut content)

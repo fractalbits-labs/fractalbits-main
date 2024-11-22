@@ -51,4 +51,35 @@ impl RpcClient {
             PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
         Ok(resp)
     }
+
+    pub async fn list_inodes(
+        &self,
+        max_keys: u32,
+        prefix: String,
+        start_after: String,
+    ) -> Result<ListInodesResponse, RpcError> {
+        let body = ListInodesRequest {
+            max_keys,
+            prefix,
+            start_after,
+        };
+
+        let mut header = MessageHeader::default();
+        header.id = self.gen_request_id();
+        header.command = Command::ListInodes;
+        header.size = (MessageHeader::encode_len() + body.encoded_len()) as u32;
+
+        let mut request_bytes = BytesMut::with_capacity(header.size as usize);
+        header.encode(&mut request_bytes);
+        body.encode(&mut request_bytes)
+            .map_err(RpcError::EncodeError)?;
+
+        let resp_bytes = self
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .await?
+            .body;
+        let resp: ListInodesResponse =
+            PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
+        Ok(resp)
+    }
 }

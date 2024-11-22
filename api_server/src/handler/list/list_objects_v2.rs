@@ -5,8 +5,11 @@ use axum::{
     response::{self, IntoResponse, Response},
     RequestExt,
 };
-use rpc_client_nss::RpcClientNss;
+use rkyv::{self, rancor::Error};
+use rpc_client_nss::{rpc::list_inodes_response, RpcClientNss};
 use serde::{Deserialize, Serialize};
+
+use crate::object_layout::ObjectLayout;
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
@@ -17,7 +20,7 @@ struct ListObjectsV2Options {
     delimiter: Option<String>,
     encoding_type: Option<String>,
     fetch_owner: Option<bool>,
-    max_keys: Option<usize>,
+    max_keys: Option<u32>,
     prefix: Option<String>,
     start_after: Option<String>,
 }
@@ -30,7 +33,7 @@ struct ListBucketResult {
     name: String,
     prefix: String,
     delimiter: String,
-    max_keys: usize,
+    max_keys: u32,
     common_prefixes: Vec<CommonPrefixes>,
     encoding_type: String,
     key_count: usize,
@@ -74,7 +77,7 @@ struct CommonPrefixes {
 
 pub async fn list_objects_v2(
     mut request: Request,
-    _rpc_client_nss: &RpcClientNss,
+    rpc_client_nss: &RpcClientNss,
 ) -> response::Result<Response> {
     let Query(opts): Query<ListObjectsV2Options> = request.extract_parts().await?;
     tracing::debug!("list_objects_v2 {opts:?}");
@@ -84,5 +87,31 @@ pub async fn list_objects_v2(
     if opts.encoding_type != Some("url".into()) {
         return Err((StatusCode::BAD_REQUEST, "invalid encoding-type").into());
     }
+
+    let max_keys = opts.max_keys.unwrap_or(1000);
+    let prefix = opts.prefix.unwrap_or("/".into());
+    let start_after = opts.start_after.unwrap_or_default();
+    let resp = rpc_client_nss
+        .list_inodes(max_keys, prefix, start_after)
+        .await
+        .unwrap();
+
+    // Process results
+    let inodes = match resp.result.unwrap() {
+        list_inodes_response::Result::Ok(res) => res.inodes,
+        list_inodes_response::Result::Err(e) => {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, e)
+                .into_response()
+                .into())
+        }
+    };
+
+    for inode in inodes {
+        let object = rkyv::from_bytes::<ObjectLayout, Error>(&inode.inode).unwrap();
+        dbg!(&inode.key);
+        dbg!(object.timestamp);
+        dbg!(object.size);
+    }
+
     Ok(Xml(ListBucketResult::default()).into_response())
 }

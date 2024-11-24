@@ -9,7 +9,7 @@ use axum::{
 use http_body_util::BodyExt;
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
 use rpc_client_bss::{message::MessageHeader, RpcClientBss};
-use rpc_client_nss::RpcClientNss;
+use rpc_client_nss::{rpc::put_inode_response, RpcClientNss};
 use uuid::Uuid;
 
 pub async fn put_object(
@@ -40,9 +40,27 @@ pub async fn put_object(
         size: content_len as u64,
     };
     let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new()).unwrap();
-    let _resp = rpc_client_nss
+    let resp = rpc_client_nss
         .put_inode(key, object_layout_bytes.into())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
+
+    // Delete old object if it is an overwrite request
+    let old_object_bytes = match resp.result.unwrap() {
+        put_inode_response::Result::Ok(res) => res,
+        put_inode_response::Result::Err(e) => {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, e)
+                .into_response()
+                .into())
+        }
+    };
+    if !old_object_bytes.is_empty() {
+        let old_object = rkyv::from_bytes::<ObjectLayout, Error>(&old_object_bytes).unwrap();
+        rpc_client_bss
+            .delete_blob(old_object.blob_id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
+    }
+
     Ok(())
 }

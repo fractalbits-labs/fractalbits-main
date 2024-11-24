@@ -62,6 +62,7 @@ pub fn start_bss_service(build_mode: BuildMode) -> CmdResult {
 
     let bss_wait_secs = 10;
     run_cmd! {
+        mkdir -p data/bss;
         sudo systemctl start bss.service;
         info "Waiting ${bss_wait_secs}s for bss server up";
         sleep $bss_wait_secs;
@@ -74,7 +75,15 @@ pub fn start_bss_service(build_mode: BuildMode) -> CmdResult {
 }
 
 pub fn start_nss_service(build_mode: BuildMode) -> CmdResult {
-    create_systemd_unit_file(ServiceName::Bss, build_mode)?;
+    create_systemd_unit_file(ServiceName::Nss, build_mode)?;
+
+    if !run_cmd!(ls ./data | grep -q -E ".*-.*-.*-.*").is_ok() {
+        run_cmd! {
+            info "Could not find any blobs, formatting at first ...";
+            mkdir -p data;
+            ./zig-out/bin/mkfs;
+        }?;
+    }
 
     let nss_wait_secs = 10;
     run_cmd! {
@@ -131,7 +140,7 @@ WantedBy=multi-user.target
     run_cmd! {
         mkdir -p etc;
         echo $systemd_unit_content > etc/$service_name.service;
-        sudo systemctl link ./etc/$service_name.service;
+        sudo systemctl link ./etc/$service_name.service --force;
         info "";
     }?;
     Ok(())

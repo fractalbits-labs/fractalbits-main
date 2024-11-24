@@ -48,7 +48,7 @@ enum Cmd {
     Tool(ToolKind),
 }
 
-#[derive(StructOpt, EnumString)]
+#[derive(EnumString)]
 #[strum(serialize_all = "snake_case")]
 enum ServiceAction {
     Stop,
@@ -57,8 +57,8 @@ enum ServiceAction {
 }
 
 #[derive(StructOpt)]
+#[structopt(rename_all = "snake_case")]
 enum ToolKind {
-    #[structopt(name = "gen_uuids")]
     GenUuids {
         #[structopt(short = "n", long_help = "Number of uuids", default_value = "1000000")]
         num: usize,

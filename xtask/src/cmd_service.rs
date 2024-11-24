@@ -1,6 +1,5 @@
-use crate::ServiceAction;
-
 use super::build::BuildMode;
+use super::ServiceAction;
 use cmd_lib::*;
 
 pub fn run_cmd_service(build_mode: BuildMode, action: ServiceAction, service: &str) -> CmdResult {

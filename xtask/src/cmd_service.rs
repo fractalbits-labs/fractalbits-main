@@ -83,7 +83,7 @@ pub fn start_nss_service(build_mode: BuildMode) -> CmdResult {
 
     if run_cmd!(test -f ./data/$ROOT_BLOB_ID).is_err() {
         run_cmd! {
-            info "Could not find any blobs, formatting at first ...";
+            info "Could not find root blob ($ROOT_BLOB_ID), formatting at first ...";
             mkdir -p data;
             ./zig-out/bin/mkfs;
         }?;

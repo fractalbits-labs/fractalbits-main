@@ -32,7 +32,7 @@ pub fn build_bss_nss_server(mode: BuildMode) -> CmdResult {
     run_cmd! {
         info "Building bss and nss server ...";
         zig build $opts;
-        info "Building bss and nss server done ...";
+        info "Building bss and nss server done";
     }
 }
 

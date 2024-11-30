@@ -37,7 +37,7 @@ pub fn stop_services(service: ServiceName) -> CmdResult {
             continue;
         }
 
-        run_cmd!(sudo systemctl stop $service.service)?;
+        run_cmd!(systemctl --user stop $service.service)?;
 
         // make sure the process is really killed
         if run_cmd!(systemctl is-active --quiet $service.service).is_ok() {
@@ -67,7 +67,7 @@ pub fn start_bss_service(build_mode: BuildMode) -> CmdResult {
     let bss_wait_secs = 10;
     run_cmd! {
         mkdir -p data/bss;
-        sudo systemctl start bss.service;
+        systemctl --user start bss.service;
         info "Waiting ${bss_wait_secs}s for bss server up";
         sleep $bss_wait_secs;
     }?;
@@ -91,7 +91,7 @@ pub fn start_nss_service(build_mode: BuildMode) -> CmdResult {
 
     let nss_wait_secs = 10;
     run_cmd! {
-        sudo systemctl start nss.service;
+        systemctl --user start nss.service;
         info "Waiting ${nss_wait_secs}s for nss server up";
         sleep $nss_wait_secs;
     }?;
@@ -106,7 +106,7 @@ pub fn start_api_server(build_mode: BuildMode) -> CmdResult {
 
     let api_server_wait_secs = 5;
     run_cmd! {
-        sudo systemctl start api_server.service;
+        systemctl --user start api_server.service;
         info "Waiting ${api_server_wait_secs}s for api server up";
         sleep $api_server_wait_secs;
     }?;
@@ -117,10 +117,6 @@ pub fn start_api_server(build_mode: BuildMode) -> CmdResult {
 }
 
 fn create_systemd_unit_file(service: ServiceName, build_mode: BuildMode) -> CmdResult {
-    #[rustfmt::skip]
-    let user = run_fun!(id -u --name)?;
-    #[rustfmt::skip]
-    let group = run_fun!(id -g --name)?;
     let pwd = run_fun!(pwd)?;
     let build = build_mode.as_ref();
     let service_name = service.as_ref();
@@ -145,20 +141,19 @@ Description={service_name} Service
 LimitNOFILE=65536
 LimitCORE=infinity
 WorkingDirectory={pwd}{env_settings}
-User={user}
-Group={group}
 ExecStart={exec_start}
 
 [Install]
 WantedBy=multi-user.target
 "##
     );
+    let service_file = format!("{service_name}.service");
 
     run_cmd! {
         mkdir -p etc;
-        echo $systemd_unit_content > etc/$service_name.service;
-        info "Linking ./etc/$service_name.service into /etc/systemd/system";
-        sudo systemctl link ./etc/$service_name.service --force --quiet;
+        echo $systemd_unit_content > etc/$service_file;
+        info "Linking ./etc/$service_file into ~/.config/systemd/user";
+        systemctl --user link ./etc/$service_file --force --quiet;
     }?;
     Ok(())
 }

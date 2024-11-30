@@ -24,7 +24,16 @@ pub fn build_rewrk_rpc() -> CmdResult {
     }
 }
 
+#[rustfmt::skip]
 pub fn build_bss_nss_server(mode: BuildMode) -> CmdResult {
+    if run_cmd!(test -f /usr/bin/protoc).is_err() {
+        run_cmd! {
+            info "Could not find protoc, installing at first ...";
+            sudo apt install -y protobuf-compiler;
+        }?;
+    }
+    std::env::set_var("PROTOC_PATH", "/usr/bin/protoc");
+
     let opts = match mode {
         BuildMode::Debug => "",
         BuildMode::Release => "--release=safe",

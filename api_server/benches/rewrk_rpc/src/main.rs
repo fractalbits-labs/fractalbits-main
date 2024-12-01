@@ -18,6 +18,8 @@ static DURATION_MATCH: &str =
 /// Captures CLI arguments and build benchmarking settings and runtime to
 /// suite the arguments and options.
 fn main() {
+    rlimit::increase_nofile_limit(1000000).unwrap();
+
     let args = parse_args();
 
     let threads: usize = match args.value_of("threads").unwrap_or("1").trim().parse() {

@@ -2,7 +2,9 @@ extern crate clap;
 
 use std::str::FromStr;
 
+#[rustfmt::skip]
 use ::http::header::HeaderName;
+#[rustfmt::skip]
 use ::http::{HeaderMap, HeaderValue, Method};
 use anyhow::{Context, Error, Result};
 use clap::{App, Arg, ArgMatches};
@@ -27,6 +29,8 @@ static DURATION_MATCH: &str =
 /// Captures CLI arguments and build benchmarking settings and runtime to
 /// suite the arguments and options.
 fn main() {
+    rlimit::increase_nofile_limit(1000000).unwrap();
+
     let args = parse_args();
 
     let threads: usize = match args.value_of("threads").unwrap_or("1").trim().parse() {

@@ -20,6 +20,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros"] }
 tokio-native-tls = "0.3"
 tower = { version = "0.4", features = ["util"] }
 fake = "2.9.2"
+rlimit = "0.10.2"
 
 # [workspace]
 # members = [

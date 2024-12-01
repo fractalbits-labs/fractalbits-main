@@ -138,7 +138,7 @@ fn create_systemd_unit_file(service: ServiceName, build_mode: BuildMode) -> CmdR
 Description={service_name} Service
 
 [Service]
-LimitNOFILE=65536
+LimitNOFILE=1000000
 LimitCORE=infinity
 WorkingDirectory={pwd}{env_settings}
 ExecStart={exec_start}

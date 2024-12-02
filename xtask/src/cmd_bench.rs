@@ -45,7 +45,7 @@ pub fn run_cmd_bench(
                 "-t",
                 "24",
                 "-c",
-                "1152",
+                "576",
                 "-m",
                 http_method,
                 "-k",

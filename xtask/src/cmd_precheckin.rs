@@ -20,7 +20,7 @@ pub fn run_cmd_precheckin() -> CmdResult {
     let rand_log = "test_art_random.log";
     run_cmd! {
         info "Running art tests (random) with log $rand_log ...";
-        ./zig-out/bin/test_art --tests random --size 400000 --ops 10000 -d 20 &> $rand_log;
+        ./zig-out/bin/test_art --tests random --size 400000 --ops 1000000 -d 20 &> $rand_log;
     }
     .map_err(|e| {
         run_cmd!(tail $rand_log).unwrap();

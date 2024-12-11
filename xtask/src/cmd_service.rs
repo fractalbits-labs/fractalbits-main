@@ -86,7 +86,6 @@ pub fn start_nss_service(build_mode: BuildMode) -> CmdResult {
             info "Could not find root blob ($ROOT_BLOB_ID), formatting at first ...";
             bash -c "mkdir -p data/{current,pending}";
             ./zig-out/bin/mkfs;
-            cp --reflink data/current/$ROOT_BLOB_ID data/pending/$ROOT_BLOB_ID;
         }?;
     }
 

@@ -133,6 +133,9 @@ async fn get_handler(
                 .await
                 .into_response()
         }
+        (Some(ApiCommand::Uploads), "/") => list::list_multipart_uploads(request, rpc_client_nss)
+            .await
+            .into_response(),
         (Some(ApiCommand::Session), _) => session::create_session(request).await,
         (Some(api_cmd), _) => (StatusCode::BAD_REQUEST, format!("TODO: {api_cmd}")).into_response(),
         (None, "/") if api_sig.list_type.is_some() => {

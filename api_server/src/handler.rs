@@ -172,6 +172,7 @@ async fn put_handler(
             upload_id,
             rpc_client_nss,
             rpc_client_bss,
+            blob_deletion,
         )
         .await
         .into_response(),

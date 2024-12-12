@@ -74,6 +74,7 @@ pub async fn any_handler(
                 request,
                 api_cmd,
                 api_sig,
+                bucket_name,
                 key,
                 rpc_client_nss,
                 rpc_client_bss,
@@ -187,6 +188,7 @@ async fn post_handler(
     request: Request,
     api_cmd: Option<ApiCommand>,
     api_sig: ApiSignature,
+    bucket: String,
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
@@ -198,7 +200,7 @@ async fn post_handler(
                 .into_response()
         }
         (Some(ApiCommand::Uploads), None) if key != "/" => {
-            mpu::create_multipart_upload(request, key, rpc_client_nss, rpc_client_bss)
+            mpu::create_multipart_upload(request, bucket, key, rpc_client_nss)
                 .await
                 .into_response()
         }

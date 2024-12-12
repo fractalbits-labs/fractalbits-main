@@ -22,3 +22,5 @@ quick-xml = { version = "0.36.2", features = ["serialize"] }
 http-body-util = "0.1.2"
 uuid = { version = "1.11.0", features = ["v7"] }
 rkyv = { version = "0.8.8", features = ["uuid-1", "unaligned"] }
+rand = "0.8.5"
+hex = "0.4.3"

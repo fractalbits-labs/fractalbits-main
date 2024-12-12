@@ -1,10 +1,18 @@
 use crate::BlobId;
+use rand::RngCore;
 use rkyv::{Archive, Deserialize, Serialize};
 
 #[derive(Archive, Deserialize, Serialize)]
 pub struct ObjectLayout {
     pub timestamp: u64,
+    pub version_id: [u8; 16],
     pub state: ObjectState,
+}
+
+pub fn gen_version_id() -> [u8; 16] {
+    let mut bytes = [0; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    bytes
 }
 
 impl ObjectLayout {

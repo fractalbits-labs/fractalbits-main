@@ -1,9 +1,13 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::object_layout::*;
 use crate::response_xml::Xml;
 use axum::{
     extract::Request,
+    http::StatusCode,
     response::{self, IntoResponse, Response},
 };
-use rpc_client_bss::RpcClientBss;
+use rkyv::{self, api::high::to_bytes_in, rancor::Error};
 use rpc_client_nss::RpcClientNss;
 use serde::Serialize;
 
@@ -34,9 +38,29 @@ struct InitiateMultipartUploadResult {
 
 pub async fn create_multipart_upload(
     _request: Request,
-    _key: String,
-    _rpc_client_nss: &RpcClientNss,
-    _rpc_client_bss: &RpcClientBss,
+    bucket: String,
+    key: String,
+    rpc_client_nss: &RpcClientNss,
 ) -> response::Result<Response> {
-    Ok(Xml(InitiateMultipartUploadResult::default()).into_response())
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let version_id = gen_version_id();
+    let object_layout = ObjectLayout {
+        version_id,
+        timestamp,
+        state: ObjectState::Mpu(MpuState::Uploading),
+    };
+    let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new()).unwrap();
+    let _resp = rpc_client_nss
+        .put_inode(key.clone(), object_layout_bytes.into())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
+    let init_mpu_res = InitiateMultipartUploadResult {
+        bucket,
+        key,
+        upload_id: hex::encode(version_id),
+    };
+    Ok(Xml(init_mpu_res).into_response())
 }

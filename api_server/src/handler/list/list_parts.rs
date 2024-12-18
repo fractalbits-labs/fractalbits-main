@@ -85,7 +85,7 @@ pub async fn list_parts(
         return Err((StatusCode::BAD_REQUEST, "key is not in uploading state").into());
     }
 
-    let mpu_prefix = mpu::get_upload_part_prefix(key, 0);
+    let mpu_prefix = mpu::get_part_prefix(key, 0);
     let mpus =
         super::list_raw_objects(rpc_client_nss, max_parts, mpu_prefix, "".into(), false).await?;
     let mut res = ListPartsResult {

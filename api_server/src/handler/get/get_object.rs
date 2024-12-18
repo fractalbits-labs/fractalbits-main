@@ -54,7 +54,7 @@ pub async fn get_object(
             }
             MpuState::Completed { size: _, etag: _ } => {
                 let mut content = BytesMut::new();
-                let mpu_prefix = mpu::get_upload_part_prefix(key.clone(), 0);
+                let mpu_prefix = mpu::get_part_prefix(key.clone(), 0);
                 let mpus =
                     list_raw_objects(rpc_client_nss, 10000, mpu_prefix, "".into(), false).await?;
                 let mut cur_part = 1;

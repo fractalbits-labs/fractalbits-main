@@ -63,7 +63,6 @@ pub async fn complete_multipart_upload(
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
 ) -> response::Result<Response> {
-    // TODO: verify mpu parts
     let body = request.into_body().collect().await.unwrap().to_bytes();
     let req_body: CompleteMultipartUpload = quick_xml::de::from_reader(body.reader()).unwrap();
     let mut valid_part_numbers: HashSet<u32> =
@@ -78,7 +77,7 @@ pub async fn complete_multipart_upload(
     }
 
     let max_parts = 10000;
-    let mpu_prefix = mpu::get_upload_part_prefix(key.clone(), 0);
+    let mpu_prefix = mpu::get_part_prefix(key.clone(), 0);
     let objs = list::list_raw_objects(
         rpc_client_nss,
         max_parts,
@@ -92,13 +91,11 @@ pub async fn complete_multipart_upload(
     let mut total_size = 0;
     let mut invalid_part_keys = HashSet::new();
     for (mpu_key, mpu_obj) in objs.iter() {
-        let mut part_str = mpu_key.clone().split_off(key.len());
-        part_str.pop(); // remove trailing '\0'
-        let part = part_str.parse::<u32>().unwrap();
-        if !valid_part_numbers.remove(&part) {
+        let part_number = mpu::parse_part_number(mpu_key, &key);
+        if !valid_part_numbers.remove(&part_number) {
             invalid_part_keys.insert(mpu_key.clone());
         } else {
-            total_size += mpu_obj.size() as u64;
+            total_size += mpu_obj.size();
         }
     }
     if !valid_part_numbers.is_empty() {

@@ -42,7 +42,7 @@ pub async fn upload_part(
     }
     // TODO: check upload_id
 
-    let mut key = super::get_upload_part_prefix(key, part_number);
+    let mut key = super::get_part_prefix(key, part_number);
     key.push('\0');
     put_object(request, key, rpc_client_nss, rpc_client_bss, blob_deletion)
         .await

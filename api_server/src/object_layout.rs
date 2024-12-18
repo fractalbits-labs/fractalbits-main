@@ -6,6 +6,7 @@ use uuid::Uuid;
 pub struct ObjectLayout {
     pub timestamp: u64,
     pub version_id: Uuid, // v4
+    pub block_size: u32,
     pub state: ObjectState,
 }
 

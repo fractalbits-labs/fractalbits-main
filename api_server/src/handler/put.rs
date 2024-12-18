@@ -34,8 +34,10 @@ pub async fn put_object(
         .as_millis() as u64;
     let etag = String::new();
     let version_id = gen_version_id();
+    let block_size = 1024 * 1024;
     let object_layout = ObjectLayout {
         version_id,
+        block_size,
         timestamp,
         state: ObjectState::Normal(ObjectData {
             size: content_len as u64,

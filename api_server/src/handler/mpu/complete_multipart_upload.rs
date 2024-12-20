@@ -1,8 +1,10 @@
 use std::collections::HashSet;
 
 use crate::{
-    handler::{delete::delete_object, get::get_raw_object},
+    handler::{delete::delete_object, get::get_raw_object, list, mpu},
+    object_layout::{MpuState, ObjectState},
     response_xml::Xml,
+    BlobId,
 };
 use axum::{
     extract::Request,
@@ -12,12 +14,9 @@ use axum::{
 use bytes::Buf;
 use http_body_util::BodyExt;
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
-use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::{rpc::put_inode_response, RpcClientNss};
 use serde::{Deserialize, Serialize};
-
-use crate::handler::{list, mpu};
-use crate::object_layout::{MpuState, ObjectState};
+use tokio::sync::mpsc::Sender;
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
@@ -61,7 +60,7 @@ pub async fn complete_multipart_upload(
     mut key: String,
     upload_id: String,
     rpc_client_nss: &RpcClientNss,
-    rpc_client_bss: &RpcClientBss,
+    blob_deletion: Sender<(BlobId, usize)>,
 ) -> response::Result<Response> {
     let body = request.into_body().collect().await.unwrap().to_bytes();
     let req_body: CompleteMultipartUpload = quick_xml::de::from_reader(body.reader()).unwrap();
@@ -102,7 +101,7 @@ pub async fn complete_multipart_upload(
         return Err((StatusCode::BAD_REQUEST, "invalid mpu parts").into());
     }
     for mpu_key in invalid_part_keys.iter() {
-        delete_object(mpu_key.clone(), rpc_client_nss, rpc_client_bss).await?;
+        delete_object(mpu_key.clone(), rpc_client_nss, blob_deletion.clone()).await?;
     }
 
     object.state = ObjectState::Mpu(MpuState::Completed {

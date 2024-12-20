@@ -14,7 +14,7 @@ pub type BlobId = uuid::Uuid;
 pub struct AppState {
     pub rpc_clients_nss: Vec<RpcClientNss>,
     pub rpc_clients_bss: Vec<RpcClientBss>,
-    pub blob_deletion: Sender<BlobId>,
+    pub blob_deletion: Sender<(BlobId, usize)>,
 }
 
 impl AppState {
@@ -71,14 +71,18 @@ impl AppState {
 
     async fn blob_deletion_task(
         bss_ip: &str,
-        mut input: Receiver<BlobId>,
+        mut input: Receiver<(BlobId, usize)>,
     ) -> Result<(), RpcErrorBss> {
         let rpc_client_bss = RpcClientBss::new(bss_ip).await?;
-        while let Some(blob_id) = input.recv().await {
-            rpc_client_bss
-                .delete_blob(blob_id, 0)
-                .await
-                .inspect_err(|e| tracing::error!("delete {} failed: {}", blob_id, e))?;
+        while let Some((blob_id, block_numbers)) = input.recv().await {
+            for block_number in 0..block_numbers {
+                rpc_client_bss
+                    .delete_blob(blob_id, block_number as u32)
+                    .await
+                    .inspect_err(|e| {
+                        tracing::error!("delete {blob_id}-p{block_number} failed: {e}")
+                    })?;
+            }
         }
         Ok(())
     }

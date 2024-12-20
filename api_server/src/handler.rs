@@ -78,12 +78,20 @@ pub async fn any_handler(
                 bucket_name,
                 key,
                 rpc_client_nss,
-                rpc_client_bss,
+                app.blob_deletion.clone(),
             )
             .await
         }
         &Method::DELETE => {
-            delete_handler(request, api_sig, key, rpc_client_nss, rpc_client_bss).await
+            delete_handler(
+                request,
+                api_sig,
+                key,
+                rpc_client_nss,
+                rpc_client_bss,
+                app.blob_deletion.clone(),
+            )
+            .await
         }
         method => (StatusCode::BAD_REQUEST, format!("TODO: method {method}")).into_response(),
     }
@@ -163,7 +171,7 @@ async fn put_handler(
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
-    blob_deletion: Sender<BlobId>,
+    blob_deletion: Sender<(BlobId, usize)>,
 ) -> Response {
     match (api_cmd, api_sig.part_number, api_sig.upload_id) {
         (Some(api_cmd), _, _) => {
@@ -196,11 +204,11 @@ async fn post_handler(
     bucket: String,
     key: String,
     rpc_client_nss: &RpcClientNss,
-    rpc_client_bss: &RpcClientBss,
+    blob_deletion: Sender<(BlobId, usize)>,
 ) -> Response {
     match (api_cmd, api_sig.upload_id) {
         (Some(ApiCommand::Delete), None) if key == "/" => {
-            delete::delete_objects(request, rpc_client_nss, rpc_client_bss)
+            delete::delete_objects(request, rpc_client_nss, blob_deletion)
                 .await
                 .into_response()
         }
@@ -215,7 +223,7 @@ async fn post_handler(
             key,
             upload_id,
             rpc_client_nss,
-            rpc_client_bss,
+            blob_deletion,
         )
         .await
         .into_response(),
@@ -229,6 +237,7 @@ async fn delete_handler(
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
+    blob_deletion: Sender<(BlobId, usize)>,
 ) -> Response {
     match api_sig.upload_id {
         Some(upload_id) if key != "/" => {
@@ -236,7 +245,7 @@ async fn delete_handler(
                 .await
                 .into_response()
         }
-        None if key != "/" => delete::delete_object(key, rpc_client_nss, rpc_client_bss)
+        None if key != "/" => delete::delete_object(key, rpc_client_nss, blob_deletion)
             .await
             .into_response(),
         _ => StatusCode::BAD_REQUEST.into_response(),

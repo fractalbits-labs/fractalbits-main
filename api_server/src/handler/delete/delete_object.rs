@@ -3,15 +3,15 @@ use axum::{
     response::{self, IntoResponse},
 };
 use rkyv::{self, rancor::Error};
-use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::{rpc::delete_inode_response, RpcClientNss};
+use tokio::sync::mpsc::Sender;
 
-use crate::object_layout::ObjectLayout;
+use crate::{object_layout::ObjectLayout, BlobId};
 
 pub async fn delete_object(
     key: String,
     rpc_client_nss: &RpcClientNss,
-    rpc_client_bss: &RpcClientBss,
+    blob_deletion: Sender<(BlobId, usize)>,
 ) -> response::Result<()> {
     let resp = rpc_client_nss
         .delete_inode(key)
@@ -28,9 +28,12 @@ pub async fn delete_object(
     };
 
     let object = rkyv::from_bytes::<ObjectLayout, Error>(&object_bytes).unwrap();
-    rpc_client_bss
-        .delete_blob(object.blob_id(), 0)
-        .await
-        .unwrap();
+    let blob_id = object.blob_id();
+    let num_blocks = object.num_blocks();
+    if let Err(e) = blob_deletion.send((blob_id, num_blocks)).await {
+        tracing::warn!(
+            "Failed to send blob {blob_id} num_blocks={num_blocks} for background deletion: {e}"
+        );
+    }
     Ok(())
 }

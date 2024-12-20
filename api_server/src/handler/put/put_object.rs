@@ -15,7 +15,7 @@ pub async fn put_object(
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
-    blob_deletion: Sender<BlobId>,
+    blob_deletion: Sender<(BlobId, usize)>,
 ) -> response::Result<()> {
     let blob_id = Uuid::now_v7();
     let body_data_stream = request.into_body().into_data_stream();
@@ -68,8 +68,10 @@ pub async fn put_object(
     if !old_object_bytes.is_empty() {
         let old_object = rkyv::from_bytes::<ObjectLayout, Error>(&old_object_bytes).unwrap();
         let blob_id = old_object.blob_id();
-        if let Err(e) = blob_deletion.send(blob_id).await {
-            tracing::warn!("Failed to send blob {blob_id} for background deletion: {e}");
+        let num_blocks = old_object.num_blocks();
+        if let Err(e) = blob_deletion.send((blob_id, num_blocks)).await {
+            tracing::warn!(
+            "Failed to send blob {blob_id} num_blocks={num_blocks} for background deletion: {e}");
         }
     }
 

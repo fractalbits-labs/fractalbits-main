@@ -4,21 +4,21 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-tokio = { version = "1.39.2", features = ["full"] }
-prost = "0.13"
-bytes = "1.7.1"
-thiserror = "1.0.63"
-tracing = "0.1.40"
-bytemuck = { version = "1.18.0", features = ["derive"] }
-tokio-util = { version = "0.7.12", features = ["codec"] }
-tokio-stream = "0.1.16"
+serde.workspace = true
+tokio.workspace = true
+prost.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytemuck.workspace = true
+tokio-util.workspace = true
+tokio-stream.workspace = true
 
 [build-dependencies]
-prost-build = "0.13"
+prost-build.workspace = true
 
 [dev-dependencies]
-tracing-test = {version = "0.2.5", features = ["no-env-filter"]}
+tracing-test.workspace = true
 
 [features]
 default = ["rss"]

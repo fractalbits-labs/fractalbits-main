@@ -11,3 +11,56 @@ members = [
 ]
 resolver = "2"
 
+default-members = ["api_server"]
+
+[workspace.dependencies]
+rpc_client_nss = { path = "api_server/rpc_client/nss" }
+rpc_client_bss = { path = "api_server/rpc_client/bss" }
+
+tokio-util = { version = "0.7.12", features = ["codec"] }
+tokio-stream = "0.1.16"
+thiserror = "1.0.63"
+fake = "3.0.1"
+bytemuck = { version = "1.18.0", features = ["derive"] }
+tokio = { version = "1.39.2", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "query", "tokio"] }
+axum-extra = { version = "0.10", features = ["protobuf"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+prost = "0.13"
+bytes = "1.7.1"
+tracing = "0.1.40"
+tower-http = { version = "0.5.2", features = ["trace"] }
+console-subscriber = "0.4.0"
+tower = "0.5.1"
+strum = { version = "0.26.3", features = ["derive"] }
+quick-xml = { version = "0.36.2", features = ["serialize"] }
+http-body-util = "0.1.2"
+uuid = { version = "1.11.0", features = ["v4", "v7"] }
+rkyv = { version = "0.8.8", features = ["uuid-1", "unaligned"] }
+rand = "0.8.5"
+hex = "0.4.3"
+chrono = "0.4.39"
+httpdate = "1.0.3"
+futures = "0.3.31"
+pin-project-lite = "0.2.15"
+etcd-client = "0.14.0"
+
+# Dev dependencies
+aws-sdk-s3 = "1.65.0"
+base64 = "0.22.1"
+cmd_lib = "1.9.5"
+sha1 = "0.10.6"
+tracing-test = {version = "0.2.5", features = ["no-env-filter"]}
+
+# Build dependencies
+prost-build = "0.13"
+
+[profile.dev]
+lto = "off"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"
+strip = true

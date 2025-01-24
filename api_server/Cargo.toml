@@ -4,33 +4,34 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-axum = { version = "0.8", default-features = false, features = ["http1", "query", "tokio"] }
-axum-extra = { version = "0.10", features = ["protobuf"] }
-tokio = { version = "1.39.2", features = ["full"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-prost = "0.13"
-bytes = "1.7.1"
-tracing = "0.1.40"
-tower-http = { version = "0.5.2", features = ["trace"] }
-console-subscriber = "0.4.0"
-rpc_client_nss = { path = "rpc_client/nss" }
-rpc_client_bss = { path = "rpc_client/bss" }
-tower = "0.5.1"
-strum = { version = "0.26.3", features = ["derive"] }
-quick-xml = { version = "0.36.2", features = ["serialize"] }
-http-body-util = "0.1.2"
-uuid = { version = "1.11.0", features = ["v4", "v7"] }
-rkyv = { version = "0.8.8", features = ["uuid-1", "unaligned"] }
-rand = "0.8.5"
-hex = "0.4.3"
-chrono = "0.4.39"
-httpdate = "1.0.3"
-futures = "0.3.31"
-pin-project-lite = "0.2.15"
+rpc_client_nss.workspace = true
+rpc_client_bss.workspace = true
+
+serde.workspace = true
+axum.workspace = true
+axum-extra.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+prost.workspace = true
+bytes.workspace = true
+tracing.workspace = true
+tower-http.workspace = true
+console-subscriber.workspace = true
+tower.workspace = true
+strum.workspace = true
+quick-xml.workspace = true
+http-body-util.workspace = true
+uuid.workspace = true
+rkyv.workspace = true
+rand.workspace = true
+hex.workspace = true
+chrono.workspace = true
+httpdate.workspace = true
+futures.workspace = true
+pin-project-lite.workspace = true
 
 [dev-dependencies]
-aws-sdk-s3 = "1.65.0"
-base64 = "0.22.1"
-cmd_lib = "1.9.5"
-sha1 = "0.10.6"
+aws-sdk-s3.workspace = true
+base64.workspace = true
+cmd_lib.workspace = true
+sha1.workspace = true

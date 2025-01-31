@@ -82,6 +82,7 @@ enum ServiceName {
     ApiServer,
     Bss,
     Nss,
+    Rss,
     All,
 }
 

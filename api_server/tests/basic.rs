@@ -3,24 +3,27 @@ use aws_sdk_s3::primitives::ByteStream;
 
 #[tokio::test]
 async fn test_basic() {
-    let s3_client = common::build_client();
-    let bucket: String = "mybucket".into();
+    let ctx = common::context();
+    let bucket_name = "my_bucket";
+    ctx.create_bucket(bucket_name).await;
+
     let key = "hello";
     let value = b"42";
     let data = ByteStream::from_static(value);
 
-    s3_client
+    ctx.client
         .put_object()
-        .bucket(&bucket)
+        .bucket(bucket_name)
         .key(key)
         .body(data)
         .send()
         .await
         .unwrap();
 
-    let res = s3_client
+    let res = ctx
+        .client
         .get_object()
-        .bucket(&bucket)
+        .bucket(bucket_name)
         .key(key)
         .send()
         .await

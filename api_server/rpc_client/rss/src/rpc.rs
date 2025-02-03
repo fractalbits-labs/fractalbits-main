@@ -8,7 +8,7 @@ use prost::Message as PbMessage;
 include!(concat!(env!("OUT_DIR"), "/rss_ops.rs"));
 
 impl RpcClient {
-    pub async fn put(&self, key: Bytes, value: Bytes) -> Result<PutResponse, RpcError> {
+    pub async fn put(&self, key: Bytes, value: Bytes) -> Result<Bytes, RpcError> {
         let body = PutRequest { key, value };
 
         let mut header = MessageHeader::default();
@@ -26,10 +26,13 @@ impl RpcClient {
             .await?
             .body;
         let resp: PutResponse = PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
-        Ok(resp)
+        match resp.result.unwrap() {
+            put_response::Result::Ok(resp) => Ok(resp),
+            put_response::Result::Err(_resp) => todo!(), // FIXME: convert to RpcError
+        }
     }
 
-    pub async fn get(&self, key: Bytes) -> Result<GetResponse, RpcError> {
+    pub async fn get(&self, key: Bytes) -> Result<Bytes, RpcError> {
         let body = GetRequest { key };
 
         let mut header = MessageHeader::default();
@@ -47,10 +50,13 @@ impl RpcClient {
             .await?
             .body;
         let resp: GetResponse = PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
-        Ok(resp)
+        match resp.result.unwrap() {
+            get_response::Result::Ok(resp) => Ok(resp),
+            get_response::Result::Err(_resp) => todo!(), // FIXME: convert to RpcError
+        }
     }
 
-    pub async fn delete(&self, key: Bytes) -> Result<DeleteResponse, RpcError> {
+    pub async fn delete(&self, key: Bytes) -> Result<Bytes, RpcError> {
         let body = DeleteRequest { key };
 
         let mut header = MessageHeader::default();
@@ -68,6 +74,9 @@ impl RpcClient {
             .await?
             .body;
         let resp: DeleteResponse = PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
-        Ok(resp)
+        match resp.result.unwrap() {
+            delete_response::Result::Ok(resp) => Ok(resp),
+            delete_response::Result::Err(_resp) => todo!(), // FIXME: convert to RpcError
+        }
     }
 }

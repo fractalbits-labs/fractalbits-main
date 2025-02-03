@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 rpc_client_nss.workspace = true
 rpc_client_bss.workspace = true
+rpc_client_rss.workspace = true
 
 serde.workspace = true
 axum.workspace = true
@@ -29,6 +30,7 @@ chrono.workspace = true
 httpdate.workspace = true
 futures.workspace = true
 pin-project-lite.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 aws-sdk-s3.workspace = true

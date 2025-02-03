@@ -46,7 +46,9 @@ pub async fn any_handler(
     tracing::debug!(%bucket_name, %key);
 
     if key == "/" && Method::PUT == request.method() {
-        return bucket::create_bucket(request).await.into_response();
+        return bucket::create_bucket(bucket_name, request)
+            .await
+            .into_response();
     }
 
     let rpc_client_nss = app.get_rpc_client_nss(addr);
@@ -106,13 +108,14 @@ pub async fn any_handler(
 // Get bucket and key for path-style requests
 fn get_bucket_and_key_from_path(path: String) -> (String, String) {
     let mut bucket = String::new();
-    let mut key = String::new();
+    let mut key = String::from("/");
     let mut bucket_part = true;
     path.chars().skip_while(|c| c == &'/').for_each(|c| {
-        if c == '/' {
+        if bucket_part && c == '/' {
             bucket_part = false;
+            return;
         }
-        if bucket_part {
+        if bucket_part && c != '\0' {
             bucket.push(c);
         } else {
             key.push(c);

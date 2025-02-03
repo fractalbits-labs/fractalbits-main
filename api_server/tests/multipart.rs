@@ -9,7 +9,8 @@ const SZ_10MB: usize = 10 * 1024 * 1024;
 #[tokio::test]
 async fn test_multipart_upload() {
     let ctx = common::context();
-    let bucket = ctx.create_bucket("testmpu");
+    let bucket_name = "test_mpu";
+    ctx.create_bucket(bucket_name).await;
 
     let u1 = vec![0x11; SZ_5MB];
     let u2 = vec![0x22; SZ_5MB];
@@ -20,7 +21,7 @@ async fn test_multipart_upload() {
     let up = ctx
         .client
         .create_multipart_upload()
-        .bucket(&bucket)
+        .bucket(bucket_name)
         .key("a")
         .send()
         .await
@@ -32,7 +33,7 @@ async fn test_multipart_upload() {
     let p3 = ctx
         .client
         .upload_part()
-        .bucket(&bucket)
+        .bucket(bucket_name)
         .key("a")
         .upload_id(uid)
         .part_number(3)
@@ -44,7 +45,7 @@ async fn test_multipart_upload() {
     let _p1 = ctx
         .client
         .upload_part()
-        .bucket(&bucket)
+        .bucket(bucket_name)
         .key("a")
         .upload_id(uid)
         .part_number(1)
@@ -56,7 +57,7 @@ async fn test_multipart_upload() {
     let _p4 = ctx
         .client
         .upload_part()
-        .bucket(&bucket)
+        .bucket(bucket_name)
         .key("a")
         .upload_id(uid)
         .part_number(4)
@@ -68,7 +69,7 @@ async fn test_multipart_upload() {
     let p1bis = ctx
         .client
         .upload_part()
-        .bucket(&bucket)
+        .bucket(bucket_name)
         .key("a")
         .upload_id(uid)
         .part_number(1)
@@ -80,7 +81,7 @@ async fn test_multipart_upload() {
     let p6 = ctx
         .client
         .upload_part()
-        .bucket(&bucket)
+        .bucket(bucket_name)
         .key("a")
         .upload_id(uid)
         .part_number(6)
@@ -93,7 +94,7 @@ async fn test_multipart_upload() {
         let r = ctx
             .client
             .list_parts()
-            .bucket(&bucket)
+            .bucket(bucket_name)
             .key("a")
             .upload_id(uid)
             .send()
@@ -125,7 +126,7 @@ async fn test_multipart_upload() {
 
     ctx.client
         .complete_multipart_upload()
-        .bucket(&bucket)
+        .bucket(bucket_name)
         .key("a")
         .upload_id(uid)
         .multipart_upload(cmp)
@@ -137,7 +138,7 @@ async fn test_multipart_upload() {
     assert!(ctx
         .client
         .list_parts()
-        .bucket(&bucket)
+        .bucket(bucket_name)
         .key("a")
         .upload_id(uid)
         .send()
@@ -149,7 +150,7 @@ async fn test_multipart_upload() {
         let r = ctx
             .client
             .head_object()
-            .bucket(&bucket)
+            .bucket(bucket_name)
             .key("a")
             .send()
             .await
@@ -162,7 +163,7 @@ async fn test_multipart_upload() {
         let o = ctx
             .client
             .get_object()
-            .bucket(&bucket)
+            .bucket(bucket_name)
             .key("a")
             .send()
             .await
@@ -176,7 +177,7 @@ async fn test_multipart_upload() {
             let o = ctx
                 .client
                 .get_object()
-                .bucket(&bucket)
+                .bucket(bucket_name)
                 .key("a")
                 .part_number(part_number)
                 .send()

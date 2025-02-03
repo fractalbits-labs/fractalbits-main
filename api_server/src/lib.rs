@@ -1,3 +1,4 @@
+mod bucket_tables;
 mod extract;
 pub mod handler;
 mod object_layout;

@@ -26,9 +26,13 @@ pub struct Context {
 }
 
 impl Context {
-    #[allow(dead_code)]
-    pub fn create_bucket(&self, bucket_name: &str) -> String {
-        bucket_name.into()
+    pub async fn create_bucket(&self, bucket_name: &str) {
+        self.client
+            .create_bucket()
+            .bucket(bucket_name)
+            .send()
+            .await
+            .unwrap();
     }
 }
 

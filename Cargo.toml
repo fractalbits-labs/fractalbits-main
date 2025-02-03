@@ -14,8 +14,9 @@ resolver = "2"
 default-members = ["api_server"]
 
 [workspace.dependencies]
-rpc_client_nss = { path = "api_server/rpc_client/nss" }
 rpc_client_bss = { path = "api_server/rpc_client/bss" }
+rpc_client_nss = { path = "api_server/rpc_client/nss" }
+rpc_client_rss = { path = "api_server/rpc_client/rss" }
 
 tokio-util = { version = "0.7.12", features = ["codec"] }
 tokio-stream = "0.1.16"
@@ -45,6 +46,7 @@ httpdate = "1.0.3"
 futures = "0.3.31"
 pin-project-lite = "0.2.15"
 etcd-client = "0.14.0"
+serde_json = "1.0.138"
 
 # Dev dependencies
 aws-sdk-s3 = "1.65.0"

@@ -26,6 +26,7 @@ pub fn stop_services(service: ServiceName) -> CmdResult {
             ServiceName::ApiServer.as_ref().to_owned(),
             ServiceName::Nss.as_ref().to_owned(),
             ServiceName::Bss.as_ref().to_owned(),
+            "homebrew.etcd".to_owned(),
         ],
         single_service => vec![single_service.as_ref().to_owned()],
     };
@@ -49,8 +50,10 @@ pub fn start_services(build_mode: BuildMode, service: ServiceName) -> CmdResult 
     match service {
         ServiceName::Bss => start_bss_service(build_mode)?,
         ServiceName::Nss => start_nss_service(build_mode)?,
+        ServiceName::Rss => start_rss_service(build_mode)?,
         ServiceName::ApiServer => start_api_server(build_mode)?,
         ServiceName::All => {
+            start_rss_service(build_mode)?;
             start_bss_service(build_mode)?;
             start_nss_service(build_mode)?;
             start_api_server(build_mode)?;
@@ -99,6 +102,42 @@ pub fn start_nss_service(build_mode: BuildMode) -> CmdResult {
     Ok(())
 }
 
+pub fn start_rss_service(build_mode: BuildMode) -> CmdResult {
+    // Start etcd service at first if needed, since root server stores infomation in etcd
+    if run_cmd!(systemctl --user is-active --quiet homebrew.etcd.service).is_err() {
+        start_etcd_service()?;
+    }
+
+    create_systemd_unit_file(ServiceName::Rss, build_mode)?;
+    let rss_wait_secs = 10;
+    run_cmd! {
+        systemctl --user start rss.service;
+        info "Waiting ${rss_wait_secs}s for root server up";
+        sleep $rss_wait_secs;
+    }?;
+    let rss_server_pid = run_fun!(pidof root_server)?;
+    check_pids(ServiceName::Nss, &rss_server_pid)?;
+    info!("root server (pid={rss_server_pid}) started");
+    Ok(())
+}
+
+fn start_etcd_service() -> CmdResult {
+    let etcd_path = run_fun!(brew --prefix etcd)?;
+    let service_file = format!("{etcd_path}/homebrew.etcd.service");
+
+    let etcd_wait_secs = 5;
+    run_cmd! {
+        info "Linking $service_file into ~/.config/systemd/user";
+        systemctl --user link $service_file --force --quiet;
+        systemctl --user start homebrew.etcd.service;
+        info "Waiting ${etcd_wait_secs}s for etcd up";
+        sleep $etcd_wait_secs;
+        systemctl --user is-active --quiet homebrew.etcd.service;
+    }?;
+
+    Ok(())
+}
+
 pub fn start_api_server(build_mode: BuildMode) -> CmdResult {
     create_systemd_unit_file(ServiceName::ApiServer, build_mode)?;
 
@@ -122,6 +161,12 @@ fn create_systemd_unit_file(service: ServiceName, build_mode: BuildMode) -> CmdR
     let exec_start = match service {
         ServiceName::Bss => format!("{pwd}/zig-out/bin/bss_server"),
         ServiceName::Nss => format!("{pwd}/zig-out/bin/nss_server"),
+        ServiceName::Rss => {
+            if let BuildMode::Debug = build_mode {
+                env_settings = "\nEnvironment=\"RUST_LOG=debug\"";
+            }
+            format!("{pwd}/target/{build}/root_server")
+        }
         ServiceName::ApiServer => {
             if let BuildMode::Debug = build_mode {
                 env_settings = "\nEnvironment=\"RUST_LOG=debug\"";

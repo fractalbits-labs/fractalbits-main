@@ -26,6 +26,7 @@ pub fn stop_services(service: ServiceName) -> CmdResult {
             ServiceName::ApiServer.as_ref().to_owned(),
             ServiceName::Nss.as_ref().to_owned(),
             ServiceName::Bss.as_ref().to_owned(),
+            ServiceName::Rss.as_ref().to_owned(),
             "homebrew.etcd".to_owned(),
         ],
         single_service => vec![single_service.as_ref().to_owned()],
@@ -165,7 +166,7 @@ fn create_systemd_unit_file(service: ServiceName, build_mode: BuildMode) -> CmdR
         ServiceName::Nss => format!("{pwd}/zig-out/bin/nss_server"),
         ServiceName::Rss => {
             if let BuildMode::Debug = build_mode {
-                env_settings = "\nEnvironment=\"RUST_LOG=debug\"";
+                env_settings = "\nEnvironment=\"RUST_LOG=info\"";
             }
             format!("{pwd}/target/{build}/root_server")
         }

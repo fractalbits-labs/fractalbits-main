@@ -125,17 +125,35 @@ pub fn start_rss_service(build_mode: BuildMode) -> CmdResult {
 }
 
 fn start_etcd_service() -> CmdResult {
-    let etcd_path = run_fun!(brew --prefix etcd)?;
-    let service_file = format!("{etcd_path}/homebrew.etcd.service");
+    let pwd = run_fun!(pwd)?;
+    let service_file = format!("etc/etcd.service");
+    let service_file_content = format!(
+        r##"
+[Unit]
+Description=etcd for root_server
+
+[Install]
+WantedBy=default.target
+
+[Service]
+Type=simple
+ExecStart="/home/linuxbrew/.linuxbrew/opt/etcd/bin/etcd"
+Restart=always
+WorkingDirectory={pwd}/ebs
+"##
+    );
 
     let etcd_wait_secs = 5;
     run_cmd! {
+        mkdir -p etc;
+        mkdir -p ebs;
+        echo $service_file_content > $service_file;
         info "Linking $service_file into ~/.config/systemd/user";
         systemctl --user link $service_file --force --quiet;
-        systemctl --user start homebrew.etcd.service;
+        systemctl --user start etcd.service;
         info "Waiting ${etcd_wait_secs}s for etcd up";
         sleep $etcd_wait_secs;
-        systemctl --user is-active --quiet homebrew.etcd.service;
+        systemctl --user is-active --quiet etcd.service;
     }?;
 
     Ok(())

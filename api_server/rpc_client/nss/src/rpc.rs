@@ -10,11 +10,15 @@ include!(concat!(env!("OUT_DIR"), "/nss_ops.rs"));
 impl RpcClient {
     pub async fn put_inode(
         &self,
-        bucket: String,
+        root_blob_name: String,
         key: String,
         value: Bytes,
     ) -> Result<PutInodeResponse, RpcError> {
-        let body = PutInodeRequest { bucket, key, value };
+        let body = PutInodeRequest {
+            root_blob_name,
+            key,
+            value,
+        };
 
         let mut header = MessageHeader::default();
         header.id = self.gen_request_id();
@@ -37,10 +41,13 @@ impl RpcClient {
 
     pub async fn get_inode(
         &self,
-        bucket: String,
+        root_blob_name: String,
         key: String,
     ) -> Result<GetInodeResponse, RpcError> {
-        let body = GetInodeRequest { bucket, key };
+        let body = GetInodeRequest {
+            root_blob_name,
+            key,
+        };
 
         let mut header = MessageHeader::default();
         header.id = self.gen_request_id();
@@ -63,14 +70,14 @@ impl RpcClient {
 
     pub async fn list_inodes(
         &self,
-        bucket: String,
+        root_blob_name: String,
         max_keys: u32,
         prefix: String,
         start_after: String,
         skip_mpu_parts: bool,
     ) -> Result<ListInodesResponse, RpcError> {
         let body = ListInodesRequest {
-            bucket,
+            root_blob_name,
             max_keys,
             prefix,
             start_after,
@@ -98,10 +105,13 @@ impl RpcClient {
 
     pub async fn delete_inode(
         &self,
-        bucket: String,
+        root_blob_name: String,
         key: String,
     ) -> Result<DeleteInodeResponse, RpcError> {
-        let body = DeleteInodeRequest { bucket, key };
+        let body = DeleteInodeRequest {
+            root_blob_name,
+            key,
+        };
 
         let mut header = MessageHeader::default();
         header.id = self.gen_request_id();

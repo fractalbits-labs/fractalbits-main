@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Query, Request},
     http::{HeaderMap, HeaderValue, StatusCode},
@@ -6,7 +8,10 @@ use axum::{
 use rpc_client_nss::RpcClientNss;
 use serde::Deserialize;
 
-use crate::object_layout::{MpuState, ObjectState};
+use crate::{
+    bucket_tables::bucket_table::Bucket,
+    object_layout::{MpuState, ObjectState},
+};
 
 use super::{get::get_raw_object, time};
 
@@ -28,12 +33,12 @@ pub struct HeadObjectOptions {
 
 pub async fn head_object(
     mut request: Request,
-    bucket: String,
+    bucket: Arc<Bucket>,
     key: String,
     rpc_client_nss: &RpcClientNss,
 ) -> response::Result<HeaderMap> {
     let Query(_opts): Query<HeadObjectOptions> = request.extract_parts().await?;
-    let obj = get_raw_object(rpc_client_nss, bucket, key).await?;
+    let obj = get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key).await?;
 
     let mut headers = HeaderMap::new();
     let last_modified = time::format_http_date(obj.timestamp);

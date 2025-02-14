@@ -1,4 +1,6 @@
-use crate::response::xml::Xml;
+use std::sync::Arc;
+
+use crate::{bucket_tables::bucket_table::Bucket, response::xml::Xml};
 use axum::{
     extract::Request,
     response::{self, IntoResponse, Response},
@@ -74,7 +76,7 @@ struct ResponseHeaders {
 
 pub async fn get_object_attributes(
     _request: Request,
-    _bucket: String,
+    _bucket: Arc<Bucket>,
     _key: String,
     _rpc_client_nss: &RpcClientNss,
 ) -> response::Result<Response> {

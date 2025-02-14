@@ -15,6 +15,8 @@ use super::extract::{
     api_command::ApiCommandFromQuery, bucket_name::BucketNameFromHost, key::KeyFromPath,
 };
 use super::AppState;
+use crate::bucket_tables::bucket_table::{Bucket, BucketTable};
+use crate::bucket_tables::table::Table;
 use crate::extract::api_command::ApiCommand;
 use crate::extract::api_signature::ApiSignature;
 use crate::BlobId;
@@ -47,21 +49,25 @@ pub async fn any_handler(
 
     let rpc_client_nss = app.get_rpc_client_nss(addr);
     let rpc_client_bss = app.get_rpc_client_bss(addr);
+    let rpc_client_rss = app.get_rpc_client_rss();
 
     if key == "/" && Method::PUT == request.method() {
-        return bucket::create_bucket(bucket_name, request, rpc_client_nss)
+        return bucket::create_bucket(bucket_name, request, rpc_client_nss, rpc_client_rss)
             .await
             .into_response();
     }
 
+    let bucket_table: Table<BucketTable> = Table::new(rpc_client_rss);
+    let bucket = Arc::new(bucket_table.get(bucket_name).await);
+
     match request.method() {
-        &Method::HEAD => head_handler(request, bucket_name, key, rpc_client_nss).await,
+        &Method::HEAD => head_handler(request, bucket, key, rpc_client_nss).await,
         &Method::GET => {
             get_handler(
                 request,
                 api_cmd,
                 api_sig,
-                bucket_name,
+                bucket,
                 key,
                 rpc_client_nss,
                 rpc_client_bss,
@@ -73,7 +79,7 @@ pub async fn any_handler(
                 request,
                 api_cmd,
                 api_sig,
-                bucket_name,
+                bucket,
                 key,
                 rpc_client_nss,
                 rpc_client_bss,
@@ -86,7 +92,7 @@ pub async fn any_handler(
                 request,
                 api_cmd,
                 api_sig,
-                bucket_name,
+                bucket,
                 key,
                 rpc_client_nss,
                 app.blob_deletion.clone(),
@@ -97,7 +103,7 @@ pub async fn any_handler(
             delete_handler(
                 request,
                 api_sig,
-                bucket_name,
+                bucket,
                 key,
                 rpc_client_nss,
                 rpc_client_bss,
@@ -134,7 +140,7 @@ fn get_bucket_and_key_from_path(path: String) -> (String, String) {
 
 async fn head_handler(
     request: Request,
-    bucket: String,
+    bucket: Arc<Bucket>,
     key: String,
     rpc_client_nss: &RpcClientNss,
 ) -> Response {
@@ -150,7 +156,7 @@ async fn get_handler(
     request: Request,
     api_cmd: Option<ApiCommand>,
     api_sig: ApiSignature,
-    bucket: String,
+    bucket: Arc<Bucket>,
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
@@ -187,7 +193,7 @@ async fn put_handler(
     request: Request,
     api_cmd: Option<ApiCommand>,
     api_sig: ApiSignature,
-    bucket: String,
+    bucket: Arc<Bucket>,
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
@@ -227,7 +233,7 @@ async fn post_handler(
     request: Request,
     api_cmd: Option<ApiCommand>,
     api_sig: ApiSignature,
-    bucket: String,
+    bucket: Arc<Bucket>,
     key: String,
     rpc_client_nss: &RpcClientNss,
     blob_deletion: Sender<(BlobId, usize)>,
@@ -260,7 +266,7 @@ async fn post_handler(
 async fn delete_handler(
     request: Request,
     api_sig: ApiSignature,
-    bucket: String,
+    bucket: Arc<Bucket>,
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,

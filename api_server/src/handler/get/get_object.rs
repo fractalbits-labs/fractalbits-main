@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::RequestExt;
@@ -7,6 +9,7 @@ use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::RpcClientNss;
 use serde::Deserialize;
 
+use crate::bucket_tables::bucket_table::Bucket;
 use crate::handler::get::get_raw_object;
 use crate::handler::list::list_raw_objects;
 use crate::handler::mpu;
@@ -31,13 +34,13 @@ pub struct GetObjectOptions {
 
 pub async fn get_object(
     mut request: Request,
-    bucket: String,
+    bucket: Arc<Bucket>,
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
 ) -> response::Result<Bytes> {
     let Query(opts): Query<GetObjectOptions> = request.extract_parts().await?;
-    let object = get_raw_object(rpc_client_nss, bucket.clone(), key.clone()).await?;
+    let object = get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key.clone()).await?;
     match object.state {
         ObjectState::Normal(ref _obj_data) => {
             let mut blob = BytesMut::new();
@@ -60,9 +63,15 @@ pub async fn get_object(
             MpuState::Completed { size: _, etag: _ } => {
                 let mut content = BytesMut::new();
                 let mpu_prefix = mpu::get_part_prefix(key.clone(), 0);
-                let mpus =
-                    list_raw_objects(bucket, rpc_client_nss, 10000, mpu_prefix, "".into(), false)
-                        .await?;
+                let mpus = list_raw_objects(
+                    bucket.root_blob_name.clone(),
+                    rpc_client_nss,
+                    10000,
+                    mpu_prefix,
+                    "".into(),
+                    false,
+                )
+                .await?;
                 // Do filtering if there is part_number option
                 let mpus = match opts.part_number {
                     None => &mpus[0..],

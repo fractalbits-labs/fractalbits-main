@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     http::StatusCode,
     response::{self, IntoResponse},
@@ -6,16 +8,16 @@ use rkyv::{self, rancor::Error};
 use rpc_client_nss::{rpc::delete_inode_response, RpcClientNss};
 use tokio::sync::mpsc::Sender;
 
-use crate::{object_layout::ObjectLayout, BlobId};
+use crate::{bucket_tables::bucket_table::Bucket, object_layout::ObjectLayout, BlobId};
 
 pub async fn delete_object(
-    bucket: String,
+    bucket: Arc<Bucket>,
     key: String,
     rpc_client_nss: &RpcClientNss,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> response::Result<()> {
     let resp = rpc_client_nss
-        .delete_inode(bucket, key)
+        .delete_inode(bucket.root_blob_name.clone(), key)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
 

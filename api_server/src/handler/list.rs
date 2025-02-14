@@ -15,7 +15,7 @@ use rkyv::{self, rancor::Error};
 use rpc_client_nss::{rpc::list_inodes_response, RpcClientNss};
 
 pub async fn list_raw_objects(
-    bucket: String,
+    root_blob_name: String,
     rpc_client_nss: &RpcClientNss,
     max_parts: u32,
     prefix: String,
@@ -23,7 +23,13 @@ pub async fn list_raw_objects(
     skip_mpu_parts: bool,
 ) -> response::Result<Vec<(String, ObjectLayout)>> {
     let resp = rpc_client_nss
-        .list_inodes(bucket, max_parts, prefix, start_after, skip_mpu_parts)
+        .list_inodes(
+            root_blob_name,
+            max_parts,
+            prefix,
+            start_after,
+            skip_mpu_parts,
+        )
         .await
         .unwrap();
 

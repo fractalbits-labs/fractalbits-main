@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::Request, http::HeaderValue, http::StatusCode, response, response::IntoResponse,
 };
@@ -6,6 +8,7 @@ use rpc_client_nss::RpcClientNss;
 use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 
+use crate::bucket_tables::bucket_table::Bucket;
 use crate::handler::put::put_object;
 use crate::BlobId;
 
@@ -30,7 +33,7 @@ struct ResponseHeaders {
 
 pub async fn upload_part(
     request: Request,
-    bucket: String,
+    bucket: Arc<Bucket>,
     key: String,
     part_number: u64,
     upload_id: String,

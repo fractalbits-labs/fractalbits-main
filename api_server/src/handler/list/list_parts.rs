@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use crate::bucket_tables::bucket_table::Bucket;
 use crate::handler::get::get_raw_object;
 use crate::handler::time;
 use crate::{
@@ -71,14 +74,14 @@ struct Owner {
 
 pub async fn list_parts(
     mut request: Request,
-    bucket: String,
+    bucket: Arc<Bucket>,
     key: String,
     rpc_client_nss: &RpcClientNss,
 ) -> response::Result<Response> {
     let Query(opts): Query<ListPartsOptions> = request.extract_parts().await?;
     let max_parts = opts.max_parts.unwrap_or(1000);
     let upload_id = opts.upload_id;
-    let object = get_raw_object(rpc_client_nss, bucket.clone(), key.clone()).await?;
+    let object = get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key.clone()).await?;
     if object.version_id.simple().to_string() != upload_id {
         return Err((StatusCode::BAD_REQUEST, "upload_id mismatch").into());
     }
@@ -88,7 +91,7 @@ pub async fn list_parts(
 
     let mpu_prefix = mpu::get_part_prefix(key, 0);
     let mpus = super::list_raw_objects(
-        bucket,
+        bucket.root_blob_name.clone(),
         rpc_client_nss,
         max_parts,
         mpu_prefix,

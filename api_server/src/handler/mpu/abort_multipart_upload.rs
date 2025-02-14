@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::Request,
     http::StatusCode,
@@ -10,18 +12,21 @@ use rpc_client_nss::{
     RpcClientNss,
 };
 
-use crate::object_layout::{MpuState, ObjectLayout, ObjectState};
+use crate::{
+    bucket_tables::bucket_table::Bucket,
+    object_layout::{MpuState, ObjectLayout, ObjectState},
+};
 
 pub async fn abort_multipart_upload(
     _request: Request,
-    bucket: String,
+    bucket: Arc<Bucket>,
     key: String,
     _upload_id: String,
     rpc_client_nss: &RpcClientNss,
     _rpc_client_bss: &RpcClientBss,
 ) -> response::Result<()> {
     let resp = rpc_client_nss
-        .get_inode(bucket.clone(), key.clone())
+        .get_inode(bucket.root_blob_name.clone(), key.clone())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
 
@@ -40,7 +45,7 @@ pub async fn abort_multipart_upload(
     let new_object_bytes = to_bytes_in::<_, Error>(&object, Vec::new()).unwrap();
 
     let resp = rpc_client_nss
-        .put_inode(bucket, key, new_object_bytes.into())
+        .put_inode(bucket.root_blob_name.clone(), key, new_object_bytes.into())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
     match resp.result.unwrap() {

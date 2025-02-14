@@ -1,4 +1,6 @@
-use crate::response::xml::Xml;
+use std::sync::Arc;
+
+use crate::{bucket_tables::bucket_table::Bucket, response::xml::Xml};
 use axum::{
     extract::{Query, Request},
     http::StatusCode,
@@ -77,7 +79,7 @@ struct CommonPrefixes {
 
 pub async fn list_objects_v2(
     mut request: Request,
-    bucket: String,
+    bucket: Arc<Bucket>,
     rpc_client_nss: &RpcClientNss,
 ) -> response::Result<Response> {
     let Query(opts): Query<ListObjectsV2Options> = request.extract_parts().await?;
@@ -97,7 +99,13 @@ pub async fn list_objects_v2(
     let prefix = opts.prefix.unwrap_or("/".into());
     let start_after = opts.start_after.unwrap_or_default();
     let resp = rpc_client_nss
-        .list_inodes(bucket, max_keys, prefix, start_after, true)
+        .list_inodes(
+            bucket.root_blob_name.clone(),
+            max_keys,
+            prefix,
+            start_after,
+            true,
+        )
         .await
         .unwrap();
 

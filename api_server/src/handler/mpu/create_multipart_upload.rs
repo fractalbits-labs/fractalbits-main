@@ -1,7 +1,8 @@
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::object_layout::*;
 use crate::response::xml::Xml;
+use crate::{bucket_tables::bucket_table::Bucket, object_layout::*};
 use axum::{
     extract::Request,
     http::StatusCode,
@@ -38,7 +39,7 @@ struct InitiateMultipartUploadResult {
 
 pub async fn create_multipart_upload(
     _request: Request,
-    bucket: String,
+    bucket: Arc<Bucket>,
     mut key: String,
     rpc_client_nss: &RpcClientNss,
 ) -> response::Result<Response> {
@@ -55,12 +56,16 @@ pub async fn create_multipart_upload(
     };
     let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new()).unwrap();
     let _resp = rpc_client_nss
-        .put_inode(bucket.clone(), key.clone(), object_layout_bytes.into())
+        .put_inode(
+            bucket.root_blob_name.clone(),
+            key.clone(),
+            object_layout_bytes.into(),
+        )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
     key.pop();
     let init_mpu_res = InitiateMultipartUploadResult {
-        bucket,
+        bucket: bucket.bucket_name.clone(),
         key,
         upload_id: version_id.simple().to_string(),
     };

@@ -43,6 +43,7 @@ pub async fn create_bucket(
     bucket_name: String,
     request: Request,
     rpc_client_nss: &RpcClientNss,
+    rpc_client_rss: Arc<RpcClientRss>,
 ) -> response::Result<()> {
     let body = request.into_body().collect().await.unwrap().to_bytes();
     if !body.is_empty() {
@@ -63,8 +64,7 @@ pub async fn create_bucket(
         }
     };
 
-    let client_rpc_rss = RpcClientRss::new("127.0.0.1:8888").await.unwrap();
-    let bucket_table: Table<BucketTable> = Table::new(Arc::new(client_rpc_rss));
+    let bucket_table: Table<BucketTable> = Table::new(rpc_client_rss);
     let bucket = Bucket::new(bucket_name.clone(), root_blob_name);
     bucket_table.put(&bucket).await;
     Ok(())

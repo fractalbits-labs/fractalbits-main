@@ -1,6 +1,7 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use crate::{
+    bucket_tables::bucket_table::Bucket,
     handler::{delete::delete_object, get::get_raw_object, list, mpu},
     object_layout::{MpuState, ObjectState},
     response::xml::Xml,
@@ -56,7 +57,7 @@ struct CompleteMultipartUploadResult {
 
 pub async fn complete_multipart_upload(
     request: Request,
-    bucket: String,
+    bucket: Arc<Bucket>,
     mut key: String,
     upload_id: String,
     rpc_client_nss: &RpcClientNss,
@@ -67,7 +68,8 @@ pub async fn complete_multipart_upload(
     let mut valid_part_numbers: HashSet<u32> =
         req_body.part.iter().map(|part| part.part_number).collect();
 
-    let mut object = get_raw_object(rpc_client_nss, bucket.clone(), key.clone()).await?;
+    let mut object =
+        get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key.clone()).await?;
     if object.version_id.simple().to_string() != upload_id {
         return Err((StatusCode::BAD_REQUEST, "upload_id mismatch").into());
     }
@@ -78,7 +80,7 @@ pub async fn complete_multipart_upload(
     let max_parts = 10000;
     let mpu_prefix = mpu::get_part_prefix(key.clone(), 0);
     let objs = list::list_raw_objects(
-        bucket.clone(),
+        bucket.root_blob_name.clone(),
         rpc_client_nss,
         max_parts,
         mpu_prefix.clone(),
@@ -117,7 +119,11 @@ pub async fn complete_multipart_upload(
     });
     let new_object_bytes = to_bytes_in::<_, Error>(&object, Vec::new()).unwrap();
     let resp = rpc_client_nss
-        .put_inode(bucket.clone(), key.clone(), new_object_bytes.into())
+        .put_inode(
+            bucket.root_blob_name.clone(),
+            key.clone(),
+            new_object_bytes.into(),
+        )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
     match resp.result.unwrap() {
@@ -131,7 +137,7 @@ pub async fn complete_multipart_upload(
 
     let mut resp = CompleteMultipartUploadResult::default();
     key.pop();
-    resp.bucket = bucket;
+    resp.bucket = bucket.bucket_name.clone();
     resp.key = key;
     resp.etag = upload_id;
     Ok(Xml(resp).into_response())

@@ -1,7 +1,10 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use super::block_data_stream::BlockDataStream;
-use crate::{object_layout::*, BlobId};
+use crate::{bucket_tables::bucket_table::Bucket, object_layout::*, BlobId};
 use axum::{extract::Request, http::StatusCode, response, response::IntoResponse};
 use futures::{StreamExt, TryStreamExt};
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
@@ -12,7 +15,7 @@ use uuid::Uuid;
 
 pub async fn put_object(
     request: Request,
-    bucket_name: String,
+    bucket: Arc<Bucket>,
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
@@ -51,7 +54,11 @@ pub async fn put_object(
     };
     let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new()).unwrap();
     let resp = rpc_client_nss
-        .put_inode(bucket_name, key, object_layout_bytes.into())
+        .put_inode(
+            bucket.root_blob_name.clone(),
+            key,
+            object_layout_bytes.into(),
+        )
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
 

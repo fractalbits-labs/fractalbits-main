@@ -31,6 +31,7 @@ httpdate.workspace = true
 futures.workspace = true
 pin-project-lite.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 aws-sdk-s3.workspace = true

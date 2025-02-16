@@ -1,9 +1,11 @@
 mod bucket_tables;
+pub mod config;
 mod extract;
 pub mod handler;
 mod object_layout;
 mod response;
 
+use config::Config;
 use futures::stream::{self, StreamExt};
 use rpc_client_bss::{RpcClientBss, RpcErrorBss};
 use rpc_client_nss::RpcClientNss;
@@ -16,6 +18,8 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 pub type BlobId = uuid::Uuid;
 
 pub struct AppState {
+    pub config: Config,
+
     pub rpc_clients_nss: Vec<RpcClientNss>,
 
     pub rpc_clients_bss: Vec<RpcClientBss>,
@@ -28,10 +32,10 @@ impl AppState {
     const MAX_NSS_CONNECTION: usize = 8;
     const MAX_BSS_CONNECTION: usize = 8;
 
-    pub async fn new(nss_ip: String, bss_ip: String, rss_ip: String) -> Self {
+    pub async fn new(config: Config) -> Self {
         let mut rpc_clients_nss = Vec::with_capacity(Self::MAX_NSS_CONNECTION);
         for _i in 0..AppState::MAX_NSS_CONNECTION {
-            let rpc_client_nss = RpcClientNss::new(&nss_ip)
+            let rpc_client_nss = RpcClientNss::new(&config.nss_addr)
                 .await
                 .expect("rpc client nss failure");
             rpc_clients_nss.push(rpc_client_nss);
@@ -39,26 +43,28 @@ impl AppState {
 
         let mut rpc_clients_bss = Vec::with_capacity(Self::MAX_BSS_CONNECTION);
         for _i in 0..AppState::MAX_BSS_CONNECTION {
-            let rpc_client_bss = RpcClientBss::new(&bss_ip)
+            let rpc_client_bss = RpcClientBss::new(&config.bss_addr)
                 .await
                 .expect("rpc client bss failure");
             rpc_clients_bss.push(rpc_client_bss);
         }
 
         let (tx, rx) = mpsc::channel(1024 * 1024);
+        let bss_addr = config.bss_addr.clone();
         tokio::spawn(async move {
-            if let Err(e) = Self::blob_deletion_task(&bss_ip, rx).await {
+            if let Err(e) = Self::blob_deletion_task(&bss_addr, rx).await {
                 tracing::error!("FATAL: blob deletion task error: {e}");
             }
         });
 
         let rpc_client_rss = Arc::new(
-            RpcClientRss::new(&rss_ip)
+            RpcClientRss::new(&config.rss_addr)
                 .await
                 .expect("rpc client rss failure"),
         );
 
         Self {
+            config,
             rpc_clients_nss,
             rpc_clients_bss,
             blob_deletion: tx,

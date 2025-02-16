@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use api_server::{handler::any_handler, AppState};
+use api_server::{config::Config, handler::any_handler, AppState};
 use axum::{extract::Request, routing, serve::ListenerExt};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -17,12 +17,9 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer().without_time())
         .init();
 
-    let app_state = AppState::new(
-        "127.0.0.1:9224".into(),
-        "127.0.0.1:9225".into(),
-        "127.0.0.1:8888".into(),
-    )
-    .await;
+    let config = Config::default();
+    let port = config.port;
+    let app_state = AppState::new(config).await;
 
     let app = routing::any(any_handler)
         .layer(
@@ -41,7 +38,7 @@ async fn main() {
         .with_state(Arc::new(app_state))
         .into_make_service_with_connect_info::<SocketAddr>();
 
-    let addr = "0.0.0.0:3000";
+    let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .unwrap()

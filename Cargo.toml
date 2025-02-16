@@ -45,6 +45,7 @@ futures = "0.3.31"
 pin-project-lite = "0.2.15"
 etcd-client = "0.14.0"
 serde_json = "1.0.138"
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 # Dev dependencies
 aws-sdk-s3 = "1.65.0"

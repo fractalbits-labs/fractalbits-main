@@ -28,6 +28,7 @@ use axum::{
 };
 use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::RpcClientNss;
+use rpc_client_rss::RpcClientRss;
 use tokio::sync::mpsc::Sender;
 
 pub async fn any_handler(
@@ -57,7 +58,7 @@ pub async fn any_handler(
             .into_response();
     }
 
-    let bucket_table: Table<BucketTable> = Table::new(rpc_client_rss);
+    let mut bucket_table: Table<Arc<RpcClientRss>, BucketTable> = Table::new(rpc_client_rss);
     let bucket = Arc::new(bucket_table.get(bucket_name).await);
 
     match request.method() {

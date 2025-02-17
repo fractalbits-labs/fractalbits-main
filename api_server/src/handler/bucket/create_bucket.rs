@@ -64,7 +64,7 @@ pub async fn create_bucket(
         }
     };
 
-    let bucket_table: Table<BucketTable> = Table::new(rpc_client_rss);
+    let mut bucket_table: Table<Arc<RpcClientRss>, BucketTable> = Table::new(rpc_client_rss);
     let bucket = Bucket::new(bucket_name.clone(), root_blob_name);
     bucket_table.put(&bucket).await;
     Ok(())

@@ -2802,6 +2802,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rss_admin"
+version = "0.1.0"
+dependencies = [
+ "bucket_tables",
+ "bytes",
+ "etcd-client",
+ "tokio",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"

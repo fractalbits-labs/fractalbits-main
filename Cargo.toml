@@ -8,6 +8,7 @@ members = [
     "api_server/rpc_client/rss",
     "api_server/bucket_tables",
     "root_server",
+    "root_server/admin",
     "xtask",
 ]
 resolver = "2"

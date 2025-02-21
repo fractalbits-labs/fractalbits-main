@@ -2809,7 +2809,9 @@ version = "0.1.0"
 dependencies = [
  "bucket_tables",
  "bytes",
+ "clap 4.5.27",
  "etcd-client",
+ "strum",
  "tokio",
 ]
 

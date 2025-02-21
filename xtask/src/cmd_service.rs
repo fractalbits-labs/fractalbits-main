@@ -87,9 +87,6 @@ pub fn start_nss_service(build_mode: BuildMode) -> CmdResult {
     if run_cmd!(test -f ./ebs/fbs.state).is_err() {
         run_cmd! {
             info "Could not find state log, formatting at first ...";
-            mkdir -p data;
-            mkdir -p cache;
-            mkdir -p ebs;
             ./zig-out/bin/mkfs;
             ./zig-out/bin/fbs --new_tree $TEST_BUCKET_ROOT_BLOB_NAME;
         }?;

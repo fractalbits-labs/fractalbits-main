@@ -1,8 +1,6 @@
 pub mod config;
-mod extract;
 pub mod handler;
 mod object_layout;
-mod response;
 
 use config::Config;
 use futures::stream::{self, StreamExt};

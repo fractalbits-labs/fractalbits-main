@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::response::xml::Xml;
+use crate::handler::common::response::xml::Xml;
 use axum::{
     extract::Request,
     response::{self, IntoResponse, Response},

@@ -1,9 +1,9 @@
 use std::{collections::HashSet, sync::Arc};
 
 use crate::{
+    handler::common::response::xml::Xml,
     handler::{delete::delete_object, get::get_raw_object, list, mpu},
     object_layout::{MpuState, ObjectState},
-    response::xml::Xml,
     BlobId,
 };
 use axum::{

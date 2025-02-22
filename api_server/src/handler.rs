@@ -1,4 +1,5 @@
 mod bucket;
+mod common;
 mod delete;
 mod get;
 mod head;
@@ -6,18 +7,15 @@ mod list;
 mod mpu;
 mod put;
 mod session;
-mod time;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use super::extract::{
-    api_command::ApiCommandFromQuery, bucket_name::BucketNameFromHost, key::KeyFromPath,
+use crate::handler::common::request::extract::{
+    api_command::ApiCommand, api_command::ApiCommandFromQuery, api_signature::ApiSignature,
+    bucket_name::BucketNameFromHost, key::KeyFromPath,
 };
-use super::AppState;
-use crate::extract::api_command::ApiCommand;
-use crate::extract::api_signature::ApiSignature;
-use crate::BlobId;
+use crate::{AppState, BlobId};
 use axum::http::status::StatusCode;
 use axum::http::Method;
 use axum::{

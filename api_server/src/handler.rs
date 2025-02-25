@@ -18,6 +18,7 @@ use axum::{
     extract::{ConnectInfo, Request, State},
     response::{IntoResponse, Response},
 };
+use bucket_tables::api_key_table::ApiKey;
 use bucket_tables::bucket_table::{Bucket, BucketTable};
 use bucket_tables::table::Table;
 use common::request::extract::{
@@ -77,7 +78,7 @@ pub async fn any_handler(
         .into_response();
     }
 
-    let mut bucket_table: Table<ArcRpcClientRss, BucketTable> = Table::new(rpc_client_rss);
+    let mut bucket_table: Table<ArcRpcClientRss, BucketTable> = Table::new(rpc_client_rss.clone());
     let bucket = Arc::new(bucket_table.get(bucket_name).await);
 
     match request.method() {
@@ -121,12 +122,14 @@ pub async fn any_handler(
         }
         &Method::DELETE => {
             delete_handler(
+                api_key,
                 request,
                 api_sig,
                 bucket,
                 key,
                 rpc_client_nss,
                 rpc_client_bss,
+                rpc_client_rss,
                 app.blob_deletion.clone(),
             )
             .await
@@ -284,12 +287,14 @@ async fn post_handler(
 }
 
 async fn delete_handler(
+    api_key: Option<ApiKey>,
     request: Request,
     api_sig: ApiSignature,
     bucket: Arc<Bucket>,
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
+    rpc_client_rss: ArcRpcClientRss,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Response {
     match api_sig.upload_id {
@@ -303,6 +308,11 @@ async fn delete_handler(
         )
         .await
         .into_response(),
+        None if key == "/" => {
+            bucket::delete_bucket(api_key, bucket, request, rpc_client_nss, rpc_client_rss)
+                .await
+                .into_response()
+        }
         None if key != "/" => delete::delete_object(bucket, key, rpc_client_nss, blob_deletion)
             .await
             .into_response(),

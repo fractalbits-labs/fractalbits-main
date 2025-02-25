@@ -52,7 +52,15 @@ pub async fn any_handler(
 
     let (request, _api_key) = match auth {
         None => (request, None),
-        Some(auth) => verify_request(request, &auth, rpc_client_rss.clone()).await,
+        Some(auth) => {
+            verify_request(
+                request,
+                &auth,
+                rpc_client_rss.clone(),
+                &app.config.s3_region,
+            )
+            .await
+        }
     };
 
     let rpc_client_nss = app.get_rpc_client_nss(addr);

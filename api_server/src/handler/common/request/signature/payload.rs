@@ -15,9 +15,9 @@ use bucket_tables::api_key_table::{ApiKey, ApiKeyTable};
 
 use crate::handler::common::encoding::uri_encode;
 use crate::handler::common::request::extract::authorization::Authorization;
+use crate::handler::common::time::LONG_DATETIME;
 
-use super::LONG_DATETIME;
-use super::{compute_scope, signing_hmac};
+use super::signing_hmac;
 
 const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
 
@@ -25,6 +25,7 @@ pub async fn check_standard_signature(
     auth: &Authorization,
     request: Request,
     rpc_client_rss: ArcRpcClientRss,
+    region: &str,
 ) -> (Request, Option<ApiKey>) {
     let (mut head, body) = request.into_parts();
     let query_params: Query<BTreeMap<String, String>> = head.extract().await.unwrap();
@@ -37,12 +38,13 @@ pub async fn check_standard_signature(
         &auth.signed_headers,
         &auth.content_sha256,
     );
-    let string_to_sign = string_to_sign(&auth.date, &auth.scope, &canonical_request);
+    let string_to_sign =
+        string_to_sign(&auth.date, &auth.scope.to_sign_string(), &canonical_request);
 
     tracing::trace!("canonical request:\n{}", canonical_request);
     tracing::trace!("string to sign:\n{}", string_to_sign);
 
-    let key = verify_v4(&auth, string_to_sign.as_bytes(), rpc_client_rss)
+    let key = verify_v4(&auth, string_to_sign.as_bytes(), rpc_client_rss, region)
         .await
         .unwrap();
 
@@ -109,17 +111,13 @@ pub async fn verify_v4(
     auth: &Authorization,
     payload: &[u8],
     rpc_client_rss: ArcRpcClientRss,
+    region: &str,
 ) -> Option<ApiKey> {
-    let region = "fractalbits-integ-tests";
-    let service = "s3";
-    let scope_expected = compute_scope(&auth.date, region, service);
-    assert_eq!(auth.scope, scope_expected, "scope mismatch");
-
     let mut api_key_table: Table<ArcRpcClientRss, ApiKeyTable> = Table::new(rpc_client_rss);
     let key = api_key_table.get(auth.key_id.clone()).await;
 
-    let mut hmac = signing_hmac(&auth.date, &key.secret_key, region, service)
-        .expect("Unable to build signing HMAC");
+    let mut hmac =
+        signing_hmac(&auth.date, &key.secret_key, region).expect("Unable to build signing HMAC");
     hmac.update(payload);
     let signature = hex::decode(&auth.signature).unwrap();
     if hmac.verify_slice(&signature).is_err() {

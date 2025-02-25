@@ -2,6 +2,7 @@
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 
+use crate::handler::common::time::{LONG_DATETIME, SHORT_DATE};
 use axum::{
     extract::{rejection::QueryRejection, FromRequestParts},
     http::{
@@ -12,20 +13,36 @@ use axum::{
 use chrono::{DateTime, Duration, NaiveDateTime, TimeZone, Utc};
 
 const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
+const SCOPE_ENDING: &str = "aws4_request";
 const X_AMZ_CONTENT_SHA256: HeaderName = HeaderName::from_static("x-amz-content-sha256");
 const X_AMZ_DATE: HeaderName = HeaderName::from_static("x-amz-date");
-const LONG_DATETIME: &str = "%Y%m%dT%H%M%SZ";
 
 pub struct AuthorizationFromReq(pub Option<Authorization>);
 
 #[derive(Debug)]
 pub struct Authorization {
     pub key_id: String,
-    pub scope: String,
+    pub scope: Scope,
     pub signed_headers: BTreeSet<String>,
     pub signature: String,
     pub content_sha256: String,
     pub date: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+pub struct Scope {
+    pub date: String,
+    pub region: String,
+    pub service: String,
+}
+
+impl Scope {
+    pub fn to_sign_string(&self) -> String {
+        format!(
+            "{}/{}/{}/{}",
+            self.date, self.region, self.service, SCOPE_ENDING
+        )
+    }
 }
 
 impl<S> FromRequestParts<S> for AuthorizationFromReq
@@ -87,6 +104,8 @@ where
 
         assert!(Utc::now() - date <= Duration::hours(24), "Date is too old");
         let (key_id, scope) = parse_credential(cred);
+        assert_eq!(scope.date, format!("{}", date.format(SHORT_DATE)));
+
         let auth = Authorization {
             key_id,
             scope,
@@ -105,15 +124,17 @@ fn parse_date(date: &str) -> DateTime<Utc> {
     Utc.from_utc_datetime(&date)
 }
 
-fn parse_credential(cred: &str) -> (String, String) {
-    let first_slash = cred
-        .find('/')
-        .expect("Credentials does not contain '/' in authorization field");
-    let (key_id, scope) = cred.split_at(first_slash);
-    (
-        key_id.to_string(),
-        scope.trim_start_matches('/').to_string(),
-    )
+fn parse_credential(cred: &str) -> (String, Scope) {
+    let parts: Vec<&str> = cred.split('/').collect();
+    assert_eq!(5, parts.len());
+    assert_eq!(SCOPE_ENDING, parts[4]);
+
+    let scope = Scope {
+        date: parts[1].to_string(),
+        region: parts[2].to_string(),
+        service: parts[3].to_string(),
+    };
+    (parts[0].to_string(), scope)
 }
 
 // TODO: unit test with format like

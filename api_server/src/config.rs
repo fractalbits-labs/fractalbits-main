@@ -14,6 +14,12 @@ pub struct Config {
 
     #[serde(default = "default_port")]
     pub port: u16,
+
+    #[serde(default = "default_s3_region")]
+    pub s3_region: String,
+
+    #[serde(default)]
+    pub root_domain: Option<String>,
 }
 
 fn default_nss_addr() -> String {
@@ -30,6 +36,10 @@ fn default_rss_addr() -> String {
 
 fn default_port() -> u16 {
     3000
+}
+
+fn default_s3_region() -> String {
+    "fractalbits".into()
 }
 
 impl Default for Config {

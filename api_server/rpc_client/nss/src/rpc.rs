@@ -156,4 +156,29 @@ impl RpcClient {
             PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
         Ok(resp)
     }
+
+    pub async fn delete_root_inode(
+        &self,
+        root_blob_name: String,
+    ) -> Result<DeleteRootInodeResponse, RpcError> {
+        let body = DeleteRootInodeRequest { root_blob_name };
+
+        let mut header = MessageHeader::default();
+        header.id = self.gen_request_id();
+        header.command = Command::DeleteRootInode;
+        header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+
+        let mut request_bytes = BytesMut::with_capacity(header.size as usize);
+        header.encode(&mut request_bytes);
+        body.encode(&mut request_bytes)
+            .map_err(RpcError::EncodeError)?;
+
+        let resp_bytes = self
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .await?
+            .body;
+        let resp: DeleteRootInodeResponse =
+            PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
+        Ok(resp)
+    }
 }

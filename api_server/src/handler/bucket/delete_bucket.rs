@@ -26,7 +26,7 @@ pub async fn delete_bucket(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
     match resp.result.unwrap() {
         delete_root_inode_response::Result::Ok(res) => res,
-        delete_root_inode_response::Result::ErrNonEmpty(e) => {
+        delete_root_inode_response::Result::ErrNotEmpty(e) => {
             return Err((StatusCode::BAD_REQUEST, e).into_response().into())
         }
         delete_root_inode_response::Result::ErrOthers(e) => {

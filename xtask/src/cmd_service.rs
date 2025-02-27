@@ -45,6 +45,12 @@ pub fn stop_services(service: ServiceName) -> CmdResult {
             cmd_die!("Failed to stop $service: service is still running");
         }
     }
+
+    // Stop localstack service at last
+    if run_cmd!(localstack status services &>/dev/null).is_ok() {
+        run_cmd!(localstack stop)?;
+    }
+
     Ok(())
 }
 
@@ -110,6 +116,11 @@ pub fn start_rss_service(build_mode: BuildMode) -> CmdResult {
         start_etcd_service()?;
     }
 
+    // Start localstack to simulate local s3 service
+    if run_cmd!(localstack status services &>/dev/null).is_err() {
+        start_localstack_service()?;
+    }
+
     // Initialize api key for testing
     run_cmd!(./target/debug/rss_admin api-key init-test)?;
 
@@ -156,6 +167,18 @@ WorkingDirectory={pwd}/ebs
         info "Waiting ${etcd_wait_secs}s for etcd up";
         sleep $etcd_wait_secs;
         systemctl --user is-active --quiet etcd.service;
+    }?;
+
+    Ok(())
+}
+
+fn start_localstack_service() -> CmdResult {
+    run_cmd! {
+        info "Starting localstack service ...";
+        localstack start --detached;
+        sleep 5;
+        info "Creating s3 bucket (\"mybucket\") in localstack ...";
+        awslocal s3api create-bucket --bucket mybucket;
     }?;
 
     Ok(())

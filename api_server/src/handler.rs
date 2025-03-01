@@ -26,6 +26,8 @@ use common::request::extract::{
     authorization::AuthorizationFromReq, bucket_name::BucketNameFromHost, key::KeyFromPath,
 };
 use common::request::signature::verify_request;
+use common::response::xml::Xml;
+use common::s3_error::{self, S3Error};
 use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::RpcClientNss;
 use rpc_client_rss::ArcRpcClientRss;
@@ -34,18 +36,19 @@ use tokio::sync::mpsc::Sender;
 pub async fn any_handler(
     State(app): State<Arc<AppState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    AuthorizationFromReq(auth): AuthorizationFromReq,
-    BucketNameFromHost(bucket_name_from_host): BucketNameFromHost,
+    bucket_name_from_host: Result<BucketNameFromHost, S3Error>,
     ApiCommandFromQuery(api_cmd): ApiCommandFromQuery,
     KeyFromPath(key_from_path): KeyFromPath,
     api_sig: ApiSignature,
+    AuthorizationFromReq(auth): AuthorizationFromReq,
     request: Request,
 ) -> Response {
     let (bucket_name, key) = match bucket_name_from_host {
+        Err(e) => return Xml(s3_error::Error::from(e)).into_response(),
         // Virtual-hosted-style request
-        Some(bucket_name) => (bucket_name, key_from_path),
+        Ok(BucketNameFromHost(Some(bucket_name))) => (bucket_name, key_from_path),
         // Path-style request
-        None => get_bucket_and_key_from_path(key_from_path),
+        Ok(BucketNameFromHost(None)) => get_bucket_and_key_from_path(key_from_path),
     };
     tracing::debug!(%bucket_name, %key);
 

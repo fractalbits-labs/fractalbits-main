@@ -1,10 +1,44 @@
 #![allow(dead_code)]
 
-use axum::http::StatusCode;
+use std::convert::From;
+
+use axum::{
+    http::{uri::InvalidUri, StatusCode},
+    response::{IntoResponse, Response},
+};
+use axum_extra::extract::rejection::HostRejection;
+use serde::Serialize;
 use strum::AsRefStr;
 use thiserror::Error;
 
 // From https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html (2025/02/28)
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct Error {
+    code: String,
+    message: String,
+    resource: String,
+}
+
+impl Error {
+    pub fn from(e: S3Error) -> Self {
+        Self {
+            code: e.as_ref().to_string(),
+            message: e.to_string(),
+            resource: "".into(),
+        }
+    }
+
+    pub fn with_resource(self, resource: &str) -> Self {
+        Self {
+            code: self.code,
+            message: self.message,
+            resource: resource.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Error, AsRefStr)]
 pub enum S3Error {
     #[error("The bucket does not allow ACLs.")]
@@ -685,5 +719,25 @@ impl S3Error {
             S3Error::InvalidTag => StatusCode::BAD_REQUEST,
             S3Error::MalformedPolicy => StatusCode::BAD_REQUEST,
         }
+    }
+}
+
+// Note we don't use this response directly, but to implement the trait to make extractors to be
+// able to return S3Error
+impl IntoResponse for S3Error {
+    fn into_response(self) -> Response {
+        (self.http_status_code(), self.to_string()).into_response()
+    }
+}
+
+impl From<HostRejection> for S3Error {
+    fn from(_value: HostRejection) -> Self {
+        Self::InvalidHostHeader
+    }
+}
+
+impl From<InvalidUri> for S3Error {
+    fn from(_value: InvalidUri) -> Self {
+        Self::InvalidURI
     }
 }

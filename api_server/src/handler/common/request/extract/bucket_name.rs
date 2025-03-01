@@ -1,11 +1,11 @@
 use axum::{
     extract::{FromRef, FromRequestParts},
-    http::{request::Parts, uri::Authority, StatusCode},
+    http::{request::Parts, uri::Authority},
     RequestPartsExt,
 };
 use axum_extra::extract::Host;
 
-use crate::config::ArcConfig;
+use crate::{config::ArcConfig, handler::common::s3_error::S3Error};
 
 pub struct BucketNameFromHost(pub Option<String>);
 
@@ -14,15 +14,12 @@ where
     ArcConfig: FromRef<S>,
     S: Send + Sync,
 {
-    type Rejection = (StatusCode, &'static str);
+    type Rejection = S3Error;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let config = ArcConfig::from_ref(state);
-        let Host(host) = parts
-            .extract::<Host>()
-            .await
-            .map_err(|_| (StatusCode::NOT_FOUND, "host information not found"))?;
-        let authority: Authority = host.parse::<Authority>().unwrap();
+        let Host(host) = parts.extract::<Host>().await?;
+        let authority: Authority = host.parse::<Authority>()?;
         let bucket_name = authority.host().strip_suffix(&config.root_domain);
         Ok(Self(bucket_name.map(|s| s.to_owned())))
     }

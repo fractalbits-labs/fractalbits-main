@@ -7,6 +7,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use axum_extra::extract::rejection::HostRejection;
+use rpc_client_bss::RpcErrorBss;
+use rpc_client_nss::RpcErrorNss;
+use rpc_client_rss::RpcErrorRss;
 use serde::Serialize;
 use strum::AsRefStr;
 use thiserror::Error;
@@ -752,5 +755,26 @@ impl From<SignatureError> for S3Error {
     fn from(value: SignatureError) -> Self {
         tracing::error!("SignatureError: {value}");
         Self::InvalidSignature
+    }
+}
+
+impl From<RpcErrorNss> for S3Error {
+    fn from(value: RpcErrorNss) -> Self {
+        tracing::error!("RpcErrorNss: {value}");
+        Self::InternalError
+    }
+}
+
+impl From<RpcErrorBss> for S3Error {
+    fn from(value: RpcErrorBss) -> Self {
+        tracing::error!("RpcErrorBss: {value}");
+        Self::InternalError
+    }
+}
+
+impl From<RpcErrorRss> for S3Error {
+    fn from(value: RpcErrorRss) -> Self {
+        tracing::error!("RpcErrorRss: {value}");
+        Self::InternalError
     }
 }

@@ -1,10 +1,6 @@
 use std::sync::Arc;
 
-use axum::{
-    extract::Request,
-    http::StatusCode,
-    response::{self, IntoResponse},
-};
+use axum::extract::Request;
 use bucket_tables::{
     api_key_table::{ApiKey, ApiKeyTable},
     bucket_table::{Bucket, BucketTable},
@@ -13,26 +9,26 @@ use bucket_tables::{
 use rpc_client_nss::{rpc::delete_root_inode_response, RpcClientNss};
 use rpc_client_rss::ArcRpcClientRss;
 
+use crate::handler::common::s3_error::S3Error;
+
 pub async fn delete_bucket(
     api_key: Option<ApiKey>,
     bucket: Arc<Bucket>,
     _request: Request,
     rpc_client_nss: &RpcClientNss,
     rpc_client_rss: ArcRpcClientRss,
-) -> response::Result<()> {
+) -> Result<(), S3Error> {
     let resp = rpc_client_nss
         .delete_root_inode(bucket.root_blob_name.clone())
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
+        .await?;
     match resp.result.unwrap() {
         delete_root_inode_response::Result::Ok(res) => res,
-        delete_root_inode_response::Result::ErrNotEmpty(e) => {
-            return Err((StatusCode::BAD_REQUEST, e).into_response().into())
+        delete_root_inode_response::Result::ErrNotEmpty(_e) => {
+            return Err(S3Error::BucketNotEmpty);
         }
         delete_root_inode_response::Result::ErrOthers(e) => {
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, e)
-                .into_response()
-                .into())
+            tracing::error!(e);
+            return Err(S3Error::InternalError);
         }
     };
 

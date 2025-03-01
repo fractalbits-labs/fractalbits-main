@@ -1,8 +1,4 @@
-use axum::{
-    extract::Request,
-    http::StatusCode,
-    response::{self, IntoResponse},
-};
+use axum::extract::Request;
 use bucket_tables::{
     api_key_table::{ApiKey, ApiKeyTable},
     bucket_table::{Bucket, BucketTable},
@@ -14,6 +10,8 @@ use http_body_util::BodyExt;
 use rpc_client_nss::{rpc::create_root_inode_response, RpcClientNss};
 use rpc_client_rss::ArcRpcClientRss;
 use serde::{Deserialize, Serialize};
+
+use crate::handler::common::s3_error::S3Error;
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
@@ -45,24 +43,12 @@ pub async fn create_bucket(
     request: Request,
     rpc_client_nss: &RpcClientNss,
     rpc_client_rss: ArcRpcClientRss,
-) -> response::Result<()> {
+) -> Result<(), S3Error> {
     match api_key {
-        None => {
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                format!("Missing valid ApiKey to create bucket"),
-            )
-                .into_response()
-                .into());
-        }
+        None => return Err(S3Error::InvalidAccessKeyId),
         Some(ref api_key) => {
             if !api_key.allow_create_bucket {
-                return Err((
-                    StatusCode::UNAUTHORIZED,
-                    format!("ApiKey {} is not allow to create bucket", api_key.key_id),
-                )
-                    .into_response()
-                    .into());
+                return Err(S3Error::AccessDenied);
             }
         }
     }
@@ -75,14 +61,12 @@ pub async fn create_bucket(
 
     let resp = rpc_client_nss
         .create_root_inode(bucket_name.clone())
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())?;
+        .await?;
     let root_blob_name = match resp.result.unwrap() {
         create_root_inode_response::Result::Ok(res) => res,
         create_root_inode_response::Result::Err(e) => {
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, e)
-                .into_response()
-                .into())
+            tracing::error!(e);
+            return Err(S3Error::InternalError);
         }
     };
 

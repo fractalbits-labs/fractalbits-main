@@ -15,7 +15,7 @@ use serde::Serialize;
 use strum::AsRefStr;
 use thiserror::Error;
 
-use super::request::signature::SignatureError;
+use super::{request::signature::SignatureError, response::xml::Xml};
 
 // From https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html (2025/02/28)
 
@@ -730,11 +730,21 @@ impl S3Error {
     }
 }
 
-// Note we don't use this response directly, but to implement the trait to make extractors to be
-// able to return S3Error
+impl S3Error {
+    pub fn into_response_with_resource(self, resource: &str) -> Response {
+        let status_code = self.http_status_code();
+        let mut response = Xml(Error::from(self).with_resource(resource)).into_response();
+        *response.status_mut() = status_code;
+        response
+    }
+}
+
 impl IntoResponse for S3Error {
     fn into_response(self) -> Response {
-        (self.http_status_code(), self.to_string()).into_response()
+        let status_code = self.http_status_code();
+        let mut response = Xml(Error::from(self)).into_response();
+        *response.status_mut() = status_code;
+        response
     }
 }
 

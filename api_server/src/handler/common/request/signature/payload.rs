@@ -113,7 +113,7 @@ pub async fn verify_v4(
     region: &str,
 ) -> Result<Option<ApiKey>, SignatureError> {
     let mut api_key_table: Table<ArcRpcClientRss, ApiKeyTable> = Table::new(rpc_client_rss);
-    let key = api_key_table.get(auth.key_id.clone()).await;
+    let key = api_key_table.get(auth.key_id.clone()).await?;
 
     let mut hmac = signing_hmac(&auth.date, &key.secret_key, region)
         .map_err(|_| SignatureError::Invalid("Unable to build signing HMAC".into()))?;

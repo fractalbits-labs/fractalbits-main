@@ -80,13 +80,13 @@ pub async fn create_bucket(
     bucket
         .authorized_keys
         .insert(api_key.key_id.clone(), bucket_key_perm);
-    bucket_table.put(&bucket).await;
+    bucket_table.put(&bucket).await?;
 
     let mut api_key_table: Table<ArcRpcClientRss, ApiKeyTable> = Table::new(rpc_client_rss);
     api_key
         .authorized_buckets
         .insert(bucket_name, bucket_key_perm);
-    api_key_table.put(&api_key).await;
+    api_key_table.put(&api_key).await?;
 
     Ok(().into_response())
 }

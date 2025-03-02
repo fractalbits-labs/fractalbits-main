@@ -34,8 +34,10 @@ pub enum RpcError {
     DecodeError(prost::DecodeError),
     #[error("internal request sending error: {0}")]
     InternalRequestError(String),
-    #[error("internal response sending error: {0}")]
+    #[error("internal response error: {0}")]
     InternalResponseError(String),
+    #[error("Entry not found")]
+    NotFound,
 }
 
 pub enum Message {
@@ -151,15 +153,16 @@ pub struct ArcRpcClient(pub Arc<RpcClient>);
 
 #[cfg(feature = "rss")]
 impl KvClient for ArcRpcClient {
-    async fn put(&mut self, key: String, value: Bytes) -> Bytes {
-        self.0.put(key.into(), value).await.unwrap()
+    type Error = RpcError;
+    async fn put(&mut self, key: String, value: Bytes) -> Result<Bytes, Self::Error> {
+        self.0.put(key.into(), value).await
     }
 
-    async fn get(&mut self, key: String) -> Bytes {
-        self.0.get(key.into()).await.unwrap()
+    async fn get(&mut self, key: String) -> Result<Bytes, Self::Error> {
+        self.0.get(key.into()).await
     }
 
-    async fn delete(&mut self, key: String) -> Bytes {
-        self.0.delete(key.into()).await.unwrap()
+    async fn delete(&mut self, key: String) -> Result<Bytes, Self::Error> {
+        self.0.delete(key.into()).await
     }
 }

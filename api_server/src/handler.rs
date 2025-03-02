@@ -25,12 +25,11 @@ use common::request::extract::{
     api_command::ApiCommand, api_command::ApiCommandFromQuery, api_signature::ApiSignature,
     authorization::AuthorizationFromReq, bucket_name::BucketNameFromHost, key::KeyFromPath,
 };
-use common::request::signature::verify_request;
-use common::response::xml::Xml;
-use common::s3_error::{self, S3Error};
+use common::request::signature::{verify_request, SignatureError};
+use common::s3_error::S3Error;
 use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::RpcClientNss;
-use rpc_client_rss::ArcRpcClientRss;
+use rpc_client_rss::{ArcRpcClientRss, RpcErrorRss};
 use tokio::sync::mpsc::Sender;
 
 pub async fn any_handler(
@@ -44,7 +43,7 @@ pub async fn any_handler(
     request: Request,
 ) -> Response {
     let (bucket_name, key) = match bucket_name_from_host {
-        Err(e) => return Xml(s3_error::Error::from(e)).into_response(),
+        Err(e) => return e.into_response(),
         // Virtual-hosted-style request
         Ok(BucketNameFromHost(Some(bucket_name))) => (bucket_name, key_from_path),
         // Path-style request
@@ -52,9 +51,9 @@ pub async fn any_handler(
     };
     tracing::debug!(%bucket_name, %key);
 
-    let resource = format!("{bucket_name}{key}");
+    let resource = format!("/{bucket_name}{key}");
     match any_handler_inner(app, addr, bucket_name, key, api_cmd, api_sig, auth, request).await {
-        Err(e) => Xml(s3_error::Error::from(e).with_resource(&resource)).into_response(),
+        Err(e) => return e.into_response_with_resource(&resource),
         Ok(response) => response,
     }
 }
@@ -96,13 +95,20 @@ async fn any_handler_inner(
     let (request, api_key) = match auth {
         None => (request, None),
         Some(auth) => {
-            verify_request(
+            match verify_request(
                 request,
                 &auth,
                 rpc_client_rss.clone(),
                 &app.config.s3_region,
             )
-            .await?
+            .await
+            {
+                Ok(res) => res,
+                Err(SignatureError::RpcErrorRss(RpcErrorRss::NotFound)) => {
+                    return Err(S3Error::InvalidAccessKeyId)
+                }
+                Err(e) => return Err(e.into()),
+            }
         }
     };
 
@@ -120,7 +126,11 @@ async fn any_handler_inner(
     }
 
     let mut bucket_table: Table<ArcRpcClientRss, BucketTable> = Table::new(rpc_client_rss.clone());
-    let bucket = Arc::new(bucket_table.get(bucket_name).await);
+    let bucket = match bucket_table.get(bucket_name).await {
+        Ok(bucket) => Arc::new(bucket),
+        Err(RpcErrorRss::NotFound) => return Err(S3Error::NoSuchBucket),
+        Err(e) => return Err(e.into()),
+    };
 
     match request.method() {
         &Method::HEAD => head_handler(request, bucket, key, rpc_client_nss).await,

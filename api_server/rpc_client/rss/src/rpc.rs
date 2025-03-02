@@ -28,7 +28,7 @@ impl RpcClient {
         let resp: PutResponse = PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
         match resp.result.unwrap() {
             put_response::Result::Ok(resp) => Ok(resp),
-            put_response::Result::Err(_resp) => todo!(), // FIXME: convert to RpcError
+            put_response::Result::Err(resp) => Err(RpcError::InternalResponseError(resp)),
         }
     }
 
@@ -52,7 +52,8 @@ impl RpcClient {
         let resp: GetResponse = PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
         match resp.result.unwrap() {
             get_response::Result::Ok(resp) => Ok(resp),
-            get_response::Result::Err(_resp) => todo!(), // FIXME: convert to RpcError
+            get_response::Result::ErrNotFound(_resp) => Err(RpcError::NotFound),
+            get_response::Result::ErrOthers(resp) => Err(RpcError::InternalResponseError(resp)),
         }
     }
 
@@ -76,7 +77,7 @@ impl RpcClient {
         let resp: DeleteResponse = PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
         match resp.result.unwrap() {
             delete_response::Result::Ok(resp) => Ok(resp),
-            delete_response::Result::Err(_resp) => todo!(), // FIXME: convert to RpcError
+            delete_response::Result::Err(resp) => Err(RpcError::InternalResponseError(resp)),
         }
     }
 }

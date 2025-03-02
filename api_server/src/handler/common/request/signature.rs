@@ -3,16 +3,12 @@ use std::str::Utf8Error;
 use crate::handler::common::time::SHORT_DATE;
 
 use super::extract::authorization::Authorization;
-use axum::{
-    extract::{rejection::QueryRejection, Request},
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::extract::{rejection::QueryRejection, Request};
 use bucket_tables::api_key_table::ApiKey;
 use chrono::{DateTime, Utc};
 use hex::FromHexError;
 use hmac::{Hmac, Mac};
-use rpc_client_rss::ArcRpcClientRss;
+use rpc_client_rss::{ArcRpcClientRss, RpcErrorRss};
 use sha2::Sha256;
 use thiserror::Error;
 
@@ -36,30 +32,9 @@ pub enum SignatureError {
 
     #[error("wrong signature: {0}")]
     Invalid(String),
-}
 
-impl IntoResponse for SignatureError {
-    fn into_response(self) -> axum::response::Response {
-        match self {
-            SignatureError::QueryRejection(e) => {
-                (StatusCode::BAD_REQUEST, e.to_string()).into_response()
-            }
-            SignatureError::Utf8Error(e) => {
-                (StatusCode::BAD_REQUEST, e.to_string()).into_response()
-            }
-            SignatureError::FromHexError(e) => {
-                (StatusCode::BAD_REQUEST, e.to_string()).into_response()
-            }
-            SignatureError::DigestInvalidLength(e) => {
-                (StatusCode::BAD_REQUEST, e.to_string()).into_response()
-            }
-            SignatureError::Invalid(s) => (
-                StatusCode::BAD_REQUEST,
-                format!("Invalid authorization signature: {s}"),
-            )
-                .into_response(),
-        }
-    }
+    #[error(transparent)]
+    RpcErrorRss(#[from] RpcErrorRss),
 }
 
 pub async fn verify_request(

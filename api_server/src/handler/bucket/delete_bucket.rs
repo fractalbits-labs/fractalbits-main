@@ -36,11 +36,11 @@ pub async fn delete_bucket(
     };
 
     let mut bucket_table: Table<ArcRpcClientRss, BucketTable> = Table::new(rpc_client_rss.clone());
-    bucket_table.delete(&bucket).await;
+    bucket_table.delete(&bucket).await?;
 
     let mut api_key = api_key.unwrap();
     let mut api_key_table: Table<ArcRpcClientRss, ApiKeyTable> = Table::new(rpc_client_rss);
     api_key.authorized_buckets.remove(&bucket.bucket_name);
-    api_key_table.put(&api_key).await;
+    api_key_table.put(&api_key).await?;
     Ok(().into_response())
 }

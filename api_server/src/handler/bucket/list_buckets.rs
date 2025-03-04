@@ -41,9 +41,10 @@ struct Buckets {
 
 impl From<Vec<Bucket>> for ListAllMyBucketsResult {
     fn from(buckets: Vec<Bucket>) -> Self {
-        let mut res = Self::default();
-        res.buckets = Buckets { bucket: buckets };
-        res
+        Self {
+            buckets: Buckets { bucket: buckets },
+            ..Default::default()
+        }
     }
 }
 

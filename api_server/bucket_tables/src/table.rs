@@ -60,7 +60,7 @@ impl<C: KvClient, F: TableSchema> Table<C, F> {
         let kvs = self.kv_client.list(prefix).await?;
         Ok(kvs
             .iter()
-            .map(|x| serde_json::from_slice(&x).unwrap())
+            .map(|x| serde_json::from_slice(x).unwrap())
             .collect())
     }
 

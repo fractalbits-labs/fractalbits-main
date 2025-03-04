@@ -189,6 +189,16 @@ async fn test_multipart_upload() {
             assert_bytes_eq!(o.body, data);
         }
     }
+
+    ctx.client
+        .delete_object()
+        .bucket(bucket_name)
+        .key('a')
+        .send()
+        .await
+        .unwrap();
+
+    ctx.delete_bucket(bucket_name).await;
 }
 
 // #[tokio::test]

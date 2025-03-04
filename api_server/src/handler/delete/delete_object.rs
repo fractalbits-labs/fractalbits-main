@@ -5,7 +5,11 @@ use rkyv::{self, rancor::Error};
 use rpc_client_nss::{rpc::delete_inode_response, RpcClientNss};
 use tokio::sync::mpsc::Sender;
 
-use crate::{handler::common::s3_error::S3Error, object_layout::ObjectLayout, BlobId};
+use crate::{
+    handler::{common::s3_error::S3Error, list::list_raw_objects, mpu},
+    object_layout::{MpuState, ObjectLayout, ObjectState},
+    BlobId,
+};
 use bucket_tables::bucket_table::Bucket;
 
 pub async fn delete_object(
@@ -15,7 +19,7 @@ pub async fn delete_object(
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
     let resp = rpc_client_nss
-        .delete_inode(bucket.root_blob_name.clone(), key)
+        .delete_inode(bucket.root_blob_name.clone(), key.clone())
         .await?;
 
     let object_bytes = match resp.result.unwrap() {
@@ -27,7 +31,46 @@ pub async fn delete_object(
     };
 
     let object = rkyv::from_bytes::<ObjectLayout, Error>(&object_bytes)?;
-    // FIXME: mpu object
+    match object.state {
+        ObjectState::Normal(..) => {
+            delete_blob(&object, blob_deletion).await?;
+        }
+        ObjectState::Mpu(mpu_state) => match mpu_state {
+            MpuState::Uploading => {
+                tracing::warn!("invalid mpu state: Uploading");
+                return Err(S3Error::InvalidObjectState);
+            }
+            MpuState::Aborted => {
+                tracing::warn!("invalid mpu state: Aborted");
+                return Err(S3Error::InvalidObjectState);
+            }
+            MpuState::Completed { .. } => {
+                let mpu_prefix = mpu::get_part_prefix(key, 0);
+                let mpus = list_raw_objects(
+                    bucket.root_blob_name.clone(),
+                    rpc_client_nss,
+                    10000,
+                    mpu_prefix,
+                    "".into(),
+                    false,
+                )
+                .await?;
+                for (mpu_key, mpu_obj) in mpus.iter() {
+                    rpc_client_nss
+                        .delete_inode(bucket.root_blob_name.clone(), mpu_key.clone())
+                        .await?;
+                    delete_blob(mpu_obj, blob_deletion.clone()).await?;
+                }
+            }
+        },
+    }
+    Ok(().into_response())
+}
+
+async fn delete_blob(
+    object: &ObjectLayout,
+    blob_deletion: Sender<(BlobId, usize)>,
+) -> Result<(), S3Error> {
     let blob_id = object.blob_id()?;
     let num_blocks = object.num_blocks()?;
     if let Err(e) = blob_deletion.send((blob_id, num_blocks)).await {
@@ -35,5 +78,5 @@ pub async fn delete_object(
             "Failed to send blob {blob_id} num_blocks={num_blocks} for background deletion: {e}"
         );
     }
-    Ok(().into_response())
+    Ok(())
 }

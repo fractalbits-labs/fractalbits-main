@@ -2,9 +2,10 @@ mod common;
 use aws_sdk_s3::primitives::ByteStream;
 
 #[tokio::test]
-async fn test_basic_obj_apis() {
+async fn test_basic_object_apis() {
     let ctx = common::context();
-    let bucket_name = "my_bucket";
+    let bucket_name = "my_bucket1";
+
     ctx.create_bucket(bucket_name).await;
 
     let key = "hello";
@@ -31,18 +32,24 @@ async fn test_basic_obj_apis() {
 
     assert_bytes_eq!(res.body, value);
 
+    ctx.client
+        .delete_object()
+        .bucket(bucket_name)
+        .key(key)
+        .send()
+        .await
+        .unwrap();
+
     ctx.delete_bucket(bucket_name).await;
 }
 
 #[tokio::test]
 async fn test_basic_bucket_apis() {
     let ctx = common::context();
-    let bucket_name = "my_bucket";
-
+    let bucket_name = "my_bucket2";
     ctx.create_bucket(bucket_name).await;
     let buckets = ctx.list_buckets().await.buckets.unwrap();
-    dbg!(&buckets);
-    assert_eq!(1, buckets.len());
-    assert_eq!(Some(bucket_name.into()), buckets[0].name);
+    // Note we may have concurrent tests running, so just do basic testing here
+    assert!(buckets.len() >= 1);
     ctx.delete_bucket(bucket_name).await;
 }

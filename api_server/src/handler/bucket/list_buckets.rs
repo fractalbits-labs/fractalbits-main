@@ -55,10 +55,10 @@ struct Bucket {
     name: String,
 }
 
-impl From<&bucket_table::Bucket> for Bucket {
-    fn from(bucket: &bucket_table::Bucket) -> Self {
+impl Bucket {
+    fn from_table_with_region(bucket: &bucket_table::Bucket, region: &str) -> Self {
         Self {
-            bucket_region: "fractalbits".into(),
+            bucket_region: region.into(),
             creation_date: format_timestamp(bucket.creation_date),
             name: bucket.bucket_name.clone(),
         }
@@ -76,6 +76,7 @@ struct Owner {
 pub async fn list_buckets(
     mut request: Request,
     rpc_client_rss: ArcRpcClientRss,
+    region: &str,
 ) -> Result<Response, S3Error> {
     let Query(_opts): Query<ListBucketsOptions> = request.extract_parts().await?;
     let mut bucket_table: Table<ArcRpcClientRss, BucketTable> = Table::new(rpc_client_rss.clone());
@@ -83,7 +84,7 @@ pub async fn list_buckets(
         .list()
         .await?
         .iter()
-        .map(|b| b.into())
+        .map(|bucket| Bucket::from_table_with_region(bucket, region))
         .collect();
     Ok(Xml(ListAllMyBucketsResult::from(buckets)).into_response())
 }

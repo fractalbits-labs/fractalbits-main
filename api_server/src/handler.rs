@@ -17,9 +17,7 @@ use axum::{
     extract::{ConnectInfo, Request, State},
     response::{IntoResponse, Response},
 };
-use bucket_tables::api_key_table::ApiKey;
-use bucket_tables::bucket_table::{Bucket, BucketTable};
-use bucket_tables::table::{Table, Versioned};
+use bucket_tables::bucket_table::Bucket;
 use common::request::extract::authorization::Authorization;
 use common::request::extract::{
     api_command::ApiCommand, api_command::ApiCommandFromQuery, api_signature::ApiSignature,
@@ -29,7 +27,7 @@ use common::request::signature::{verify_request, SignatureError};
 use common::s3_error::S3Error;
 use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::RpcClientNss;
-use rpc_client_rss::{ArcRpcClientRss, RpcErrorRss};
+use rpc_client_rss::RpcErrorRss;
 use tokio::sync::mpsc::Sender;
 
 #[allow(clippy::too_many_arguments)]
@@ -114,34 +112,51 @@ async fn any_handler_inner(
         }
     };
 
-    if bucket_name.is_empty() && key == "/" && request.method() == Method::GET {
-        return bucket::list_buckets(request, rpc_client_rss, &app.config.s3_region).await;
-    }
-
+    // Handle bucket related apis at first
     let rpc_client_nss = app.get_rpc_client_nss(addr);
-    let rpc_client_bss = app.get_rpc_client_bss(addr);
-    if key == "/" && request.method() == Method::PUT {
-        return bucket::create_bucket(
-            api_key,
-            bucket_name,
-            request,
-            rpc_client_nss,
-            rpc_client_rss,
-            &app.config.s3_region,
-        )
-        .await;
+    if key == "/" {
+        match *request.method() {
+            Method::HEAD => {
+                return bucket::head_bucket(api_key, bucket_name, rpc_client_rss).await;
+            }
+            Method::PUT => {
+                return bucket::create_bucket(
+                    api_key,
+                    bucket_name,
+                    request,
+                    rpc_client_nss,
+                    rpc_client_rss,
+                    &app.config.s3_region,
+                )
+                .await;
+            }
+            Method::DELETE => {
+                let bucket = bucket::resolve_bucket(bucket_name, rpc_client_rss.clone()).await?;
+                return bucket::delete_bucket(
+                    api_key,
+                    &bucket,
+                    request,
+                    rpc_client_nss,
+                    rpc_client_rss,
+                )
+                .await;
+            }
+            Method::GET => {
+                // Or it will be list_objects* api, which will be handled in later code
+                if bucket_name.is_empty() {
+                    return bucket::list_buckets(request, rpc_client_rss, &app.config.s3_region)
+                        .await;
+                }
+            }
+            _ => return Err(S3Error::NotImplemented),
+        }
     }
 
-    let mut bucket_table: Table<ArcRpcClientRss, BucketTable> = Table::new(rpc_client_rss.clone());
-    let bucket = match bucket_table.get(bucket_name).await {
-        Ok(bucket) => bucket.data,
-        Err(RpcErrorRss::NotFound) => return Err(S3Error::NoSuchBucket),
-        Err(e) => return Err(e.into()),
-    };
-
-    match request.method() {
-        &Method::HEAD => head_handler(request, &bucket, key, rpc_client_nss).await,
-        &Method::GET => {
+    let bucket = bucket::resolve_bucket(bucket_name, rpc_client_rss).await?;
+    let rpc_client_bss = app.get_rpc_client_bss(addr);
+    match *request.method() {
+        Method::HEAD => head_handler(request, &bucket, key, rpc_client_nss).await,
+        Method::GET => {
             get_handler(
                 request,
                 api_cmd,
@@ -153,7 +168,7 @@ async fn any_handler_inner(
             )
             .await
         }
-        &Method::PUT => {
+        Method::PUT => {
             put_handler(
                 request,
                 api_cmd,
@@ -166,7 +181,7 @@ async fn any_handler_inner(
             )
             .await
         }
-        &Method::POST => {
+        Method::POST => {
             post_handler(
                 request,
                 api_cmd,
@@ -178,21 +193,19 @@ async fn any_handler_inner(
             )
             .await
         }
-        &Method::DELETE => {
+        Method::DELETE => {
             delete_handler(
-                api_key,
                 request,
                 api_sig,
                 &bucket,
                 key,
                 rpc_client_nss,
                 rpc_client_bss,
-                rpc_client_rss,
                 app.blob_deletion.clone(),
             )
             .await
         }
-        _method => Err(S3Error::MethodNotAllowed),
+        _ => Err(S3Error::MethodNotAllowed),
     }
 }
 
@@ -315,14 +328,12 @@ async fn post_handler(
 
 #[allow(clippy::too_many_arguments)]
 async fn delete_handler(
-    api_key: Option<Versioned<ApiKey>>,
     request: Request,
     api_sig: ApiSignature,
     bucket: &Bucket,
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
-    rpc_client_rss: ArcRpcClientRss,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
     match api_sig.upload_id {
@@ -336,9 +347,6 @@ async fn delete_handler(
                 rpc_client_bss,
             )
             .await
-        }
-        None if key == "/" => {
-            bucket::delete_bucket(api_key, bucket, request, rpc_client_nss, rpc_client_rss).await
         }
         None if key != "/" => {
             delete::delete_object(bucket, key, rpc_client_nss, blob_deletion).await

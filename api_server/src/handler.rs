@@ -243,10 +243,13 @@ async fn get_handler(
             tracing::warn!("{api_cmd} not implemented");
             Err(S3Error::NotImplemented)
         }
-        (None, "/") if api_sig.list_type.is_some() => {
-            list::list_objects_v2(request, bucket, rpc_client_nss).await
+        (None, "/") => {
+            if api_sig.list_type.is_some() {
+                list::list_objects_v2(request, bucket, rpc_client_nss).await
+            } else {
+                list::list_objects(request, bucket, rpc_client_nss).await
+            }
         }
-        (None, "/") => Err(S3Error::NotImplemented),
         (None, _key) if api_sig.upload_id.is_some() => {
             list::list_parts(request, bucket, key, rpc_client_nss).await
         }

@@ -29,6 +29,7 @@ pub fn stop_services(service: ServiceName) -> CmdResult {
             ServiceName::Bss.as_ref().to_owned(),
             ServiceName::Rss.as_ref().to_owned(),
             "etcd".to_owned(),
+            "minio".to_owned(),
         ],
         single_service => vec![single_service.as_ref().to_owned()],
     };
@@ -44,11 +45,6 @@ pub fn stop_services(service: ServiceName) -> CmdResult {
         if run_cmd!(systemctl --user is-active --quiet $service.service).is_ok() {
             cmd_die!("Failed to stop $service: service is still running");
         }
-    }
-
-    // Stop localstack service at last
-    if run_cmd!(localstack status services &>/dev/null).is_ok() {
-        run_cmd!(localstack stop)?;
     }
 
     Ok(())
@@ -116,9 +112,9 @@ pub fn start_rss_service(build_mode: BuildMode) -> CmdResult {
         start_etcd_service()?;
     }
 
-    // Start localstack to simulate local s3 service
-    if run_cmd!(localstack status services &>/dev/null).is_err() {
-        start_localstack_service()?;
+    // Start minio to simulate local s3 service
+    if run_cmd!(systemctl --user is-active --quiet minio.service).is_err() {
+        start_minio_service()?;
     }
 
     // Initialize api key for testing
@@ -172,13 +168,38 @@ WorkingDirectory={pwd}/ebs
     Ok(())
 }
 
-fn start_localstack_service() -> CmdResult {
+fn start_minio_service() -> CmdResult {
+    let pwd = run_fun!(pwd)?;
+    let service_file = "etc/minio.service";
+    let service_file_content = format!(
+        r##"
+[Unit]
+Description=Simulated s3 service (minio)
+
+[Install]
+WantedBy=default.target
+
+[Service]
+Type=simple
+ExecStart=/home/linuxbrew/.linuxbrew/opt/minio/bin/minio server s3/
+Restart=always
+WorkingDirectory={pwd}
+"##
+    );
+    let minio_wait_secs = 5;
+    let minio_url = "http://localhost:9000";
     run_cmd! {
-        info "Starting localstack service ...";
-        localstack start --detached;
-        sleep 5;
-        info "Creating s3 bucket (\"mybucket\") in localstack ...";
-        awslocal s3api create-bucket --bucket mybucket;
+        mkdir -p etc;
+        mkdir -p s3;
+        echo $service_file_content > $service_file;
+        info "Linking $service_file into ~/.config/systemd/user";
+        systemctl --user link $service_file --force --quiet;
+        systemctl --user start minio.service;
+        info "Waiting ${minio_wait_secs}s for minio up";
+        sleep $minio_wait_secs;
+        info "Creating s3 bucket (\"mybucket\") in minio ...";
+        AWS_ENDPOINT_URL_S3=$minio_url AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin
+            aws s3api create-bucket --bucket mybucket;
     }?;
 
     Ok(())

@@ -4,9 +4,7 @@ use aws_sdk_s3::primitives::ByteStream;
 #[tokio::test]
 async fn test_basic_object_apis() {
     let ctx = common::context();
-    let bucket_name = "my_bucket1";
-
-    ctx.create_bucket(bucket_name).await;
+    let bucket = ctx.create_bucket("my_bucket1").await;
 
     let key = "hello";
     let value = b"42";
@@ -14,7 +12,7 @@ async fn test_basic_object_apis() {
 
     ctx.client
         .put_object()
-        .bucket(bucket_name)
+        .bucket(&bucket)
         .key(key)
         .body(data)
         .send()
@@ -24,7 +22,7 @@ async fn test_basic_object_apis() {
     let res = ctx
         .client
         .get_object()
-        .bucket(bucket_name)
+        .bucket(&bucket)
         .key(key)
         .send()
         .await
@@ -34,22 +32,22 @@ async fn test_basic_object_apis() {
 
     ctx.client
         .delete_object()
-        .bucket(bucket_name)
+        .bucket(&bucket)
         .key(key)
         .send()
         .await
         .unwrap();
 
-    ctx.delete_bucket(bucket_name).await;
+    ctx.delete_bucket(&bucket).await;
 }
 
 #[tokio::test]
 async fn test_basic_bucket_apis() {
     let ctx = common::context();
-    let bucket_name = "my_bucket2";
-    ctx.create_bucket(bucket_name).await;
+    let bucket = ctx.create_bucket("my_bucket2").await;
+
     let buckets = ctx.list_buckets().await.buckets.unwrap();
     // Note we may have concurrent tests running, so just do basic testing here
     assert!(buckets.len() >= 1);
-    ctx.delete_bucket(bucket_name).await;
+    ctx.delete_bucket(&bucket).await;
 }

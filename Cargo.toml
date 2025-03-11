@@ -54,6 +54,7 @@ clap = { version = "4.5.27", features = ["derive"] }
 hmac = "0.12"
 sha2 = "0.10"
 itertools = "0.13"
+crc32fast = "1.4.2"
 
 # Dev dependencies
 aws-sdk-s3 = "1.65.0"

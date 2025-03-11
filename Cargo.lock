@@ -127,6 +127,7 @@ dependencies = [
  "clap 4.5.27",
  "cmd_lib",
  "console-subscriber",
+ "crc32fast",
  "futures",
  "hex",
  "hmac",

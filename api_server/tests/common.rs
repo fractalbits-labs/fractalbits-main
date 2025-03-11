@@ -28,13 +28,15 @@ pub struct Context {
 }
 
 impl Context {
-    pub async fn create_bucket(&self, bucket_name: &str) {
+    pub async fn create_bucket(&self, name: &str) -> String {
+        let bucket_name = name.to_owned();
         self.client
             .create_bucket()
-            .bucket(bucket_name)
+            .bucket(name)
             .send()
             .await
             .unwrap();
+        bucket_name
     }
 
     pub async fn delete_bucket(&self, bucket_name: &str) {

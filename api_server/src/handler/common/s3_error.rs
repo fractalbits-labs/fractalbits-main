@@ -4,7 +4,11 @@ use std::convert::From;
 
 use axum::{
     extract::rejection::QueryRejection,
-    http::{uri::InvalidUri, StatusCode},
+    http::{
+        header::{InvalidHeaderValue, ToStrError},
+        uri::InvalidUri,
+        StatusCode,
+    },
     response::{IntoResponse, Response},
 };
 use axum_extra::extract::rejection::HostRejection;
@@ -15,6 +19,7 @@ use serde::Serialize;
 use strum::AsRefStr;
 use thiserror::Error;
 
+use super::super::common::signature;
 use super::{request::signature::SignatureError, response::xml::Xml};
 
 // From https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html (2025/02/28)
@@ -808,5 +813,26 @@ impl From<quick_xml::DeError> for S3Error {
     fn from(value: quick_xml::DeError) -> Self {
         tracing::error!("quick_xml::DeError: {value}");
         Self::UnexpectedContent
+    }
+}
+
+impl From<ToStrError> for S3Error {
+    fn from(value: ToStrError) -> Self {
+        tracing::error!("ToStrError: {value}");
+        Self::UnexpectedContent
+    }
+}
+
+impl From<signature::error::Error> for S3Error {
+    fn from(value: signature::error::Error) -> Self {
+        tracing::error!("signature::error::Error: {value}");
+        Self::InvalidSignature
+    }
+}
+
+impl From<InvalidHeaderValue> for S3Error {
+    fn from(value: InvalidHeaderValue) -> Self {
+        tracing::error!("InvalidHeaderValue: {value}");
+        Self::InvalidURI
     }
 }

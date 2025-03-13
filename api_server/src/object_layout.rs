@@ -1,4 +1,4 @@
-use crate::handler::common::s3_error::S3Error;
+use crate::handler::common::{s3_error::S3Error, signature::checksum::ChecksumValue};
 use crate::BlobId;
 use rkyv::{Archive, Deserialize, Serialize};
 use uuid::Uuid;
@@ -69,4 +69,5 @@ pub struct ObjectData {
     pub size: u64,
     pub etag: String,
     pub blob_id: BlobId,
+    pub checksum: Option<ChecksumValue>,
 }

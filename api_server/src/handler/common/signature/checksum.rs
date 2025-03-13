@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::Sha256;
 
-use axum::http::{self, HeaderMap, HeaderName, HeaderValue};
+use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use axum::response::Response;
+
+use crate::handler::common::s3_error::S3Error;
 
 use super::super::data::*;
 
@@ -22,6 +25,8 @@ pub const CONTENT_MD5: HeaderName = HeaderName::from_static("content-md5");
 
 pub const X_AMZ_CHECKSUM_ALGORITHM: HeaderName =
     HeaderName::from_static("x-amz-checksum-algorithm");
+pub const X_AMZ_SDK_CHECKSUM_ALGORITHM: HeaderName =
+    HeaderName::from_static("x-amz-sdk-checksum-algorithm");
 pub const X_AMZ_CHECKSUM_MODE: HeaderName = HeaderName::from_static("x-amz-checksum-mode");
 pub const X_AMZ_CHECKSUM_CRC32: HeaderName = HeaderName::from_static("x-amz-checksum-crc32");
 pub const X_AMZ_CHECKSUM_CRC32C: HeaderName = HeaderName::from_static("x-amz-checksum-crc32c");
@@ -34,7 +39,20 @@ pub type Md5Checksum = [u8; 16];
 pub type Sha1Checksum = [u8; 20];
 pub type Sha256Checksum = [u8; 32];
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    Debug,
+    Serialize,
+    Deserialize,
+)]
 pub enum ChecksumValue {
     Crc32(#[serde(with = "serde_bytes")] [u8; 4]),
     Crc32c(#[serde(with = "serde_bytes")] [u8; 4]),
@@ -323,22 +341,34 @@ pub fn extract_checksum_value(
 
 pub fn add_checksum_response_headers(
     checksum: &Option<ChecksumValue>,
-    mut resp: http::response::Builder,
-) -> http::response::Builder {
+    resp: &mut Response,
+) -> Result<(), S3Error> {
     match checksum {
         Some(ChecksumValue::Crc32(crc32)) => {
-            resp = resp.header(X_AMZ_CHECKSUM_CRC32, BASE64_STANDARD.encode(&crc32));
+            resp.headers_mut().insert(
+                X_AMZ_CHECKSUM_CRC32,
+                HeaderValue::from_str(&BASE64_STANDARD.encode(&crc32))?,
+            );
         }
         Some(ChecksumValue::Crc32c(crc32c)) => {
-            resp = resp.header(X_AMZ_CHECKSUM_CRC32C, BASE64_STANDARD.encode(&crc32c));
+            resp.headers_mut().insert(
+                X_AMZ_CHECKSUM_CRC32C,
+                HeaderValue::from_str(&BASE64_STANDARD.encode(&crc32c)).unwrap(),
+            );
         }
         Some(ChecksumValue::Sha1(sha1)) => {
-            resp = resp.header(X_AMZ_CHECKSUM_SHA1, BASE64_STANDARD.encode(&sha1));
+            resp.headers_mut().insert(
+                X_AMZ_CHECKSUM_SHA1,
+                HeaderValue::from_str(&BASE64_STANDARD.encode(&sha1)).unwrap(),
+            );
         }
         Some(ChecksumValue::Sha256(sha256)) => {
-            resp = resp.header(X_AMZ_CHECKSUM_SHA256, BASE64_STANDARD.encode(&sha256));
+            resp.headers_mut().insert(
+                X_AMZ_CHECKSUM_SHA256,
+                HeaderValue::from_str(&BASE64_STANDARD.encode(&sha256)).unwrap(),
+            );
         }
         None => (),
     }
-    resp
+    Ok(())
 }

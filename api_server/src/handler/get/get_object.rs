@@ -8,10 +8,12 @@ use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::RpcClientNss;
 use serde::Deserialize;
 
-use crate::handler::get::get_raw_object;
-use crate::handler::list::list_raw_objects;
 use crate::handler::mpu;
 use crate::handler::{common::s3_error::S3Error, Request};
+use crate::handler::{
+    common::signature::checksum::add_checksum_response_headers, list::list_raw_objects,
+};
+use crate::handler::{common::signature::checksum::X_AMZ_CHECKSUM_MODE, get::get_raw_object};
 use crate::object_layout::{MpuState, ObjectState};
 use crate::BlobId;
 use bucket_tables::bucket_table::Bucket;
@@ -39,10 +41,11 @@ pub async fn get_object(
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
 ) -> Result<Response, S3Error> {
+    let checksum_mode = checksum_mode(&request);
     let Query(opts): Query<GetObjectOptions> = request.into_parts().0.extract().await?;
     let object = get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key.clone()).await?;
     match object.state {
-        ObjectState::Normal(ref _obj_data) => {
+        ObjectState::Normal(ref obj_data) => {
             let mut blob = BytesMut::new();
             get_full_blob(
                 &mut blob,
@@ -51,7 +54,15 @@ pub async fn get_object(
                 object.num_blocks()?,
             )
             .await?;
-            Ok(blob.freeze().into_response())
+            let mut resp = blob.freeze().into_response();
+            if checksum_mode.enabled {
+                tracing::debug!(
+                    "checksum_mode enabled, adding checksum: {:?}",
+                    obj_data.checksum
+                );
+                add_checksum_response_headers(&obj_data.checksum, &mut resp)?;
+            }
+            Ok(resp)
         }
         ObjectState::Mpu(mpu_state) => match mpu_state {
             MpuState::Uploading => {
@@ -109,4 +120,18 @@ async fn get_full_blob(
     }
 
     Ok(())
+}
+
+struct ChecksumMode {
+    enabled: bool,
+}
+
+fn checksum_mode(request: &Request) -> ChecksumMode {
+    ChecksumMode {
+        enabled: request
+            .headers()
+            .get(X_AMZ_CHECKSUM_MODE)
+            .map(|x| x == "ENABLED")
+            .unwrap_or(false),
+    }
 }

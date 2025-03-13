@@ -2,7 +2,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 // use super::block_data_stream::BlockDataStream;
 use crate::{
-    handler::{common::s3_error::S3Error, Request},
+    handler::{
+        common::{
+            s3_error::S3Error,
+            signature::checksum::{
+                request_checksum_value, request_trailer_checksum_algorithm, ExpectedChecksums,
+            },
+        },
+        Request,
+    },
     object_layout::*,
     BlobId,
 };
@@ -24,13 +32,15 @@ pub async fn put_object(
     rpc_client_bss: &RpcClientBss,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
-    let blob_id = Uuid::now_v7();
-    let body_content = request.into_body().collect().await.unwrap();
-    let size = rpc_client_bss
-        .put_blob(blob_id, 0, body_content)
-        .await
-        .map(|x| (x - MessageHeader::SIZE) as u64)?;
-
+    let expected_checksums = ExpectedChecksums {
+        md5: match request.headers().get("content-md5") {
+            Some(x) => Some(x.to_str()?.to_string()),
+            None => None,
+        },
+        sha256: None,
+        extra: request_checksum_value(request.headers())?,
+    };
+    let trailer_checksum_algorithm = request_trailer_checksum_algorithm(request.headers())?;
     // let body_data_stream = request.into_body().into_data_stream();
     // let size = BlockDataStream::new(body_data_stream, ObjectLayout::DEFAULT_BLOCK_SIZE)
     //     .enumerate()
@@ -44,6 +54,17 @@ pub async fn put_object(
     //     .try_fold(0, |acc, x| async move { Ok(acc + x) })
     //     .await
     //     .map_err(|_e| S3Error::InternalError)?;
+
+    let blob_id = Uuid::now_v7();
+    let (body_content, checksums) = request.into_body().collect_with_checksums().await.unwrap();
+    let checksum = match expected_checksums.extra {
+        Some(x) => Some(x),
+        None => checksums.extract(trailer_checksum_algorithm),
+    };
+    let size = rpc_client_bss
+        .put_blob(blob_id, 0, body_content)
+        .await
+        .map(|x| (x - MessageHeader::SIZE) as u64)?;
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -59,6 +80,7 @@ pub async fn put_object(
             size,
             blob_id,
             etag,
+            checksum,
         }),
     };
     let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new())?;

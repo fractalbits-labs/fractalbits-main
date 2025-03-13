@@ -74,10 +74,9 @@ async fn test_checksum_on_streaming(
         .unwrap()
 }
 
-#[ignore = "todo"]
 #[tokio::test]
 async fn test_crc32_checksum_on_streaming() {
-    let (ctx, bucket, key) = setup().await;
+    let (ctx, bucket, key) = setup("test_crc32_checksum_on_streaming").await;
 
     let expected_aws_chunked_encoded_body: &'static str =
         "B\r\nHello world\r\n0\r\nx-amz-checksum-crc32:i9aeUg==\r\n\r\n";
@@ -100,10 +99,9 @@ async fn test_crc32_checksum_on_streaming() {
 }
 
 // This test isn't a duplicate. It tests CRC32C (note the C) checksum request validation
-#[ignore = "todo"]
 #[tokio::test]
 async fn test_crc32c_checksum_on_streaming() {
-    let (ctx, bucket, key) = setup().await;
+    let (ctx, bucket, key) = setup("test_crc32c_checksum_on_streaming").await;
 
     let expected_aws_chunked_encoded_body =
         "B\r\nHello world\r\n0\r\nx-amz-checksum-crc32c:crUfeA==\r\n\r\n";
@@ -125,10 +123,9 @@ async fn test_crc32c_checksum_on_streaming() {
     cleanup(&ctx, &bucket, &key).await;
 }
 
-#[ignore = "todo"]
 #[tokio::test]
 async fn test_sha1_checksum_on_streaming() {
-    let (ctx, bucket, key) = setup().await;
+    let (ctx, bucket, key) = setup("test_sha1_checksum_on_streaming").await;
 
     let expected_aws_chunked_encoded_body =
         "B\r\nHello world\r\n0\r\nx-amz-checksum-sha1:e1AsOh9IyGCa4hLN+2Od7jlnP14=\r\n\r\n";
@@ -150,10 +147,9 @@ async fn test_sha1_checksum_on_streaming() {
     cleanup(&ctx, &bucket, &key).await;
 }
 
-#[ignore = "todo"]
 #[tokio::test]
 async fn test_sha256_checksum_on_streaming() {
-    let (ctx, bucket, key) = setup().await;
+    let (ctx, bucket, key) = setup("test_sha256_checksum_on_streaming").await;
 
     let expected_aws_chunked_encoded_body = "B\r\nHello world\r\n0\r\nx-amz-checksum-sha256:ZOyIygCyaOW6GjVnihtTFtIS9PNmskdyMlNKiuyjfzw=\r\n\r\n";
     let expected_encoded_content_length = expected_aws_chunked_encoded_body.len();
@@ -177,9 +173,9 @@ async fn test_sha256_checksum_on_streaming() {
     cleanup(&ctx, &bucket, &key).await;
 }
 
-async fn setup() -> (Context, String, String) {
+async fn setup(bucket: &str) -> (Context, String, String) {
     let ctx = common::context();
-    let bucket = ctx.create_bucket("test-bucket").await;
+    let bucket = ctx.create_bucket(bucket).await;
     let key = "test.txt".to_string();
     (ctx, bucket, key)
 }

@@ -14,15 +14,19 @@ use crate::{
     object_layout::*,
     BlobId,
 };
-use axum::response::{IntoResponse, Response};
+use axum::{
+    body::Body,
+    response::{IntoResponse, Response},
+};
 use bucket_tables::bucket_table::Bucket;
-// use futures::{StreamExt, TryStreamExt};
-// use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
 use rpc_client_bss::{message::MessageHeader, RpcClientBss};
 use rpc_client_nss::{rpc::put_inode_response, RpcClientNss};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
+
+use super::block_data_stream::BlockDataStream;
 
 pub async fn put_object(
     request: Request,
@@ -40,31 +44,31 @@ pub async fn put_object(
         sha256: None,
         extra: request_checksum_value(request.headers())?,
     };
-    let trailer_checksum_algorithm = request_trailer_checksum_algorithm(request.headers())?;
-    // let body_data_stream = request.into_body().into_data_stream();
-    // let size = BlockDataStream::new(body_data_stream, ObjectLayout::DEFAULT_BLOCK_SIZE)
-    //     .enumerate()
-    //     .map(|(i, block_data)| async move {
-    //         rpc_client_bss
-    //             .put_blob(blob_id, i as u32, block_data)
-    //             .await
-    //             .map(|x| (x - MessageHeader::SIZE) as u64)
-    //     })
-    //     .buffer_unordered(5)
-    //     .try_fold(0, |acc, x| async move { Ok(acc + x) })
-    //     .await
-    //     .map_err(|_e| S3Error::InternalError)?;
 
+    let trailer_checksum_algorithm = request_trailer_checksum_algorithm(request.headers())?;
+    let (body_stream, checksummer) = request.into_body().streaming_with_checksums();
+    let body_data_stream = Body::from_stream(body_stream).into_data_stream();
     let blob_id = Uuid::now_v7();
-    let (body_content, checksums) = request.into_body().collect_with_checksums().await.unwrap();
+    let size = BlockDataStream::new(body_data_stream, ObjectLayout::DEFAULT_BLOCK_SIZE)
+        .enumerate()
+        .map(|(i, block_data)| async move {
+            rpc_client_bss
+                .put_blob(blob_id, i as u32, block_data)
+                .await
+                .map(|x| (x - MessageHeader::SIZE) as u64)
+        })
+        .buffer_unordered(5)
+        .try_fold(0, |acc, x| async move { Ok(acc + x) })
+        .await
+        .map_err(|_e| S3Error::InternalError)?;
+
     let checksum = match expected_checksums.extra {
         Some(x) => Some(x),
-        None => checksums.extract(trailer_checksum_algorithm),
+        None => checksummer
+            .await
+            .expect("JoinHandle error")?
+            .extract(trailer_checksum_algorithm),
     };
-    let size = rpc_client_bss
-        .put_blob(blob_id, 0, body_content)
-        .await
-        .map(|x| (x - MessageHeader::SIZE) as u64)?;
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)

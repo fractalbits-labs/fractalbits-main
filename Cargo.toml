@@ -75,6 +75,7 @@ num_cpus = "1.16.0"
 rayon = "1.10.0"
 rlimit = "0.10.2"
 tempfile = "3.18.0"
+rstest = "0.25.0"
 
 # Build dependencies
 prost-build = "0.13"

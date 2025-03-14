@@ -7,50 +7,56 @@ use aws_sdk_s3::{
 };
 use axum::http::HeaderValue;
 use common::Context;
+use rstest::*;
 
 // The test structure is identical for all supported checksum algorithms
-async fn test_checksum_on_streaming(
+async fn test_checksum(
     ctx: &Context,
     bucket: &str,
     key: &str,
-    body: &'static [u8],
+    value: &'static [u8],
     expected_decoded_content_length: usize,
     expected_encoded_content_length: usize,
     checksum_algorithm: ChecksumAlgorithm,
+    streaming: bool,
 ) -> GetObjectOutput {
     // ByteStreams created from a file are streaming and have a known size
     let mut file = tempfile::NamedTempFile::new().unwrap();
     use std::io::Write;
-    file.write_all(body).unwrap();
+    file.write_all(value).unwrap();
 
-    let stream_body = ByteStream::from_path(file.path()).await.unwrap();
+    let body = if streaming {
+        ByteStream::from_path(file.path()).await.unwrap()
+    } else {
+        ByteStream::from_static(value)
+    };
 
-    // The response from the fake connection won't return the expected XML but we don't care about
-    // that error in this test
-    let _ = ctx
-        .client
+    ctx.client
         .put_object()
         .bucket(bucket)
         .key(key)
-        .body(stream_body)
+        .body(body)
         .checksum_algorithm(checksum_algorithm)
         .customize()
+        // we actually only do `inspect_request` here
         .mutate_request(move |request| {
-            let x_amz_decoded_content_length = request
-                .headers()
-                .get("x-amz-decoded-content-length")
-                .expect("x-amz-decoded-content-length header exists");
+            if streaming {
+                let x_amz_decoded_content_length = request
+                    .headers()
+                    .get("x-amz-decoded-content-length")
+                    .expect("x-amz-decoded-content-length header exists");
+                // The length of the string "Hello world"
+                assert_eq!(
+                    HeaderValue::from_str(&expected_decoded_content_length.to_string()).unwrap(),
+                    x_amz_decoded_content_length,
+                    "decoded content length was wrong"
+                );
+            }
             let content_length = request
                 .headers()
                 .get("Content-Length")
                 .expect("Content-Length header exists");
 
-            // The length of the string "Hello world"
-            assert_eq!(
-                HeaderValue::from_str(&expected_decoded_content_length.to_string()).unwrap(),
-                x_amz_decoded_content_length,
-                "decoded content length was wrong"
-            );
             // The sum of the length of the original body, chunk markers, and trailers
             assert_eq!(
                 HeaderValue::from_str(&expected_encoded_content_length.to_string()).unwrap(),
@@ -62,7 +68,7 @@ async fn test_checksum_on_streaming(
         })
         .send()
         .await
-        .unwrap();
+        .expect(&format!("put_object failed: (bucket={bucket}, key={key})"));
 
     ctx.client
         .get_object()
@@ -74,14 +80,19 @@ async fn test_checksum_on_streaming(
         .unwrap()
 }
 
+#[rstest]
+#[case(false)]
+#[case(true)]
 #[tokio::test]
-async fn test_crc32_checksum_on_streaming() {
-    let (ctx, bucket, key) = setup("test_crc32_checksum_on_streaming").await;
+async fn test_crc32_checksum(#[case] streaming: bool) {
+    let (ctx, bucket, key) = setup(&format!("test_crc32_checksum_on_streaming_{streaming}")).await;
 
-    let expected_aws_chunked_encoded_body: &'static str =
-        "B\r\nHello world\r\n0\r\nx-amz-checksum-crc32:i9aeUg==\r\n\r\n";
-    let expected_encoded_content_length = expected_aws_chunked_encoded_body.len();
-    let res = test_checksum_on_streaming(
+    let expected_encoded_content_length = if streaming {
+        b"B\r\nHello world\r\n0\r\nx-amz-checksum-crc32:i9aeUg==\r\n\r\n".len()
+    } else {
+        b"Hello world".len()
+    };
+    let res = test_checksum(
         &ctx,
         &bucket,
         &key,
@@ -89,6 +100,7 @@ async fn test_crc32_checksum_on_streaming() {
         11,
         expected_encoded_content_length,
         ChecksumAlgorithm::Crc32,
+        streaming,
     )
     .await;
     // Header checksums are base64 encoded
@@ -99,14 +111,19 @@ async fn test_crc32_checksum_on_streaming() {
 }
 
 // This test isn't a duplicate. It tests CRC32C (note the C) checksum request validation
+#[rstest]
+#[case(false)]
+#[case(true)]
 #[tokio::test]
-async fn test_crc32c_checksum_on_streaming() {
-    let (ctx, bucket, key) = setup("test_crc32c_checksum_on_streaming").await;
+async fn test_crc32c_checksum(#[case] streaming: bool) {
+    let (ctx, bucket, key) = setup(&format!("test_crc32c_checksum_on_streaming_{streaming}")).await;
 
-    let expected_aws_chunked_encoded_body =
-        "B\r\nHello world\r\n0\r\nx-amz-checksum-crc32c:crUfeA==\r\n\r\n";
-    let expected_encoded_content_length = expected_aws_chunked_encoded_body.len();
-    let res = test_checksum_on_streaming(
+    let expected_encoded_content_length = if streaming {
+        b"B\r\nHello world\r\n0\r\nx-amz-checksum-crc32c:crUfeA==\r\n\r\n".len()
+    } else {
+        b"Hello world".len()
+    };
+    let res = test_checksum(
         &ctx,
         &bucket,
         &key,
@@ -114,6 +131,7 @@ async fn test_crc32c_checksum_on_streaming() {
         11,
         expected_encoded_content_length,
         ChecksumAlgorithm::Crc32C,
+        streaming,
     )
     .await;
     // Header checksums are base64 encoded
@@ -123,14 +141,19 @@ async fn test_crc32c_checksum_on_streaming() {
     cleanup(&ctx, &bucket, &key).await;
 }
 
+#[rstest]
+#[case(false)]
+#[case(true)]
 #[tokio::test]
-async fn test_sha1_checksum_on_streaming() {
-    let (ctx, bucket, key) = setup("test_sha1_checksum_on_streaming").await;
+async fn test_sha1_checksum(#[case] streaming: bool) {
+    let (ctx, bucket, key) = setup(&format!("test_sha1_checksum_on_streaming_{streaming}")).await;
 
-    let expected_aws_chunked_encoded_body =
-        "B\r\nHello world\r\n0\r\nx-amz-checksum-sha1:e1AsOh9IyGCa4hLN+2Od7jlnP14=\r\n\r\n";
-    let expected_encoded_content_length = expected_aws_chunked_encoded_body.len();
-    let res = test_checksum_on_streaming(
+    let expected_encoded_content_length = if streaming {
+        b"B\r\nHello world\r\n0\r\nx-amz-checksum-sha1:e1AsOh9IyGCa4hLN+2Od7jlnP14=\r\n\r\n".len()
+    } else {
+        b"Hello world".len()
+    };
+    let res = test_checksum(
         &ctx,
         &bucket,
         &key,
@@ -138,6 +161,7 @@ async fn test_sha1_checksum_on_streaming() {
         11,
         expected_encoded_content_length,
         ChecksumAlgorithm::Sha1,
+        streaming,
     )
     .await;
     // Header checksums are base64 encoded
@@ -147,13 +171,19 @@ async fn test_sha1_checksum_on_streaming() {
     cleanup(&ctx, &bucket, &key).await;
 }
 
+#[rstest]
+#[case(false)]
+#[case(true)]
 #[tokio::test]
-async fn test_sha256_checksum_on_streaming() {
-    let (ctx, bucket, key) = setup("test_sha256_checksum_on_streaming").await;
+async fn test_sha256_checksum(#[case] streaming: bool) {
+    let (ctx, bucket, key) = setup(&format!("test_sha256_checksum_on_streaming_{streaming}")).await;
 
-    let expected_aws_chunked_encoded_body = "B\r\nHello world\r\n0\r\nx-amz-checksum-sha256:ZOyIygCyaOW6GjVnihtTFtIS9PNmskdyMlNKiuyjfzw=\r\n\r\n";
-    let expected_encoded_content_length = expected_aws_chunked_encoded_body.len();
-    let res = test_checksum_on_streaming(
+    let expected_encoded_content_length = if streaming {
+        b"B\r\nHello world\r\n0\r\nx-amz-checksum-sha256:ZOyIygCyaOW6GjVnihtTFtIS9PNmskdyMlNKiuyjfzw=\r\n\r\n".len()
+    } else {
+        b"Hello world".len()
+    };
+    let res = test_checksum(
         &ctx,
         &bucket,
         &key,
@@ -161,6 +191,7 @@ async fn test_sha256_checksum_on_streaming() {
         11,
         expected_encoded_content_length,
         ChecksumAlgorithm::Sha256,
+        streaming,
     )
     .await;
     // Header checksums are base64 encoded

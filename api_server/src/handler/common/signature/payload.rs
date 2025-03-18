@@ -218,10 +218,8 @@ fn verify_signed_headers(
         return Err(Error::Other("Header `Host` should be signed".into()));
     }
     for (name, _) in headers.iter() {
-        if name.as_str().starts_with("x-amz-") {
-            if !signed_headers.contains(name.as_str()) {
-                return Err(Error::Other(format!("Header `{}` should be signed", name)));
-            }
+        if name.as_str().starts_with("x-amz-") && !signed_headers.contains(name.as_str()) {
+            return Err(Error::Other(format!("Header `{}` should be signed", name)));
         }
     }
     Ok(())

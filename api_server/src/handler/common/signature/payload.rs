@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use axum::body::Body;
 use axum::extract::Query;
-use axum::http::header::{HeaderMap, HeaderValue};
+use axum::http::header::{HeaderMap, HeaderValue, AUTHORIZATION, HOST};
 use axum::http::{request::Request, Method};
 use axum::RequestExt;
 use bucket_tables::api_key_table::{ApiKey, ApiKeyTable};
@@ -33,29 +33,28 @@ pub async fn check_payload_signature(
     rpc_client_rss: ArcRpcClientRss,
     region: &str,
 ) -> Result<CheckedSignature, Error> {
-    check_standard_signature(auth, request, rpc_client_rss, region).await
-    // let query = parse_query_map(request.uri())?;
+    let Query(mut query): Query<BTreeMap<String, String>> = request.extract_parts().await?;
 
-    // if query.contains_key(&X_AMZ_ALGORITHM) {
-    //     // We check for presigned-URL-style authentication first, because
-    //     // the browser or something else could inject an Authorization header
-    //     // that is totally unrelated to AWS signatures.
-    //     check_presigned_signature(garage, service, request, query).await
-    // } else if request.headers().contains_key(AUTHORIZATION) {
-    //     check_standard_signature(garage, service, request, query).await
-    // } else {
-    //     // Unsigned (anonymous) request
-    //     let content_sha256 = request
-    //         .headers()
-    //         .get(X_AMZ_CONTENT_SHA256)
-    //         .map(|x| x.to_str())
-    //         .transpose()?;
-    //     Ok(CheckedSignature {
-    //         key: None,
-    //         content_sha256_header: parse_x_amz_content_sha256(content_sha256)?,
-    //         signature_header: None,
-    //     })
-    // }
+    if query.contains_key(X_AMZ_ALGORITHM.as_str()) {
+        // We check for presigned-URL-style authentication first, because
+        // the browser or something else could inject an Authorization header
+        // that is totally unrelated to AWS signatures.
+        check_presigned_signature(auth, request, &mut query, rpc_client_rss, region).await
+    } else if request.headers().contains_key(AUTHORIZATION) {
+        check_standard_signature(auth, request, rpc_client_rss, region).await
+    } else {
+        // Unsigned (anonymous) request
+        let content_sha256 = request
+            .headers()
+            .get(X_AMZ_CONTENT_SHA256)
+            .map(|x| x.to_str())
+            .transpose()?;
+        Ok(CheckedSignature {
+            key: None,
+            content_sha256_header: parse_x_amz_content_sha256(content_sha256)?,
+            signature_header: None,
+        })
+    }
 }
 
 fn parse_x_amz_content_sha256(header: Option<&str>) -> Result<ContentSha256Header, Error> {
@@ -85,14 +84,13 @@ fn parse_x_amz_content_sha256(header: Option<&str>) -> Result<ContentSha256Heade
         let sha256 = hex::decode(header)
             .ok()
             .and_then(|bytes| Hash::try_from(&bytes))
-            .unwrap(); // FIXME
-                       // .ok_or_else(|| Err::Other("Invalid content sha256 hash".into()))?;
+            .ok_or_else(|| Error::Other("Invalid content sha256 hash".into()))?;
         Ok(ContentSha256Header::Sha256Checksum(sha256))
     }
 }
 
 pub async fn check_standard_signature(
-    auth: &Authentication,
+    authentication: &Authentication,
     request: &mut Request<Body>,
     rpc_client_rss: ArcRpcClientRss,
     region: &str,
@@ -103,24 +101,130 @@ pub async fn check_standard_signature(
         request.uri().path(),
         &query_params,
         request.headers(),
-        &auth.signed_headers,
-        &auth.content_sha256,
+        &authentication.signed_headers,
+        &authentication.content_sha256,
     )?;
-    let string_to_sign =
-        string_to_sign(&auth.date, &auth.scope.to_sign_string(), &canonical_request);
+    let string_to_sign = string_to_sign(
+        &authentication.date,
+        &authentication.scope.to_sign_string(),
+        &canonical_request,
+    );
 
     tracing::trace!("canonical request:\n{}", canonical_request);
     tracing::trace!("string to sign:\n{}", string_to_sign);
 
-    let key = verify_v4(auth, string_to_sign.as_bytes(), rpc_client_rss, region).await?;
+    let key = verify_v4(
+        authentication,
+        string_to_sign.as_bytes(),
+        rpc_client_rss,
+        region,
+    )
+    .await?;
 
-    let content_sha256_header = parse_x_amz_content_sha256(Some(&auth.content_sha256))?;
+    let content_sha256_header = parse_x_amz_content_sha256(Some(&authentication.content_sha256))?;
 
     Ok(CheckedSignature {
         key,
         content_sha256_header,
-        signature_header: Some(auth.signature.clone()),
+        signature_header: Some(authentication.signature.clone()),
     })
+}
+
+async fn check_presigned_signature(
+    authentication: &Authentication,
+    request: &mut Request<Body>,
+    query: &mut BTreeMap<String, String>,
+    rpc_client_rss: ArcRpcClientRss,
+    region: &str,
+) -> Result<CheckedSignature, Error> {
+    let signed_headers = &authentication.signed_headers;
+    // Verify that all necessary request headers are included in signed_headers
+    // For AWSv4 pre-signed URLs, the following must be included:
+    // - the Host header (mandatory)
+    // - all x-amz-* headers used in the request
+    verify_signed_headers(request.headers(), signed_headers)?;
+
+    // The X-Amz-Signature value is passed as a query parameter,
+    // but the signature cannot be computed from a string that contains itself.
+    // AWS specifies that all query params except X-Amz-Signature are included
+    // in the canonical request.
+    query.remove(X_AMZ_SIGNATURE.as_str());
+    let canonical_request = canonical_request(
+        request.method(),
+        request.uri().path(),
+        query,
+        request.headers(),
+        signed_headers,
+        &authentication.content_sha256,
+    )?;
+    let string_to_sign = string_to_sign(
+        &authentication.date,
+        &authentication.scope.to_sign_string(),
+        &canonical_request,
+    );
+
+    tracing::trace!("canonical request (presigned url):\n{}", canonical_request);
+    tracing::trace!("string to sign (presigned url):\n{}", string_to_sign);
+
+    let key = verify_v4(
+        authentication,
+        string_to_sign.as_bytes(),
+        rpc_client_rss,
+        region,
+    )
+    .await?;
+
+    // In the page on presigned URLs, AWS specifies that if a signed query
+    // parameter and a signed header of the same name have different values,
+    // then an InvalidRequest error is raised.
+    let headers_mut = request.headers_mut();
+    for (name, value) in query.iter() {
+        if let Some(existing) = headers_mut.get(name) {
+            if signed_headers.contains(name) && existing.as_bytes() != value.as_bytes() {
+                return Err(Error::Other(format!(
+                    "Conflicting values for `{}` in query parameters and request headers",
+                    name
+                )));
+            }
+        }
+        if name.starts_with("x-amz-") {
+            // Query parameters that start by x-amz- are actually intended to stand in for
+            // headers that can't be added at the time the request is made.
+            // What we do is just add them to the Request object as regular headers,
+            // that will be handled downstream as if they were included like in a normal request.
+            // (Here we allow such query parameters to override headers with the same name
+            // that are not signed, however there is not much reason that this would happen)
+            headers_mut.insert(
+                HeaderName::from_lowercase(name.as_bytes()).unwrap(),
+                HeaderValue::from_bytes(value.as_bytes()).unwrap(),
+            );
+        }
+    }
+
+    // Presigned URLs always use UNSIGNED-PAYLOAD,
+    // so there is no sha256 hash to return.
+    Ok(CheckedSignature {
+        key,
+        content_sha256_header: ContentSha256Header::UnsignedPayload,
+        signature_header: Some(authentication.signature.clone()),
+    })
+}
+
+fn verify_signed_headers(
+    headers: &HeaderMap,
+    signed_headers: &BTreeSet<String>,
+) -> Result<(), Error> {
+    if !signed_headers.contains(HOST.as_str()) {
+        return Err(Error::Other("Header `Host` should be signed".into()));
+    }
+    for (name, _) in headers.iter() {
+        if name.as_str().starts_with("x-amz-") {
+            if !signed_headers.contains(name.as_str()) {
+                return Err(Error::Other(format!("Header `{}` should be signed", name)));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn string_to_sign(datetime: &DateTime<Utc>, scope_string: &str, canonical_req: &str) -> String {

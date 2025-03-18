@@ -2,9 +2,6 @@ use axum::{extract::rejection::QueryRejection, http::header::ToStrError};
 use rpc_client_rss::RpcErrorRss;
 use thiserror::Error;
 
-// use crate::common_error::CommonError;
-// pub use crate::common_error::{CommonErrorDerivative, OkOrBadRequest, OkOrInternalError};
-
 /// Errors of this crate
 #[derive(Debug, Error)]
 pub enum Error {

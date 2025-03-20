@@ -1,38 +1,37 @@
-use axum::http::{header::CONTENT_TYPE, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::{body::Body, response::Response};
 use serde::Serialize;
+
+use crate::handler::common::s3_error::S3Error;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Xml<T>(pub T);
 
-impl<T> IntoResponse for Xml<T>
+// Note we are not implementing `IntoResponse` trait since we want to attach more contexts with
+// error cases, to follow the s3 error responses format:
+// https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html
+impl<T> TryInto<Response> for Xml<T>
 where
     T: Serialize,
 {
-    fn into_response(self) -> Response {
-        let mut xml = r#"<?xml version="1.0" encoding="UTF-8"?>"#.to_string();
-        match quick_xml::se::to_writer(&mut xml, &self.0) {
-            Ok(()) => (
-                [(CONTENT_TYPE, HeaderValue::from_static("application/xml"))],
-                xml,
-            )
-                .into_response(),
-            Err(err) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static("text/plain; charset=utf-8"),
-                )],
-                err.to_string(),
-            )
-                .into_response(),
-        }
+    type Error = S3Error;
+
+    fn try_into(self) -> Result<Response, Self::Error> {
+        let mut xml_body = r#"<?xml version="1.0" encoding="UTF-8"?>"#.to_string();
+        quick_xml::se::to_writer(&mut xml_body, &self.0)?;
+        Response::builder()
+            .header("Content-Type", "application/xml")
+            .body(Body::from(xml_body))
+            .map_err(|e| {
+                tracing::error!("{}", format!("{e}"));
+                S3Error::InternalError
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::header;
     use http_body_util::BodyExt;
 
     #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -60,8 +59,11 @@ mod tests {
                 session_token: "test_token".into(),
             },
         };
-        let resp = Xml(output).into_response();
-        assert_eq!("application/xml", resp.headers().get(CONTENT_TYPE).unwrap());
+        let resp: Response = Xml(output).try_into().unwrap();
+        assert_eq!(
+            "application/xml",
+            resp.headers().get(header::CONTENT_TYPE).unwrap()
+        );
 
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let expected = "\

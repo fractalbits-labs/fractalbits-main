@@ -12,7 +12,7 @@ use crate::{
     object_layout::{MpuState, ObjectState},
     BlobId,
 };
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use bucket_tables::bucket_table::Bucket;
 use bytes::Buf;
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
@@ -138,5 +138,5 @@ pub async fn complete_multipart_upload(
     resp.bucket = bucket.bucket_name.clone();
     resp.key = key;
     resp.etag = upload_id;
-    Ok(Xml(resp).into_response())
+    Xml(resp).try_into()
 }

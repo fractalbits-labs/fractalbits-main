@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::handler::common::s3_error::S3Error;
 use crate::handler::{common::response::xml::Xml, Request};
 use crate::object_layout::*;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use bucket_tables::bucket_table::Bucket;
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
 use rpc_client_nss::RpcClientNss;
@@ -65,5 +65,5 @@ pub async fn create_multipart_upload(
         key,
         upload_id: version_id.simple().to_string(),
     };
-    Ok(Xml(init_mpu_res).into_response())
+    Xml(init_mpu_res).try_into()
 }

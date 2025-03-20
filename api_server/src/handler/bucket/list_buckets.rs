@@ -1,8 +1,4 @@
-use axum::{
-    extract::Query,
-    response::{IntoResponse, Response},
-    RequestPartsExt,
-};
+use axum::{extract::Query, response::Response, RequestPartsExt};
 use bucket_tables::{
     bucket_table::{self, BucketTable},
     table::Table,
@@ -90,5 +86,5 @@ pub async fn list_buckets(
         .iter()
         .map(|bucket| Bucket::from_table_with_region(bucket, region))
         .collect();
-    Ok(Xml(ListAllMyBucketsResult::from(buckets)).into_response())
+    Xml(ListAllMyBucketsResult::from(buckets)).try_into()
 }

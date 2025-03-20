@@ -2,11 +2,7 @@ use crate::handler::{
     common::{response::xml::Xml, s3_error::S3Error, time::format_timestamp},
     Request,
 };
-use axum::{
-    extract::Query,
-    response::{IntoResponse, Response},
-    RequestPartsExt,
-};
+use axum::{extract::Query, response::Response, RequestPartsExt};
 use bucket_tables::bucket_table::Bucket;
 use rkyv::{self, rancor::Error};
 use rpc_client_nss::{rpc::list_inodes_response, RpcClientNss};
@@ -179,10 +175,10 @@ pub async fn list_objects_v2(
         })
         .collect::<Result<Vec<Contents>, S3Error>>()?;
 
-    Ok(Xml(ListBucketResult::default()
+    Xml(ListBucketResult::default()
         .contents(contents)
         .bucket_name(bucket.bucket_name.clone())
         .prefix(prefix)
         .max_keys(max_keys))
-    .into_response())
+    .try_into()
 }

@@ -334,5 +334,5 @@ pub async fn copy_object(
     _rpc_client_bss: &RpcClientBss,
 ) -> Result<Response, S3Error> {
     let _header_opts = HeaderOpts::from_headers(request.headers())?;
-    Ok(Xml(CopyObjectResult::default()).into_response())
+    Xml(CopyObjectResult::default()).try_into()
 }

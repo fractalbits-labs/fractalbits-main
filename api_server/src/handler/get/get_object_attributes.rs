@@ -10,7 +10,7 @@ use crate::handler::{
 use axum::{
     extract::Query,
     http::{header, HeaderMap, HeaderValue},
-    response::{IntoResponse, Response},
+    response::Response,
     RequestPartsExt,
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -217,7 +217,7 @@ pub async fn get_object_attributes(
         resp = resp.object_size(obj.size()? as usize);
     }
     // TODO: ObjectParts | StorageClass
-    let mut resp = Xml(resp).into_response();
+    let mut resp: Response = Xml(resp).try_into()?;
     resp.headers_mut().insert(
         header::LAST_MODIFIED,
         HeaderValue::from_str(&last_modified)?,

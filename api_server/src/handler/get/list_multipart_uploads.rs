@@ -2,11 +2,7 @@ use crate::handler::{
     common::{response::xml::Xml, s3_error::S3Error},
     Request,
 };
-use axum::{
-    extract::Query,
-    response::{IntoResponse, Response},
-    RequestPartsExt,
-};
+use axum::{extract::Query, response::Response, RequestPartsExt};
 use rpc_client_nss::RpcClientNss;
 use serde::{Deserialize, Serialize};
 
@@ -76,5 +72,5 @@ pub async fn list_multipart_uploads(
     _rpc_client_nss: &RpcClientNss,
 ) -> Result<Response, S3Error> {
     let Query(_opts): Query<ListMultipartUploadsOptions> = request.into_parts().0.extract().await?;
-    Ok(Xml(ListMultipartUploadsResult::default()).into_response())
+    Xml(ListMultipartUploadsResult::default()).try_into()
 }

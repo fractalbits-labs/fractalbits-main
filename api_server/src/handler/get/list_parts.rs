@@ -3,11 +3,7 @@ use crate::handler::common::{
     time,
 };
 use crate::object_layout::{MpuState, ObjectState};
-use axum::{
-    extract::Query,
-    response::{IntoResponse, Response},
-    RequestPartsExt,
-};
+use axum::{extract::Query, response::Response, RequestPartsExt};
 use bucket_tables::bucket_table::Bucket;
 use rpc_client_nss::RpcClientNss;
 use serde::{Deserialize, Serialize};
@@ -112,5 +108,5 @@ pub async fn list_parts(
         }
         res.part.push(part);
     }
-    Ok(Xml(res).into_response())
+    Xml(res).try_into()
 }

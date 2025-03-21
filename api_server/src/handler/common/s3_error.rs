@@ -738,9 +738,20 @@ impl S3Error {
 impl S3Error {
     pub fn into_response_with_resource(self, resource: &str) -> Response {
         let status_code = self.http_status_code();
-        let mut response: Response = Xml(Error::from(self).with_resource(resource))
-            .try_into()
-            .unwrap(); // FIXME: hard-coded internal server error message
+        let mut response: Response = match Xml(Error::from(self).with_resource(resource)).try_into()
+        {
+            Ok(resp) => resp,
+            Err(_) => format!(
+                r#"
+<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>InternalError</Code>
+    <Message>An internal error occurred. Try again.</Message>
+    <Resource>{resource}</Resource>
+</Error>"#
+            )
+            .into_response(),
+        };
         *response.status_mut() = status_code;
         response
     }
@@ -749,7 +760,16 @@ impl S3Error {
 impl IntoResponse for S3Error {
     fn into_response(self) -> Response {
         let status_code = self.http_status_code();
-        let mut response: Response = Xml(Error::from(self)).try_into().unwrap(); // FIXME
+        let mut response: Response = match Xml(Error::from(self)).try_into() {
+            Ok(resp) => resp,
+            Err(_) => r#"
+<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>InternalError</Code>
+    <Message>An internal error occurred. Try again.</Message>
+</Error>"#
+                .into_response(),
+        };
         *response.status_mut() = status_code;
         response
     }

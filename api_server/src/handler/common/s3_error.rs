@@ -5,9 +5,9 @@ use std::convert::From;
 use axum::{
     extract::rejection::QueryRejection,
     http::{
-        header::{InvalidHeaderValue, ToStrError},
+        header::{self, InvalidHeaderValue, ToStrError},
         uri::InvalidUri,
-        StatusCode,
+        HeaderValue, StatusCode,
     },
     response::{IntoResponse, Response},
 };
@@ -15,42 +15,13 @@ use axum_extra::extract::rejection::HostRejection;
 use rpc_client_bss::RpcErrorBss;
 use rpc_client_nss::RpcErrorNss;
 use rpc_client_rss::RpcErrorRss;
-use serde::Serialize;
 use strum::AsRefStr;
 use thiserror::Error;
 
 use super::super::common::signature;
-use super::{request::signature::SignatureError, response::xml::Xml};
+use super::request::signature::SignatureError;
 
 // From https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html (2025/02/28)
-
-#[derive(Serialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct Error {
-    code: String,
-    message: String,
-    resource: String,
-}
-
-impl From<S3Error> for Error {
-    fn from(e: S3Error) -> Self {
-        Self {
-            code: e.as_ref().to_string(),
-            message: e.to_string(),
-            resource: "".into(),
-        }
-    }
-}
-
-impl Error {
-    pub fn with_resource(self, resource: &str) -> Self {
-        Self {
-            code: self.code,
-            message: self.message,
-            resource: resource.to_string(),
-        }
-    }
-}
 
 #[derive(Debug, Error, AsRefStr)]
 pub enum S3Error {
@@ -737,41 +708,53 @@ impl S3Error {
 
 impl S3Error {
     pub fn into_response_with_resource(self, resource: &str) -> Response {
-        let status_code = self.http_status_code();
-        let mut response: Response = match Xml(Error::from(self).with_resource(resource)).try_into()
-        {
-            Ok(resp) => resp,
-            Err(_) => format!(
-                r#"
+        let body = format!(
+            r#"
 <?xml version="1.0" encoding="UTF-8"?>
 <Error>
-    <Code>InternalError</Code>
-    <Message>An internal error occurred. Try again.</Message>
-    <Resource>{resource}</Resource>
-</Error>"#
-            )
-            .into_response(),
-        };
-        *response.status_mut() = status_code;
-        response
+    <Code>{}</Code>
+    <Message>{}</Message>
+    <Resource>{}</Resource>
+</Error>"#,
+            self.as_ref(),
+            self,
+            resource
+        );
+
+        (
+            self.http_status_code(),
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/xml"),
+            )],
+            body,
+        )
+            .into_response()
     }
 }
 
 impl IntoResponse for S3Error {
     fn into_response(self) -> Response {
-        let status_code = self.http_status_code();
-        let mut response: Response = match Xml(Error::from(self)).try_into() {
-            Ok(resp) => resp,
-            Err(_) => r#"
+        let body = format!(
+            r#"
 <?xml version="1.0" encoding="UTF-8"?>
 <Error>
-    <Code>InternalError</Code>
-    <Message>An internal error occurred. Try again.</Message>
-</Error>"#
-                .into_response(),
-        };
-        *response.status_mut() = status_code;
-        response
+    <Code>{}</Code>
+    <Message>{}</Message>
+</Error>"#,
+            self.as_ref(),
+            self,
+        );
+
+        (
+            self.http_status_code(),
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/xml"),
+            )],
+            body,
+        )
+            .into_response()
     }
 }
 

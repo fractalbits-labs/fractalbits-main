@@ -3,7 +3,7 @@ use crate::BlobId;
 use rkyv::{Archive, Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Archive, Deserialize, Serialize, PartialEq)]
+#[derive(Archive, Deserialize, Serialize, PartialEq, Debug)]
 pub struct ObjectLayout {
     pub timestamp: u64,
     pub version_id: Uuid, // v4
@@ -58,13 +58,13 @@ impl ObjectLayout {
     }
 }
 
-#[derive(Archive, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Archive, Deserialize, Serialize, PartialEq)]
 pub enum ObjectState {
     Normal(ObjectData),
     Mpu(MpuState),
 }
 
-#[derive(Archive, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Archive, Deserialize, Serialize, PartialEq)]
 pub enum MpuState {
     Uploading,
     Aborted,
@@ -72,7 +72,7 @@ pub enum MpuState {
 }
 
 /// Data stored in normal object or mpu parts
-#[derive(Archive, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Archive, Deserialize, Serialize, PartialEq)]
 pub struct ObjectData {
     pub size: u64,
     pub etag: String,

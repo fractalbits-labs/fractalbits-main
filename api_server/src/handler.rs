@@ -135,10 +135,12 @@ async fn any_handler_inner(
             let bucket = bucket::resolve_bucket(bucket_name, rpc_client_rss.clone()).await?;
             put_handler(
                 request,
+                api_key,
                 &bucket,
                 key,
                 rpc_client_nss,
                 rpc_client_bss,
+                rpc_client_rss,
                 blob_deletion,
                 put_endpoint,
             )
@@ -242,12 +244,15 @@ async fn get_handler(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn put_handler(
     request: Request,
+    api_key: Versioned<ApiKey>,
     bucket: &Bucket,
     key: String,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
+    rpc_client_rss: ArcRpcClientRss,
     blob_deletion: Sender<(BlobId, usize)>,
     endpoint: PutEndpoint,
 ) -> Result<Response, S3Error> {
@@ -277,7 +282,15 @@ async fn put_handler(
             .await
         }
         PutEndpoint::CopyObject => {
-            put::copy_object(request, bucket, key, rpc_client_nss, rpc_client_bss).await
+            put::copy_object(
+                request,
+                api_key,
+                bucket,
+                key,
+                rpc_client_nss,
+                rpc_client_rss,
+            )
+            .await
         }
     }
 }

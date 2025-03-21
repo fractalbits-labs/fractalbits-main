@@ -139,6 +139,7 @@ dependencies = [
  "itertools",
  "md-5",
  "nom",
+ "percent-encoding",
  "pin-project-lite",
  "prost",
  "quick-xml",

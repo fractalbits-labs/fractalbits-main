@@ -3,13 +3,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     handler::{
+        bucket,
         common::{
+            get_raw_object,
+            request::extract::BucketNameAndKey,
             response::xml::Xml,
             s3_error::S3Error,
             signature::checksum::{
                 request_checksum_value, request_trailer_checksum_algorithm, ChecksumValue,
                 ExpectedChecksums,
             },
+            time,
         },
         Request,
     },
@@ -22,12 +26,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
-use bucket_tables::bucket_table::Bucket;
+use bucket_tables::{api_key_table::ApiKey, bucket_table::Bucket, table::Versioned};
 use futures::{StreamExt, TryStreamExt};
 use rand::{rngs::OsRng, RngCore};
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
 use rpc_client_bss::{message::MessageHeader, RpcClientBss};
 use rpc_client_nss::{rpc::put_inode_response, RpcClientNss};
+use rpc_client_rss::ArcRpcClientRss;
 use serde::{Deserialize, Serialize};
 
 use super::block_data_stream::BlockDataStream;
@@ -41,7 +46,7 @@ struct HeaderOpts {
     content_encoding: Option<String>,
     content_language: Option<String>,
     content_type: Option<String>,
-    x_amz_copy_source: Option<String>,
+    x_amz_copy_source: String, // required
     x_amz_copy_source_if_match: Option<String>,
     x_amz_copy_source_if_modified_since: Option<String>,
     x_amz_copy_source_if_none_match: Option<String>,
@@ -114,9 +119,9 @@ impl HeaderOpts {
                 .map(|x| x.to_owned()),
             x_amz_copy_source: headers
                 .get("x-amz-copy-source")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .ok_or(S3Error::InvalidArgument2)?
+                .to_str()?
+                .to_owned(),
             x_amz_copy_source_if_match: headers
                 .get("x-amz-copy-source-if-match")
                 .map(|x| x.to_str())
@@ -320,7 +325,7 @@ impl CopyObjectResult {
                 self.checksum_sha256 = Some(BASE64_STANDARD.encode(sha256));
                 self.checksum_type = Some("SHA256".to_string());
             }
-            None => (),
+            None => {}
         }
         self
     }
@@ -328,11 +333,42 @@ impl CopyObjectResult {
 
 pub async fn copy_object(
     request: Request,
+    api_key: Versioned<ApiKey>,
     _bucket: &Bucket,
     _key: String,
-    _rpc_client_nss: &RpcClientNss,
-    _rpc_client_bss: &RpcClientBss,
+    rpc_client_nss: &RpcClientNss,
+    rpc_client_rss: ArcRpcClientRss,
 ) -> Result<Response, S3Error> {
-    let _header_opts = HeaderOpts::from_headers(request.headers())?;
-    Xml(CopyObjectResult::default()).try_into()
+    let header_opts = HeaderOpts::from_headers(request.headers())?;
+    let source_obj = get_copy_source_object(
+        api_key,
+        &header_opts.x_amz_copy_source,
+        rpc_client_nss,
+        rpc_client_rss,
+    )
+    .await?;
+    Xml(CopyObjectResult::default()
+        .etag(source_obj.etag()?)
+        .last_modified(time::format_http_date(source_obj.timestamp))
+        .checksum(source_obj.checksum()?))
+    .try_into()
+}
+
+async fn get_copy_source_object(
+    api_key: Versioned<ApiKey>,
+    copy_source: &str,
+    rpc_client_nss: &RpcClientNss,
+    rpc_client_rss: ArcRpcClientRss,
+) -> Result<ObjectLayout, S3Error> {
+    let copy_source = percent_encoding::percent_decode_str(copy_source).decode_utf8()?;
+
+    let (source_bucket_name, source_key) =
+        BucketNameAndKey::get_bucket_and_key_from_path(&copy_source);
+
+    if !api_key.data.allow_read(&source_bucket_name) {
+        return Err(S3Error::AccessDenied);
+    }
+
+    let source_bucket = bucket::resolve_bucket(source_bucket_name, rpc_client_rss).await?;
+    get_raw_object(rpc_client_nss, source_bucket.root_blob_name, source_key).await
 }

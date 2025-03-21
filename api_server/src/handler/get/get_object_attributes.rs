@@ -35,7 +35,7 @@ struct HeaderOpts {
     x_amz_server_side_encryption_customer_key_md5: Option<String>,
     x_amz_request_payer: Option<String>,
     x_amz_expected_bucket_owner: Option<String>,
-    x_amz_object_attributes: HashSet<String>,
+    x_amz_object_attributes: HashSet<String>, // required
 }
 
 impl HeaderOpts {

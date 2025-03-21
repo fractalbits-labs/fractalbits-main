@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::convert::From;
+use std::{convert::From, str::Utf8Error};
 
 use axum::{
     extract::rejection::QueryRejection,
@@ -839,5 +839,12 @@ impl From<InvalidHeaderValue> for S3Error {
     fn from(value: InvalidHeaderValue) -> Self {
         tracing::error!("InvalidHeaderValue: {value}");
         Self::InvalidURI
+    }
+}
+
+impl From<Utf8Error> for S3Error {
+    fn from(value: Utf8Error) -> Self {
+        tracing::error!("Utf8Error: {value}");
+        Self::UnexpectedContent
     }
 }

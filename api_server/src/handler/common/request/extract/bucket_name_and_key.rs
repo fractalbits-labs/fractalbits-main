@@ -23,19 +23,7 @@ impl BucketNameAndKey {
         Ok(bucket_name.map(|s| s.to_owned()))
     }
 
-    fn full_key_from_uri_path(parts: &mut Parts) -> String {
-        match parts.uri.path() {
-            "/" => "/".into(),
-            key => {
-                // nss requires '\0' for now
-                let mut key = key.to_owned();
-                key.push('\0');
-                key
-            }
-        }
-    }
-
-    fn get_bucket_and_key_from_path(full_key: String) -> (String, String) {
+    pub fn get_bucket_and_key_from_path(full_key: &str) -> (String, String) {
         let mut bucket = String::new();
         let mut key = String::from("/");
         let mut bucket_part = true;
@@ -50,9 +38,8 @@ impl BucketNameAndKey {
                 key.push(c);
             }
         });
-        // Not a real key, removing hacking for nss
-        if key == "/\0" {
-            key.pop();
+        if key != "/" {
+            key.push('\0'); // nss requires '\0' for now
         }
         (bucket, key)
     }
@@ -66,13 +53,16 @@ where
     type Rejection = S3Error;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let full_key = Self::full_key_from_uri_path(parts);
+        let mut full_key = parts.uri.path().to_owned();
         let config = ArcConfig::from_ref(state);
         let (bucket_name, key) = match Self::buket_name_from_host(parts, config).await? {
             // Virtual-hosted-style request
-            Some(bucket_name) => (bucket_name, full_key),
+            Some(bucket_name) => {
+                full_key.push('\0'); // nss requires '\0' for now
+                (bucket_name, full_key)
+            }
             // Path-style request
-            None => Self::get_bucket_and_key_from_path(full_key),
+            None => Self::get_bucket_and_key_from_path(&full_key),
         };
         Ok(Self { bucket_name, key })
     }

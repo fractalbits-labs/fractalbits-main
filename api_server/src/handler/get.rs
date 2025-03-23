@@ -5,12 +5,12 @@ mod list_objects;
 mod list_objects_v2;
 mod list_parts;
 
-pub use get_object::get_object;
-pub use get_object_attributes::get_object_attributes;
-pub use list_multipart_uploads::list_multipart_uploads;
-pub use list_objects::list_objects;
-pub use list_objects_v2::list_objects_v2;
-pub use list_parts::list_parts;
+pub use get_object::get_object_handler;
+pub use get_object_attributes::get_object_attributes_handler;
+pub use list_multipart_uploads::list_multipart_uploads_handler;
+pub use list_objects::list_objects_handler;
+pub use list_objects_v2::list_objects_v2_handler;
+pub use list_parts::list_parts_handler;
 
 use super::common::authorization::Authorization;
 

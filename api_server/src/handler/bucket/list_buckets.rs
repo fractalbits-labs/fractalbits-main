@@ -73,7 +73,7 @@ struct Owner {
     id: String,
 }
 
-pub async fn list_buckets(
+pub async fn list_buckets_handler(
     request: Request,
     rpc_client_rss: ArcRpcClientRss,
     region: &str,

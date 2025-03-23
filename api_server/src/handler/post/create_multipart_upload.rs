@@ -34,7 +34,7 @@ struct InitiateMultipartUploadResult {
     upload_id: String,
 }
 
-pub async fn create_multipart_upload(
+pub async fn create_multipart_upload_handler(
     _request: Request,
     bucket: &Bucket,
     mut key: String,

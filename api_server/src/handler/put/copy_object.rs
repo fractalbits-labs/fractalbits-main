@@ -331,7 +331,7 @@ impl CopyObjectResult {
     }
 }
 
-pub async fn copy_object(
+pub async fn copy_object_handler(
     request: Request,
     api_key: Versioned<ApiKey>,
     _bucket: &Bucket,

@@ -113,7 +113,7 @@ struct CommonPrefixes {
     prefix: String,
 }
 
-pub async fn list_objects_v2(
+pub async fn list_objects_v2_handler(
     request: Request,
     bucket: &Bucket,
     rpc_client_nss: &RpcClientNss,

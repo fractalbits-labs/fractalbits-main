@@ -12,7 +12,7 @@ use crate::{
 };
 use bucket_tables::bucket_table::Bucket;
 
-pub async fn abort_multipart_upload(
+pub async fn abort_multipart_upload_handler(
     _request: Request,
     bucket: &Bucket,
     key: String,

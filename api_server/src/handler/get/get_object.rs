@@ -36,7 +36,7 @@ pub struct GetObjectOptions {
     response_expires: Option<String>,
 }
 
-pub async fn get_object(
+pub async fn get_object_handler(
     request: Request,
     bucket: &Bucket,
     key: String,

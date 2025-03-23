@@ -3,9 +3,9 @@ mod copy_object;
 mod put_object;
 mod upload_part;
 
-pub use copy_object::copy_object;
-pub use put_object::put_object;
-pub use upload_part::upload_part;
+pub use copy_object::copy_object_handler;
+pub use put_object::put_object_handler;
+pub use upload_part::upload_part_handler;
 
 use super::common::authorization::Authorization;
 

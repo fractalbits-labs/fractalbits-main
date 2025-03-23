@@ -10,7 +10,7 @@ use crate::{
 };
 use bucket_tables::bucket_table::Bucket;
 
-pub async fn delete_object(
+pub async fn delete_object_handler(
     bucket: &Bucket,
     key: String,
     rpc_client_nss: &RpcClientNss,

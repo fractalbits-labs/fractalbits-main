@@ -42,7 +42,7 @@ struct BucketConfig {
     bucket_type: String,
 }
 
-pub async fn create_bucket(
+pub async fn create_bucket_handler(
     api_key: Versioned<ApiKey>,
     bucket_name: String,
     request: Request,

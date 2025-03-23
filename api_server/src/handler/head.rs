@@ -1,6 +1,6 @@
 mod head_object;
 
-pub use head_object::head_object;
+pub use head_object::head_object_handler;
 
 use super::common::authorization::Authorization;
 

@@ -30,7 +30,7 @@ pub struct HeadObjectOptions {
     response_expires: Option<String>,
 }
 
-pub async fn head_object(
+pub async fn head_object_handler(
     request: Request,
     bucket: &Bucket,
     key: String,

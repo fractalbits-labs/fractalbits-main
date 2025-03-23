@@ -185,7 +185,7 @@ async fn bucket_handler(
 ) -> Result<Response, S3Error> {
     match endpoint {
         BucketEndpoint::CreateBucket => {
-            bucket::create_bucket(
+            bucket::create_bucket_handler(
                 api_key,
                 bucket_name,
                 request,
@@ -197,13 +197,14 @@ async fn bucket_handler(
         }
         BucketEndpoint::DeleteBucket => {
             let bucket = bucket::resolve_bucket(bucket_name, rpc_client_rss.clone()).await?;
-            bucket::delete_bucket(api_key, &bucket, request, rpc_client_nss, rpc_client_rss).await
+            bucket::delete_bucket_handler(api_key, &bucket, request, rpc_client_nss, rpc_client_rss)
+                .await
         }
         BucketEndpoint::HeadBucket => {
-            bucket::head_bucket(api_key, bucket_name, rpc_client_rss).await
+            bucket::head_bucket_handler(api_key, bucket_name, rpc_client_rss).await
         }
         BucketEndpoint::ListBuckets => {
-            bucket::list_buckets(request, rpc_client_rss, &app.config.s3_region).await
+            bucket::list_buckets_handler(request, rpc_client_rss, &app.config.s3_region).await
         }
     }
 }
@@ -216,7 +217,9 @@ async fn head_handler(
     endpoint: HeadEndpoint,
 ) -> Result<Response, S3Error> {
     match endpoint {
-        HeadEndpoint::HeadObject => head::head_object(request, bucket, key, rpc_client_nss).await,
+        HeadEndpoint::HeadObject => {
+            head::head_object_handler(request, bucket, key, rpc_client_nss).await
+        }
     }
 }
 
@@ -230,17 +233,23 @@ async fn get_handler(
 ) -> Result<Response, S3Error> {
     match endpoint {
         GetEndpoint::GetObject => {
-            get::get_object(request, bucket, key, rpc_client_nss, rpc_client_bss).await
+            get::get_object_handler(request, bucket, key, rpc_client_nss, rpc_client_bss).await
         }
         GetEndpoint::GetObjectAttributes => {
-            get::get_object_attributes(request, bucket, key, rpc_client_nss).await
+            get::get_object_attributes_handler(request, bucket, key, rpc_client_nss).await
         }
         GetEndpoint::ListMultipartUploads => {
-            get::list_multipart_uploads(request, rpc_client_nss).await
+            get::list_multipart_uploads_handler(request, rpc_client_nss).await
         }
-        GetEndpoint::ListObjects => get::list_objects(request, bucket, rpc_client_nss).await,
-        GetEndpoint::ListObjectsV2 => get::list_objects_v2(request, bucket, rpc_client_nss).await,
-        GetEndpoint::ListParts => get::list_parts(request, bucket, key, rpc_client_nss).await,
+        GetEndpoint::ListObjects => {
+            get::list_objects_handler(request, bucket, rpc_client_nss).await
+        }
+        GetEndpoint::ListObjectsV2 => {
+            get::list_objects_v2_handler(request, bucket, rpc_client_nss).await
+        }
+        GetEndpoint::ListParts => {
+            get::list_parts_handler(request, bucket, key, rpc_client_nss).await
+        }
     }
 }
 
@@ -258,7 +267,7 @@ async fn put_handler(
 ) -> Result<Response, S3Error> {
     match endpoint {
         PutEndpoint::PutObject => {
-            put::put_object(
+            put::put_object_handler(
                 request,
                 bucket,
                 key,
@@ -269,7 +278,7 @@ async fn put_handler(
             .await
         }
         PutEndpoint::UploadPart(part_number, upload_id) => {
-            put::upload_part(
+            put::upload_part_handler(
                 request,
                 bucket,
                 key,
@@ -282,7 +291,7 @@ async fn put_handler(
             .await
         }
         PutEndpoint::CopyObject => {
-            put::copy_object(
+            put::copy_object_handler(
                 request,
                 api_key,
                 bucket,
@@ -305,7 +314,7 @@ async fn post_handler(
 ) -> Result<Response, S3Error> {
     match endpoint {
         PostEndpoint::CompleteMultipartUpload(upload_id) => {
-            post::complete_multipart_upload(
+            post::complete_multipart_upload_handler(
                 request,
                 bucket,
                 key,
@@ -316,10 +325,10 @@ async fn post_handler(
             .await
         }
         PostEndpoint::CreateMultipartUpload => {
-            post::create_multipart_upload(request, bucket, key, rpc_client_nss).await
+            post::create_multipart_upload_handler(request, bucket, key, rpc_client_nss).await
         }
         PostEndpoint::DeleteObjects => {
-            post::delete_objects(request, rpc_client_nss, blob_deletion).await
+            post::delete_objects_handler(request, rpc_client_nss, blob_deletion).await
         }
     }
 }
@@ -335,7 +344,7 @@ async fn delete_handler(
 ) -> Result<Response, S3Error> {
     match endpoint {
         DeleteEndpoint::AbortMultipartUpload(upload_id) => {
-            delete::abort_multipart_upload(
+            delete::abort_multipart_upload_handler(
                 request,
                 bucket,
                 key,
@@ -346,7 +355,7 @@ async fn delete_handler(
             .await
         }
         DeleteEndpoint::DeleteObject => {
-            delete::delete_object(bucket, key, rpc_client_nss, blob_deletion).await
+            delete::delete_object_handler(bucket, key, rpc_client_nss, blob_deletion).await
         }
     }
 }

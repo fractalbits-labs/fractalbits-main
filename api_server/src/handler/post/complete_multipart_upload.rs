@@ -6,7 +6,7 @@ use crate::{
             get_raw_object, list_raw_objects, mpu_get_part_prefix, mpu_parse_part_number,
             response::xml::Xml, s3_error::S3Error,
         },
-        delete::delete_object,
+        delete::delete_object_handler,
         Request,
     },
     object_layout::{MpuState, ObjectState},
@@ -56,7 +56,7 @@ struct CompleteMultipartUploadResult {
     checksum_sha256: String,
 }
 
-pub async fn complete_multipart_upload(
+pub async fn complete_multipart_upload_handler(
     request: Request,
     bucket: &Bucket,
     mut key: String,
@@ -104,7 +104,7 @@ pub async fn complete_multipart_upload(
         return Err(S3Error::InvalidPart);
     }
     for mpu_key in invalid_part_keys.iter() {
-        delete_object(
+        delete_object_handler(
             bucket,
             mpu_key.clone(),
             rpc_client_nss,

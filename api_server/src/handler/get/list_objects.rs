@@ -105,7 +105,7 @@ struct CommonPrefixes {
     prefix: String,
 }
 
-pub async fn list_objects(
+pub async fn list_objects_handler(
     request: Request,
     bucket: &Bucket,
     rpc_client_nss: &RpcClientNss,

@@ -10,7 +10,7 @@ use rpc_client_rss::{ArcRpcClientRss, RpcErrorRss};
 
 use crate::handler::{common::s3_error::S3Error, Request};
 
-pub async fn delete_bucket(
+pub async fn delete_bucket_handler(
     api_key: Versioned<ApiKey>,
     bucket: &Bucket,
     _request: Request,

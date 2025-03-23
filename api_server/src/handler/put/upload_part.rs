@@ -6,7 +6,7 @@ use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 
 use crate::handler::common::{mpu_get_part_prefix, s3_error::S3Error};
-use crate::handler::put::put_object;
+use crate::handler::put::put_object_handler;
 use crate::handler::Request;
 use crate::BlobId;
 use bucket_tables::bucket_table::Bucket;
@@ -31,7 +31,7 @@ struct ResponseHeaders {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn upload_part(
+pub async fn upload_part_handler(
     request: Request,
     bucket: &Bucket,
     key: String,
@@ -48,7 +48,7 @@ pub async fn upload_part(
 
     let mut key = mpu_get_part_prefix(key, part_number);
     key.push('\0');
-    put_object(
+    put_object_handler(
         request,
         bucket,
         key,

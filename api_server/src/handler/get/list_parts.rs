@@ -65,7 +65,7 @@ struct Owner {
     id: String,
 }
 
-pub async fn list_parts(
+pub async fn list_parts_handler(
     request: Request,
     bucket: &Bucket,
     key: String,

@@ -5,7 +5,7 @@ use rpc_client_rss::ArcRpcClientRss;
 use super::resolve_bucket;
 use crate::handler::common::s3_error::S3Error;
 
-pub async fn head_bucket(
+pub async fn head_bucket_handler(
     api_key: Versioned<ApiKey>,
     bucket_name: String,
     rpc_client_rss: ArcRpcClientRss,

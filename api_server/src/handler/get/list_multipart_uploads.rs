@@ -67,7 +67,7 @@ struct CommonPrefixes {
     prefix: String,
 }
 
-pub async fn list_multipart_uploads(
+pub async fn list_multipart_uploads_handler(
     request: Request,
     _rpc_client_nss: &RpcClientNss,
 ) -> Result<Response, S3Error> {

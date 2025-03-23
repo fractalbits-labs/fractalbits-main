@@ -27,7 +27,7 @@ struct Error {
     message: String,
 }
 
-pub async fn delete_objects(
+pub async fn delete_objects_handler(
     _request: Request,
     _rpc_client_nss: &RpcClientNss,
     _blob_deletion: Sender<(BlobId, usize)>,

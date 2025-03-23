@@ -195,7 +195,7 @@ struct Part {
     size: usize,
 }
 
-pub async fn get_object_attributes(
+pub async fn get_object_attributes_handler(
     request: Request,
     bucket: &Bucket,
     key: String,

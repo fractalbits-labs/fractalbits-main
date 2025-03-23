@@ -28,7 +28,7 @@ use uuid::Uuid;
 
 use super::block_data_stream::BlockDataStream;
 
-pub async fn put_object(
+pub async fn put_object_handler(
     request: Request,
     bucket: &Bucket,
     key: String,

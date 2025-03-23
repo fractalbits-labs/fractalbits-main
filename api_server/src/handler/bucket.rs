@@ -3,10 +3,10 @@ mod delete_bucket;
 mod head_bucket;
 mod list_buckets;
 
-pub use create_bucket::create_bucket;
-pub use delete_bucket::delete_bucket;
-pub use head_bucket::head_bucket;
-pub use list_buckets::list_buckets;
+pub use create_bucket::create_bucket_handler;
+pub use delete_bucket::delete_bucket_handler;
+pub use head_bucket::head_bucket_handler;
+pub use list_buckets::list_buckets_handler;
 
 use super::common::{authorization::Authorization, s3_error::S3Error};
 use bucket_tables::{

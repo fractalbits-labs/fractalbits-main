@@ -1,5 +1,6 @@
 use axum::{
     extract::Query,
+    http::{header, HeaderMap, HeaderValue},
     response::{IntoResponse, Response},
     RequestPartsExt,
 };
@@ -26,7 +27,7 @@ use bucket_tables::bucket_table::Bucket;
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct GetObjectOptions {
+pub struct QueryOpts {
     #[serde(rename(deserialize = "partNumber"))]
     part_number: Option<u32>,
     #[serde(rename(deserialize = "versionId"))]
@@ -39,6 +40,45 @@ pub struct GetObjectOptions {
     response_expires: Option<String>,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Default)]
+struct HeaderOpts<'a> {
+    if_match: Option<&'a HeaderValue>,
+    if_modified_since: Option<&'a HeaderValue>,
+    if_none_match: Option<&'a HeaderValue>,
+    if_unmodified_since: Option<&'a HeaderValue>,
+    range: Option<&'a HeaderValue>,
+    x_amz_server_side_encryption_customer_algorithm: Option<&'a HeaderValue>,
+    x_amz_server_side_encryption_customer_key: Option<&'a HeaderValue>,
+    x_amz_server_side_encryption_customer_key_md5: Option<&'a HeaderValue>,
+    x_amz_request_payer: Option<&'a HeaderValue>,
+    x_amz_expected_bucket_owner: Option<&'a HeaderValue>,
+    x_amz_checksum_mode_enabled: bool,
+}
+
+impl<'a> HeaderOpts<'a> {
+    fn from_headers(headers: &'a HeaderMap) -> Result<Self, S3Error> {
+        Ok(Self {
+            if_match: headers.get(header::IF_MATCH),
+            if_modified_since: headers.get(header::IF_MODIFIED_SINCE),
+            if_none_match: headers.get(header::IF_NONE_MATCH),
+            if_unmodified_since: headers.get(header::IF_UNMODIFIED_SINCE),
+            range: headers.get(header::RANGE),
+            x_amz_server_side_encryption_customer_algorithm: headers
+                .get("x-amz-server-side-encryption-customer-algorithm"),
+            x_amz_server_side_encryption_customer_key: headers
+                .get("x-amz-server-side-encryption-customer-key"),
+            x_amz_server_side_encryption_customer_key_md5: headers
+                .get("x-amz-server-side-encryption-customer-key-MD5"),
+            x_amz_request_payer: headers.get("x-amz-request-payer"),
+            x_amz_expected_bucket_owner: headers.get("x-amz-expected-bucket-owner"),
+            x_amz_checksum_mode_enabled: headers
+                .get(X_AMZ_CHECKSUM_MODE)
+                .map(|x| x == "ENABLED")
+                .unwrap_or(false),
+        })
+    }
+}
 pub async fn get_object_handler(
     request: Request,
     bucket: &Bucket,
@@ -46,14 +86,15 @@ pub async fn get_object_handler(
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: &RpcClientBss,
 ) -> Result<Response, S3Error> {
-    let checksum_mode_enabled = checksum_mode_enabled(&request);
-    let Query(opts): Query<GetObjectOptions> = request.into_parts().0.extract().await?;
+    let mut parts = request.into_parts().0;
+    let Query(opts): Query<QueryOpts> = parts.extract().await?;
+    let header_opts = HeaderOpts::from_headers(&parts.headers)?;
     let object = get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key.clone()).await?;
     get_object_content(
         bucket,
         &object,
         key,
-        checksum_mode_enabled,
+        header_opts.x_amz_checksum_mode_enabled,
         opts.part_number,
         rpc_client_nss,
         rpc_client_bss,
@@ -146,13 +187,4 @@ async fn get_full_blob(
     }
 
     Ok(())
-}
-
-#[inline]
-fn checksum_mode_enabled(request: &Request) -> bool {
-    request
-        .headers()
-        .get(X_AMZ_CHECKSUM_MODE)
-        .map(|x| x == "ENABLED")
-        .unwrap_or(false)
 }

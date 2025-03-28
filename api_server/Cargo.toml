@@ -53,6 +53,7 @@ serde_bytes.workspace = true
 percent-encoding.workspace = true
 sync_wrapper.workspace = true
 tokio-stream.workspace = true
+http-range.workspace = true
 
 [dev-dependencies]
 aws-sdk-s3.workspace = true

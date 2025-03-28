@@ -12,6 +12,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use axum_extra::extract::rejection::HostRejection;
+use http_range::HttpRangeParseError;
 use rpc_client_bss::RpcErrorBss;
 use rpc_client_nss::RpcErrorNss;
 use rpc_client_rss::RpcErrorRss;
@@ -846,5 +847,19 @@ impl From<Utf8Error> for S3Error {
     fn from(value: Utf8Error) -> Self {
         tracing::error!("Utf8Error: {value}");
         Self::UnexpectedContent
+    }
+}
+
+impl From<HttpRangeParseError> for S3Error {
+    fn from(value: HttpRangeParseError) -> Self {
+        tracing::error!("HttpRangeParseError: {:?}", value);
+        Self::InvalidRange
+    }
+}
+
+impl From<axum::Error> for S3Error {
+    fn from(value: axum::Error) -> Self {
+        tracing::error!("axum::Error: {}", value);
+        Self::InternalError
     }
 }

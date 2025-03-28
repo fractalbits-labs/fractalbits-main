@@ -3,12 +3,13 @@ use std::sync::Arc;
 use axum::{
     body::{Body, BodyDataStream},
     extract::Query,
-    http::{header, HeaderMap, HeaderValue},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     RequestPartsExt,
 };
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
+use http_range::HttpRange;
 use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::RpcClientNss;
 use serde::Deserialize;
@@ -86,6 +87,7 @@ impl<'a> HeaderOpts<'a> {
         })
     }
 }
+
 pub async fn get_object_handler(
     request: Request,
     bucket: &Bucket,
@@ -97,27 +99,64 @@ pub async fn get_object_handler(
     let Query(opts): Query<QueryOpts> = parts.extract().await?;
     let header_opts = HeaderOpts::from_headers(&parts.headers)?;
     let object = get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key.clone()).await?;
+    let total_size = object.size()?;
+    let range = parse_range_header(header_opts.range, total_size)?;
     let checksum_mode_enabled = header_opts.x_amz_checksum_mode_enabled;
-    let (body, body_size, checksum) = get_object_content(
-        bucket,
-        &object,
-        key,
-        opts.part_number,
-        rpc_client_nss,
-        rpc_client_bss,
-    )
-    .await?;
+    match (opts.part_number, range) {
+        (_, None) => {
+            let (body, body_size, checksum) = get_object_content(
+                bucket,
+                &object,
+                key,
+                opts.part_number,
+                rpc_client_nss,
+                rpc_client_bss,
+            )
+            .await?;
 
-    let mut resp = body.into_response();
-    resp.headers_mut().insert(
-        header::CONTENT_LENGTH,
-        HeaderValue::from_str(&body_size.to_string())?,
-    );
-    if checksum_mode_enabled {
-        tracing::debug!("checksum_mode enabled, adding checksum: {:?}", checksum);
-        add_checksum_response_headers(&checksum, &mut resp)?;
+            let mut resp = body.into_response();
+            resp.headers_mut().insert(
+                header::CONTENT_LENGTH,
+                HeaderValue::from_str(&body_size.to_string())?,
+            );
+            if checksum_mode_enabled {
+                tracing::debug!("checksum_mode enabled, adding checksum: {:?}", checksum);
+                add_checksum_response_headers(&checksum, &mut resp)?;
+            }
+            Ok(resp)
+        }
+
+        (None, Some(range)) => {
+            let body_bytes = get_object_range_content(
+                bucket,
+                &object,
+                key,
+                range,
+                rpc_client_nss,
+                rpc_client_bss,
+            )
+            .await?;
+
+            let mut resp = body_bytes.into_response();
+            resp.headers_mut().insert(
+                header::CONTENT_LENGTH,
+                HeaderValue::from_str(&format!("{}", range.length))?,
+            );
+            resp.headers_mut().insert(
+                header::CONTENT_RANGE,
+                HeaderValue::from_str(&format!(
+                    "bytes {}-{}/{}",
+                    range.start,
+                    range.start + range.length - 1,
+                    total_size
+                ))?,
+            );
+            *resp.status_mut() = StatusCode::PARTIAL_CONTENT;
+            Ok(resp)
+        }
+
+        (Some(_), Some(_)) => Err(S3Error::InvalidArgument1),
     }
-    Ok(resp)
 }
 
 pub async fn get_object_content(
@@ -187,6 +226,73 @@ pub async fn get_object_content(
     }
 }
 
+async fn get_object_range_content(
+    bucket: &Bucket,
+    object: &ObjectLayout,
+    key: String,
+    range: HttpRange,
+    rpc_client_nss: &RpcClientNss,
+    rpc_client_bss: Arc<RpcClientBss>,
+) -> Result<Bytes, S3Error> {
+    // convert to std::ops::Range
+    let range = range.start as usize..(range.start + range.length) as usize;
+    match object.state {
+        ObjectState::Normal(ref obj_data) => {
+            let blob_id = object.blob_id()?;
+            let num_blocks = object.num_blocks()?;
+            let body_stream = get_full_blob_stream(rpc_client_bss, blob_id, num_blocks).await;
+            Ok(
+                axum::body::to_bytes(Body::from_stream(body_stream), obj_data.size as usize)
+                    .await?
+                    .slice(range),
+            )
+        }
+        ObjectState::Mpu(ref mpu_state) => match mpu_state {
+            MpuState::Uploading => {
+                tracing::warn!("invalid mpu state: Uploading");
+                Err(S3Error::InvalidObjectState)
+            }
+            MpuState::Aborted => {
+                tracing::warn!("invalid mpu state: Aborted");
+                Err(S3Error::InvalidObjectState)
+            }
+            MpuState::Completed { size, .. } => {
+                let mpu_prefix = mpu_get_part_prefix(key.clone(), 0);
+                let mpus = list_raw_objects(
+                    bucket.root_blob_name.clone(),
+                    rpc_client_nss,
+                    10000,
+                    mpu_prefix,
+                    "".into(),
+                    false,
+                )
+                .await?;
+                let body_stream = futures::stream::iter(mpus.into_iter())
+                    .then(move |(_key, mpu_obj)| {
+                        let rpc_client_bss = rpc_client_bss.clone();
+                        async move {
+                            let blob_id = match mpu_obj.blob_id() {
+                                Ok(blob_id) => blob_id,
+                                Err(e) => return Err(axum::Error::new(e)),
+                            };
+                            let num_blocks = match mpu_obj.num_blocks() {
+                                Ok(num_blocks) => num_blocks,
+                                Err(e) => return Err(axum::Error::new(e)),
+                            };
+                            Ok(get_full_blob_stream(rpc_client_bss, blob_id, num_blocks).await)
+                        }
+                    })
+                    .try_flatten();
+                Ok(
+                    axum::body::to_bytes(Body::from_stream(body_stream), *size as usize)
+                        .await?
+                        .slice(range),
+                )
+            }
+        },
+    }
+}
+
 async fn get_full_blob_stream(
     rpc_client_bss: Arc<RpcClientBss>,
     blob_id: BlobId,
@@ -206,4 +312,25 @@ async fn get_full_blob_stream(
         .try_flatten();
 
     Body::from_stream(body_stream).into_data_stream()
+}
+
+fn parse_range_header(
+    range_header: Option<&HeaderValue>,
+    total_size: u64,
+) -> Result<Option<http_range::HttpRange>, S3Error> {
+    let range = match range_header {
+        Some(range) => {
+            let range_str = range.to_str()?;
+            let mut ranges = http_range::HttpRange::parse(range_str, total_size)?;
+            if ranges.len() > 1 {
+                // Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
+                tracing::debug!("Found more than one ranges: {range_str}");
+                return Err(S3Error::InvalidRange);
+            } else {
+                ranges.pop()
+            }
+        }
+        None => None,
+    };
+    Ok(range)
 }

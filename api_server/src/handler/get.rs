@@ -5,7 +5,10 @@ mod list_objects;
 mod list_objects_v2;
 mod list_parts;
 
-pub use get_object::{get_object_content, get_object_handler, HeaderOpts as GetObjectHeaderOpts};
+pub use get_object::{
+    get_object_content, get_object_handler, override_headers, HeaderOpts as GetObjectHeaderOpts,
+    QueryOpts as GetObjectQueryOpts,
+};
 pub use get_object_attributes::get_object_attributes_handler;
 pub use list_multipart_uploads::list_multipart_uploads_handler;
 pub use list_objects::list_objects_handler;

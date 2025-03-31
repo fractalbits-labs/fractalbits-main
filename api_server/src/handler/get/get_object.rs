@@ -153,7 +153,7 @@ pub async fn get_object_handler(
     }
 }
 
-fn override_headers(resp: &mut Response, query_opts: &QueryOpts) -> Result<(), S3Error> {
+pub fn override_headers(resp: &mut Response, query_opts: &QueryOpts) -> Result<(), S3Error> {
     // override headers, see https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html
     let overrides = [
         (header::CACHE_CONTROL, &query_opts.response_cache_control),

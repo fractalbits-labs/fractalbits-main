@@ -208,7 +208,7 @@ pub async fn get_object_content(
                 tracing::warn!("invalid mpu state: Aborted");
                 Err(S3Error::InvalidObjectState)
             }
-            MpuState::Completed { size, .. } => {
+            MpuState::Completed(core_meta_data) => {
                 let mpu_prefix = mpu_get_part_prefix(key.clone(), 0);
                 let mut mpus = list_raw_objects(
                     bucket.root_blob_name.clone(),
@@ -221,7 +221,7 @@ pub async fn get_object_content(
                 .await?;
                 // Do filtering if there is part_number option
                 let (mpus_iter, body_size) = match part_number {
-                    None => (mpus.into_iter(), *size),
+                    None => (mpus.into_iter(), core_meta_data.size),
                     Some(n) => {
                         let mpu_obj = mpus.swap_remove(n as usize - 1);
                         let mpu_size = mpu_obj.1.size()?;

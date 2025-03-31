@@ -90,12 +90,14 @@ pub async fn put_object_handler(
         version_id,
         block_size: ObjectLayout::DEFAULT_BLOCK_SIZE,
         timestamp,
-        state: ObjectState::Normal(ObjectData {
-            size,
+        state: ObjectState::Normal(ObjectMetaData {
             blob_id,
-            etag: etag.clone(),
-            checksum,
-            headers,
+            core_meta_data: ObjectCoreMetaData {
+                size,
+                etag: etag.clone(),
+                headers,
+                checksum,
+            },
         }),
     };
     let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new())?;

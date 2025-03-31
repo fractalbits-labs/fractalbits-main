@@ -9,7 +9,7 @@ use crate::{
         delete::delete_object_handler,
         Request,
     },
-    object_layout::{MpuState, ObjectState},
+    object_layout::{MpuState, ObjectCoreMetaData, ObjectState},
     BlobId,
 };
 use axum::response::Response;
@@ -114,11 +114,12 @@ pub async fn complete_multipart_upload_handler(
         .await?;
     }
 
-    object.state = ObjectState::Mpu(MpuState::Completed {
+    object.state = ObjectState::Mpu(MpuState::Completed(ObjectCoreMetaData {
         size: total_size,
         etag: upload_id.clone(),
         headers,
-    });
+        checksum: None,
+    }));
     let new_object_bytes = to_bytes_in::<_, Error>(&object, Vec::new())?;
     let resp = rpc_client_nss
         .put_inode(

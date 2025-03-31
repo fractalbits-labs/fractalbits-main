@@ -31,8 +31,8 @@ impl ObjectLayout {
     #[inline]
     pub fn size(&self) -> Result<u64, S3Error> {
         match self.state {
-            ObjectState::Normal(ref data) => Ok(data.size),
-            ObjectState::Mpu(MpuState::Completed { size, .. }) => Ok(size),
+            ObjectState::Normal(ref data) => Ok(data.core_meta_data.size),
+            ObjectState::Mpu(MpuState::Completed(ref core_meta_data)) => Ok(core_meta_data.size),
             _ => Err(S3Error::InvalidObjectState),
         }
     }
@@ -40,8 +40,10 @@ impl ObjectLayout {
     #[inline]
     pub fn etag(&self) -> Result<String, S3Error> {
         match self.state {
-            ObjectState::Normal(ref data) => Ok(data.etag.clone()),
-            ObjectState::Mpu(MpuState::Completed { ref etag, .. }) => Ok(etag.clone()),
+            ObjectState::Normal(ref data) => Ok(data.core_meta_data.etag.clone()),
+            ObjectState::Mpu(MpuState::Completed(ref core_meta_data)) => {
+                Ok(core_meta_data.etag.clone())
+            }
             _ => Err(S3Error::InvalidObjectState),
         }
     }
@@ -54,7 +56,7 @@ impl ObjectLayout {
     #[inline]
     pub fn checksum(&self) -> Result<Option<ChecksumValue>, S3Error> {
         match self.state {
-            ObjectState::Normal(ref data) => Ok(data.checksum),
+            ObjectState::Normal(ref data) => Ok(data.core_meta_data.checksum),
             ObjectState::Mpu(_) => Ok(None), // TODO
         }
     }
@@ -62,8 +64,10 @@ impl ObjectLayout {
     #[inline]
     pub fn headers(&self) -> Result<&HeaderList, S3Error> {
         match self.state {
-            ObjectState::Normal(ref data) => Ok(&data.headers),
-            ObjectState::Mpu(MpuState::Completed { ref headers, .. }) => Ok(headers),
+            ObjectState::Normal(ref data) => Ok(&data.core_meta_data.headers),
+            ObjectState::Mpu(MpuState::Completed(ref core_meta_data)) => {
+                Ok(&core_meta_data.headers)
+            }
             _ => Err(S3Error::InvalidObjectState),
         }
     }
@@ -71,7 +75,7 @@ impl ObjectLayout {
 
 #[derive(Debug, Archive, Deserialize, Serialize, PartialEq)]
 pub enum ObjectState {
-    Normal(ObjectData),
+    Normal(ObjectMetaData),
     Mpu(MpuState),
 }
 
@@ -79,19 +83,20 @@ pub enum ObjectState {
 pub enum MpuState {
     Uploading,
     Aborted,
-    Completed {
-        size: u64,
-        etag: String,
-        headers: HeaderList,
-    },
+    Completed(ObjectCoreMetaData),
 }
 
 /// Data stored in normal object or mpu parts
 #[derive(Debug, Archive, Deserialize, Serialize, PartialEq)]
-pub struct ObjectData {
+pub struct ObjectMetaData {
+    pub blob_id: BlobId,
+    pub core_meta_data: ObjectCoreMetaData,
+}
+
+#[derive(Debug, Archive, Deserialize, Serialize, PartialEq)]
+pub struct ObjectCoreMetaData {
     pub size: u64,
     pub etag: String,
-    pub blob_id: BlobId,
     pub headers: HeaderList,
     pub checksum: Option<ChecksumValue>,
 }

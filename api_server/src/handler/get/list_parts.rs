@@ -103,8 +103,8 @@ pub async fn list_parts_handler(
             ..Default::default()
         };
         if let ObjectState::Normal(obj) = mpu.state {
-            part.etag = obj.etag;
-            part.size = obj.size;
+            part.etag = obj.core_meta_data.etag;
+            part.size = obj.core_meta_data.size;
         }
         res.part.push(part);
     }

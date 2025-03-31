@@ -1,6 +1,6 @@
 use axum::{
     extract::Query,
-    http::{HeaderMap, HeaderValue},
+    http::{header, HeaderValue},
     response::{IntoResponse, Response},
     RequestPartsExt,
 };
@@ -9,15 +9,15 @@ use rpc_client_nss::RpcClientNss;
 use serde::Deserialize;
 
 use crate::handler::{
-    common::{get_raw_object, s3_error::S3Error, time},
+    common::{get_raw_object, object_headers, s3_error::S3Error},
+    get::GetObjectHeaderOpts,
     Request,
 };
-use crate::object_layout::{MpuState, ObjectState};
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct HeadObjectOptions {
+pub struct QueryOpts {
     #[serde(rename(deserialize = "partNumber"))]
     part_number: Option<u64>,
     #[serde(rename(deserialize = "versionId"))]
@@ -36,33 +36,17 @@ pub async fn head_object_handler(
     key: String,
     rpc_client_nss: &RpcClientNss,
 ) -> Result<Response, S3Error> {
-    let Query(_opts): Query<HeadObjectOptions> = request.into_parts().0.extract().await?;
+    let mut parts = request.into_parts().0;
+    let Query(_query_opts): Query<QueryOpts> = parts.extract().await?;
+    let header_opts = GetObjectHeaderOpts::from_headers(&parts.headers)?;
+    let checksum_mode_enabled = header_opts.x_amz_checksum_mode_enabled;
     let obj = get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key).await?;
 
-    let mut headers = HeaderMap::new();
-    let last_modified = time::format_http_date(obj.timestamp);
-    headers.insert(
-        "Last-Modified",
-        HeaderValue::from_str(&last_modified).unwrap(),
+    let mut resp = ().into_response();
+    resp.headers_mut().insert(
+        header::CONTENT_LENGTH,
+        HeaderValue::from_str(&obj.size()?.to_string())?,
     );
-    match obj.state {
-        ObjectState::Normal(obj_data) => {
-            headers.insert("ETag", HeaderValue::from_str(&obj_data.etag).unwrap());
-            headers.insert(
-                "Content-Length",
-                HeaderValue::from_str(&obj_data.size.to_string()).unwrap(),
-            );
-        }
-        ObjectState::Mpu(MpuState::Completed { size, etag }) => {
-            headers.insert("ETag", HeaderValue::from_str(&etag).unwrap());
-            headers.insert(
-                "Content-Length",
-                HeaderValue::from_str(&size.to_string()).unwrap(),
-            );
-        }
-        _ => {
-            return Err(S3Error::InvalidObjectState);
-        }
-    }
-    Ok(headers.into_response())
+    object_headers(&mut resp, &obj, checksum_mode_enabled)?;
+    Ok(resp)
 }

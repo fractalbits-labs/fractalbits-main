@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use crate::{
     handler::{
         common::{
-            get_raw_object, list_raw_objects, mpu_get_part_prefix, mpu_parse_part_number,
-            response::xml::Xml, s3_error::S3Error,
+            extract_metadata_headers, get_raw_object, list_raw_objects, mpu_get_part_prefix,
+            mpu_parse_part_number, response::xml::Xml, s3_error::S3Error,
         },
         delete::delete_object_handler,
         Request,
@@ -64,6 +64,7 @@ pub async fn complete_multipart_upload_handler(
     rpc_client_nss: &RpcClientNss,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
+    let headers = extract_metadata_headers(request.headers())?;
     let body = request.into_body().collect().await.unwrap();
     let req_body: CompleteMultipartUpload = quick_xml::de::from_reader(body.reader())?;
     let mut valid_part_numbers: HashSet<u32> =
@@ -116,6 +117,7 @@ pub async fn complete_multipart_upload_handler(
     object.state = ObjectState::Mpu(MpuState::Completed {
         size: total_size,
         etag: upload_id.clone(),
+        headers,
     });
     let new_object_bytes = to_bytes_in::<_, Error>(&object, Vec::new())?;
     let resp = rpc_client_nss

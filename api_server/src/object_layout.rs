@@ -3,6 +3,8 @@ use crate::BlobId;
 use rkyv::{Archive, Deserialize, Serialize};
 use uuid::Uuid;
 
+pub type HeaderList = Vec<(String, String)>;
+
 #[derive(Archive, Deserialize, Serialize, PartialEq, Debug)]
 pub struct ObjectLayout {
     pub timestamp: u64,
@@ -53,7 +55,16 @@ impl ObjectLayout {
     pub fn checksum(&self) -> Result<Option<ChecksumValue>, S3Error> {
         match self.state {
             ObjectState::Normal(ref data) => Ok(data.checksum),
-            ObjectState::Mpu(_) => todo!(),
+            ObjectState::Mpu(_) => Ok(None), // TODO
+        }
+    }
+
+    #[inline]
+    pub fn headers(&self) -> Result<&HeaderList, S3Error> {
+        match self.state {
+            ObjectState::Normal(ref data) => Ok(&data.headers),
+            ObjectState::Mpu(MpuState::Completed { ref headers, .. }) => Ok(headers),
+            _ => Err(S3Error::InvalidObjectState),
         }
     }
 }
@@ -68,7 +79,11 @@ pub enum ObjectState {
 pub enum MpuState {
     Uploading,
     Aborted,
-    Completed { size: u64, etag: String },
+    Completed {
+        size: u64,
+        etag: String,
+        headers: HeaderList,
+    },
 }
 
 /// Data stored in normal object or mpu parts
@@ -77,5 +92,6 @@ pub struct ObjectData {
     pub size: u64,
     pub etag: String,
     pub blob_id: BlobId,
+    pub headers: HeaderList,
     pub checksum: Option<ChecksumValue>,
 }

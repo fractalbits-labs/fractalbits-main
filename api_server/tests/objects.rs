@@ -198,86 +198,86 @@ async fn test_metadata() {
             .unwrap();
         assert!(r.e_tag.is_some());
 
-        //         let o = ctx
-        //             .client
-        //             .head_object()
-        //             .bucket(&bucket)
-        //             .key(STD_KEY)
-        //             .send()
-        //             .await
-        //             .unwrap();
-        //         assert!(o.e_tag.is_some());
-        //         assert_eq!(o.content_type.unwrap().as_str(), "application/test");
-        //         assert_eq!(o.cache_control, None);
-        //         assert_eq!(o.content_disposition, None);
-        //         assert_eq!(o.content_encoding, None);
-        //         assert_eq!(o.content_language, None);
-        //         assert_eq!(o.expires, None);
-        //         assert_eq!(o.metadata.unwrap_or_default().len(), 0);
+        let o = ctx
+            .client
+            .head_object()
+            .bucket(&bucket)
+            .key(STD_KEY)
+            .send()
+            .await
+            .unwrap();
+        assert!(o.e_tag.is_some());
+        assert_eq!(o.content_type.unwrap().as_str(), "application/test");
+        assert_eq!(o.cache_control, None);
+        assert_eq!(o.content_disposition, None);
+        assert_eq!(o.content_encoding, None);
+        assert_eq!(o.content_language, None);
+        assert_eq!(o.expires, None);
+        assert_eq!(o.metadata.unwrap_or_default().len(), 0);
 
-        //         let o = ctx
-        //             .client
-        //             .get_object()
-        //             .bucket(&bucket)
-        //             .key(STD_KEY)
-        //             .response_content_type("application/x-dummy-test")
-        //             .response_cache_control("ccdummy")
-        //             .response_content_disposition("cddummy")
-        //             .response_content_encoding("cedummy")
-        //             .response_content_language("cldummy")
-        //             .response_expires(exp)
-        //             .send()
-        //             .await
-        //             .unwrap();
-        //         assert!(o.e_tag.is_some());
-        //         assert_eq!(o.content_type.unwrap().as_str(), "application/x-dummy-test");
-        //         assert_eq!(o.cache_control.unwrap().as_str(), "ccdummy");
-        //         assert_eq!(o.content_disposition.unwrap().as_str(), "cddummy");
-        //         assert_eq!(o.content_encoding.unwrap().as_str(), "cedummy");
-        //         assert_eq!(o.content_language.unwrap().as_str(), "cldummy");
-        //         assert_eq!(o.expires.unwrap(), exp);
-        //     }
+        let o = ctx
+            .client
+            .get_object()
+            .bucket(&bucket)
+            .key(STD_KEY)
+            .response_content_type("application/x-dummy-test")
+            .response_cache_control("ccdummy")
+            .response_content_disposition("cddummy")
+            .response_content_encoding("cedummy")
+            .response_content_language("cldummy")
+            .response_expires(exp)
+            .send()
+            .await
+            .unwrap();
+        assert!(o.e_tag.is_some());
+        assert_eq!(o.content_type.unwrap().as_str(), "application/x-dummy-test");
+        assert_eq!(o.cache_control.unwrap().as_str(), "ccdummy");
+        assert_eq!(o.content_disposition.unwrap().as_str(), "cddummy");
+        assert_eq!(o.content_encoding.unwrap().as_str(), "cedummy");
+        assert_eq!(o.content_language.unwrap().as_str(), "cldummy");
+        assert_eq!(o.expires.unwrap(), exp);
+    }
 
-        //     {
-        //         let data = ByteStream::from_static(BODY);
-        //         let r = ctx
-        //             .client
-        //             .put_object()
-        //             .bucket(&bucket)
-        //             .key(STD_KEY)
-        //             .body(data)
-        //             .content_type("application/test")
-        //             .cache_control("cctest")
-        //             .content_disposition("cdtest")
-        //             .content_encoding("cetest")
-        //             .content_language("cltest")
-        //             .expires(exp2)
-        //             .metadata("testmeta", "hello people")
-        //             .metadata("nice-unicode-meta", "宅配便")
-        //             .send()
-        //             .await
-        //             .unwrap();
-        //         assert!(r.e_tag.is_some());
+    {
+        let data = ByteStream::from_static(BODY);
+        let r = ctx
+            .client
+            .put_object()
+            .bucket(&bucket)
+            .key(STD_KEY)
+            .body(data)
+            .content_type("application/test")
+            .cache_control("cctest")
+            .content_disposition("cdtest")
+            .content_encoding("cetest")
+            .content_language("cltest")
+            .expires(exp2)
+            .metadata("testmeta", "hello people")
+            .metadata("nice-unicode-meta", "宅配便")
+            .send()
+            .await
+            .unwrap();
+        assert!(r.e_tag.is_some());
 
-        //         let o = ctx
-        //             .client
-        //             .head_object()
-        //             .bucket(&bucket)
-        //             .key(STD_KEY)
-        //             .send()
-        //             .await
-        //             .unwrap();
-        //         assert!(o.e_tag.is_some());
-        //         assert_eq!(o.content_type.unwrap().as_str(), "application/test");
-        //         assert_eq!(o.cache_control.unwrap().as_str(), "cctest");
-        //         assert_eq!(o.content_disposition.unwrap().as_str(), "cdtest");
-        //         assert_eq!(o.content_encoding.unwrap().as_str(), "cetest");
-        //         assert_eq!(o.content_language.unwrap().as_str(), "cltest");
-        //         assert_eq!(o.expires.unwrap(), exp2);
-        //         let mut meta = o.metadata.unwrap();
-        //         assert_eq!(meta.remove("testmeta").unwrap(), "hello people");
-        //         assert_eq!(meta.remove("nice-unicode-meta").unwrap(), "宅配便");
-        //         assert_eq!(meta.len(), 0);
+        let o = ctx
+            .client
+            .head_object()
+            .bucket(&bucket)
+            .key(STD_KEY)
+            .send()
+            .await
+            .unwrap();
+        assert!(o.e_tag.is_some());
+        assert_eq!(o.content_type.unwrap().as_str(), "application/test");
+        assert_eq!(o.cache_control.unwrap().as_str(), "cctest");
+        assert_eq!(o.content_disposition.unwrap().as_str(), "cdtest");
+        assert_eq!(o.content_encoding.unwrap().as_str(), "cetest");
+        assert_eq!(o.content_language.unwrap().as_str(), "cltest");
+        assert_eq!(o.expires.unwrap(), exp2);
+        let mut meta = o.metadata.unwrap();
+        assert_eq!(meta.remove("testmeta").unwrap(), "hello people");
+        assert_eq!(meta.remove("nice-unicode-meta").unwrap(), "宅配便");
+        assert_eq!(meta.len(), 0);
 
         let o = ctx
             .client

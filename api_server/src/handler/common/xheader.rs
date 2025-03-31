@@ -36,3 +36,6 @@ pub const X_AMZ_PART_NUMBER_MARKER: HeaderName =
     HeaderName::from_static("x-amz-part-number-marker");
 pub const X_AMZ_OBJECT_ATTRIBUTES: HeaderName = HeaderName::from_static("x-amz-object-attributes");
 pub const X_AMZ_OBJECT_SIZE: HeaderName = HeaderName::from_static("x-amz-object-size");
+
+pub const X_AMZ_WEBSITE_REDIRECT_LOCATION: HeaderName =
+    HeaderName::from_static("x-amz-website-redirect-location");

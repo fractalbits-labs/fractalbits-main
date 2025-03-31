@@ -13,16 +13,13 @@ use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::RpcClientNss;
 use serde::Deserialize;
 
-use crate::{
-    handler::common::signature::checksum::ChecksumValue,
-    object_layout::{MpuState, ObjectState},
-};
-use crate::{handler::common::time, BlobId};
+use crate::object_layout::{MpuState, ObjectState};
+use crate::BlobId;
 use crate::{
     handler::{
         common::{
-            get_raw_object, list_raw_objects, mpu_get_part_prefix, s3_error::S3Error,
-            signature::checksum::add_checksum_response_headers, xheader,
+            get_raw_object, list_raw_objects, mpu_get_part_prefix, object_headers,
+            s3_error::S3Error, xheader,
         },
         Request,
     },
@@ -48,22 +45,22 @@ pub struct QueryOpts {
 
 #[allow(dead_code)]
 #[derive(Debug, Default)]
-struct HeaderOpts<'a> {
-    if_match: Option<&'a HeaderValue>,
-    if_modified_since: Option<&'a HeaderValue>,
-    if_none_match: Option<&'a HeaderValue>,
-    if_unmodified_since: Option<&'a HeaderValue>,
-    range: Option<&'a HeaderValue>,
-    x_amz_server_side_encryption_customer_algorithm: Option<&'a HeaderValue>,
-    x_amz_server_side_encryption_customer_key: Option<&'a HeaderValue>,
-    x_amz_server_side_encryption_customer_key_md5: Option<&'a HeaderValue>,
-    x_amz_request_payer: Option<&'a HeaderValue>,
-    x_amz_expected_bucket_owner: Option<&'a HeaderValue>,
-    x_amz_checksum_mode_enabled: bool,
+pub struct HeaderOpts<'a> {
+    pub if_match: Option<&'a HeaderValue>,
+    pub if_modified_since: Option<&'a HeaderValue>,
+    pub if_none_match: Option<&'a HeaderValue>,
+    pub if_unmodified_since: Option<&'a HeaderValue>,
+    pub range: Option<&'a HeaderValue>,
+    pub x_amz_server_side_encryption_customer_algorithm: Option<&'a HeaderValue>,
+    pub x_amz_server_side_encryption_customer_key: Option<&'a HeaderValue>,
+    pub x_amz_server_side_encryption_customer_key_md5: Option<&'a HeaderValue>,
+    pub x_amz_request_payer: Option<&'a HeaderValue>,
+    pub x_amz_expected_bucket_owner: Option<&'a HeaderValue>,
+    pub x_amz_checksum_mode_enabled: bool,
 }
 
 impl<'a> HeaderOpts<'a> {
-    fn from_headers(headers: &'a HeaderMap) -> Result<Self, S3Error> {
+    pub fn from_headers(headers: &'a HeaderMap) -> Result<Self, S3Error> {
         Ok(Self {
             if_match: headers.get(header::IF_MATCH),
             if_modified_since: headers.get(header::IF_MODIFIED_SINCE),
@@ -98,13 +95,11 @@ pub async fn get_object_handler(
     let header_opts = HeaderOpts::from_headers(&parts.headers)?;
     let object = get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key.clone()).await?;
     let total_size = object.size()?;
-    let etag = object.etag()?;
-    let last_modified = time::format_http_date(object.timestamp);
     let range = parse_range_header(header_opts.range, total_size)?;
     let checksum_mode_enabled = header_opts.x_amz_checksum_mode_enabled;
     match (query_opts.part_number, range) {
         (_, None) => {
-            let (body, body_size, checksum) = get_object_content(
+            let (body, body_size) = get_object_content(
                 bucket,
                 &object,
                 key,
@@ -115,20 +110,11 @@ pub async fn get_object_handler(
             .await?;
 
             let mut resp = body.into_response();
-            resp.headers_mut().insert(
-                header::LAST_MODIFIED,
-                HeaderValue::from_str(&last_modified)?,
-            );
-            resp.headers_mut()
-                .insert(header::ETAG, HeaderValue::from_str(&etag)?);
+            object_headers(&mut resp, &object, checksum_mode_enabled)?;
             resp.headers_mut().insert(
                 header::CONTENT_LENGTH,
                 HeaderValue::from_str(&body_size.to_string())?,
             );
-            if checksum_mode_enabled {
-                tracing::debug!("checksum_mode enabled, adding checksum: {:?}", checksum);
-                add_checksum_response_headers(&checksum, &mut resp)?;
-            }
 
             override_headers(&mut resp, &query_opts)?;
             Ok(resp)
@@ -204,14 +190,14 @@ pub async fn get_object_content(
     part_number: Option<u32>,
     rpc_client_nss: &RpcClientNss,
     rpc_client_bss: Arc<RpcClientBss>,
-) -> Result<(Body, u64, Option<ChecksumValue>), S3Error> {
+) -> Result<(Body, u64), S3Error> {
     match object.state {
-        ObjectState::Normal(ref obj_data) => {
+        ObjectState::Normal(ref _obj_data) => {
             let blob_id = object.blob_id()?;
             let num_blocks = object.num_blocks()?;
             let size = object.size()?;
             let body_stream = get_full_blob_stream(rpc_client_bss, blob_id, num_blocks).await;
-            Ok((Body::from_stream(body_stream), size, obj_data.checksum))
+            Ok((Body::from_stream(body_stream), size))
         }
         ObjectState::Mpu(ref mpu_state) => match mpu_state {
             MpuState::Uploading => {
@@ -222,7 +208,7 @@ pub async fn get_object_content(
                 tracing::warn!("invalid mpu state: Aborted");
                 Err(S3Error::InvalidObjectState)
             }
-            MpuState::Completed { size, etag: _ } => {
+            MpuState::Completed { size, .. } => {
                 let mpu_prefix = mpu_get_part_prefix(key.clone(), 0);
                 let mut mpus = list_raw_objects(
                     bucket.root_blob_name.clone(),
@@ -258,7 +244,7 @@ pub async fn get_object_content(
                         }
                     })
                     .try_flatten();
-                Ok((Body::from_stream(body_stream), body_size, None))
+                Ok((Body::from_stream(body_stream), body_size))
             }
         },
     }

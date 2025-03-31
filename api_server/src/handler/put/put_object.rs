@@ -6,6 +6,7 @@ use std::{
 use crate::{
     handler::{
         common::{
+            extract_metadata_headers,
             s3_error::S3Error,
             signature::checksum::{
                 request_checksum_value, request_trailer_checksum_algorithm, ExpectedChecksums,
@@ -41,6 +42,7 @@ pub async fn put_object_handler(
     rpc_client_bss: Arc<RpcClientBss>,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
+    let headers = extract_metadata_headers(request.headers())?;
     let expected_checksums = ExpectedChecksums {
         md5: match request.headers().get("content-md5") {
             Some(x) => Some(x.to_str()?.to_string()),
@@ -93,6 +95,7 @@ pub async fn put_object_handler(
             blob_id,
             etag: etag.clone(),
             checksum,
+            headers,
         }),
     };
     let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new())?;

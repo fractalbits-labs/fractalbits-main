@@ -9,7 +9,7 @@ use crate::{
             response::xml::Xml,
             s3_error::S3Error,
             signature::{body::ReqBody, checksum::ChecksumValue},
-            time,
+            time, xheader,
         },
         get::get_object_content,
         put::put_object_handler,
@@ -20,7 +20,7 @@ use crate::{
 };
 use axum::{
     body::Body,
-    http::{header, HeaderMap},
+    http::{header, HeaderMap, HeaderValue},
     response::Response,
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -33,240 +33,106 @@ use tokio::sync::mpsc::Sender;
 
 #[allow(dead_code)]
 #[derive(Debug, Default)]
-struct HeaderOpts {
-    x_amz_acl: Option<String>,
-    cache_control: Option<String>,
-    x_amz_checksum_algorithm: Option<String>,
-    content_disposition: Option<String>,
-    content_encoding: Option<String>,
-    content_language: Option<String>,
-    content_type: Option<String>,
+struct HeaderOpts<'a> {
+    x_amz_acl: Option<&'a HeaderValue>,
+    cache_control: Option<&'a HeaderValue>,
+    x_amz_checksum_algorithm: Option<&'a HeaderValue>,
+    content_disposition: Option<&'a HeaderValue>,
+    content_encoding: Option<&'a HeaderValue>,
+    content_language: Option<&'a HeaderValue>,
+    content_type: Option<&'a HeaderValue>,
     x_amz_copy_source: String, // required
-    x_amz_copy_source_if_match: Option<String>,
-    x_amz_copy_source_if_modified_since: Option<String>,
-    x_amz_copy_source_if_none_match: Option<String>,
-    x_amz_copy_source_if_unmodified_since: Option<String>,
-    expires: Option<String>,
-    x_amz_grant_full_control: Option<String>,
-    x_amz_grant_read: Option<String>,
-    x_amz_grant_read_acp: Option<String>,
-    x_amz_grant_write_acp: Option<String>,
-    x_amz_metadata_directive: Option<String>,
-    x_amz_tagging_directive: Option<String>,
-    x_amz_server_side_encryption: Option<String>,
-    x_amz_storage_class: Option<String>,
-    x_amz_website_redirect_location: Option<String>,
-    x_amz_server_side_encryption_customer_algorithm: Option<String>,
-    x_amz_server_side_encryption_customer_key: Option<String>,
-    x_amz_server_side_encryption_customer_key_md5: Option<String>,
-    x_amz_server_side_encryption_aws_kms_key_id: Option<String>,
-    x_amz_server_side_encryption_context: Option<String>,
-    x_amz_server_side_encryption_bucket_key_enabled: Option<String>,
-    x_amz_copy_source_server_side_encryption_customer_algorithm: Option<String>,
-    x_amz_copy_source_server_side_encryption_customer_key: Option<String>,
-    x_amz_copy_source_server_side_encryption_customer_key_md5: Option<String>,
-    x_amz_request_payer: Option<String>,
-    x_amz_tagging: Option<String>,
-    x_amz_object_lock_mode: Option<String>,
-    x_amz_object_lock_retain_until_date: Option<String>,
-    x_amz_object_lock_legal_hold: Option<String>,
-    x_amz_expected_bucket_owner: Option<String>,
-    x_amz_source_expected_bucket_owner: Option<String>,
+    x_amz_copy_source_if_match: Option<&'a HeaderValue>,
+    x_amz_copy_source_if_modified_since: Option<&'a HeaderValue>,
+    x_amz_copy_source_if_none_match: Option<&'a HeaderValue>,
+    x_amz_copy_source_if_unmodified_since: Option<&'a HeaderValue>,
+    expires: Option<&'a HeaderValue>,
+    x_amz_grant_full_control: Option<&'a HeaderValue>,
+    x_amz_grant_read: Option<&'a HeaderValue>,
+    x_amz_grant_read_acp: Option<&'a HeaderValue>,
+    x_amz_grant_write_acp: Option<&'a HeaderValue>,
+    x_amz_metadata_directive: Option<&'a HeaderValue>,
+    x_amz_tagging_directive: Option<&'a HeaderValue>,
+    x_amz_server_side_encryption: Option<&'a HeaderValue>,
+    x_amz_storage_class: Option<&'a HeaderValue>,
+    x_amz_website_redirect_location: Option<&'a HeaderValue>,
+    x_amz_server_side_encryption_customer_algorithm: Option<&'a HeaderValue>,
+    x_amz_server_side_encryption_customer_key: Option<&'a HeaderValue>,
+    x_amz_server_side_encryption_customer_key_md5: Option<&'a HeaderValue>,
+    x_amz_server_side_encryption_aws_kms_key_id: Option<&'a HeaderValue>,
+    x_amz_server_side_encryption_context: Option<&'a HeaderValue>,
+    x_amz_server_side_encryption_bucket_key_enabled: Option<&'a HeaderValue>,
+    x_amz_copy_source_server_side_encryption_customer_algorithm: Option<&'a HeaderValue>,
+    x_amz_copy_source_server_side_encryption_customer_key: Option<&'a HeaderValue>,
+    x_amz_copy_source_server_side_encryption_customer_key_md5: Option<&'a HeaderValue>,
+    x_amz_request_payer: Option<&'a HeaderValue>,
+    x_amz_tagging: Option<&'a HeaderValue>,
+    x_amz_object_lock_mode: Option<&'a HeaderValue>,
+    x_amz_object_lock_retain_until_date: Option<&'a HeaderValue>,
+    x_amz_object_lock_legal_hold: Option<&'a HeaderValue>,
+    x_amz_expected_bucket_owner: Option<&'a HeaderValue>,
+    x_amz_source_expected_bucket_owner: Option<&'a HeaderValue>,
 }
 
-impl HeaderOpts {
-    fn from_headers(headers: &HeaderMap) -> Result<Self, S3Error> {
+impl<'a> HeaderOpts<'a> {
+    fn from_headers(headers: &'a HeaderMap) -> Result<Self, S3Error> {
         Ok(Self {
-            x_amz_acl: headers
-                .get("x-amz-acl")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            cache_control: headers
-                .get(header::CACHE_CONTROL)
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_checksum_algorithm: headers
-                .get("x-amz-checksum-algorithm")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            content_disposition: headers
-                .get(header::CONTENT_DISPOSITION)
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            content_encoding: headers
-                .get(header::CONTENT_ENCODING)
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            content_language: headers
-                .get(header::CONTENT_LANGUAGE)
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            content_type: headers
-                .get(header::CONTENT_TYPE)
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+            x_amz_acl: headers.get(xheader::X_AMZ_ACL),
+            cache_control: headers.get(header::CACHE_CONTROL),
+            x_amz_checksum_algorithm: headers.get(xheader::X_AMZ_CHECKSUM_ALGORITHM),
+            content_disposition: headers.get(header::CONTENT_DISPOSITION),
+            content_encoding: headers.get(header::CONTENT_ENCODING),
+            content_language: headers.get(header::CONTENT_LANGUAGE),
+            content_type: headers.get(header::CONTENT_TYPE),
             x_amz_copy_source: headers
-                .get("x-amz-copy-source")
+                .get(xheader::X_AMZ_COPY_SOURCE)
                 .ok_or(S3Error::InvalidArgument2)?
                 .to_str()?
                 .to_owned(),
-            x_amz_copy_source_if_match: headers
-                .get("x-amz-copy-source-if-match")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+            x_amz_copy_source_if_match: headers.get(xheader::X_AMZ_COPY_SOURCE_IF_MATCH),
             x_amz_copy_source_if_modified_since: headers
-                .get("x-amz-copy-source-if-modified-since")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_copy_source_if_none_match: headers
-                .get("x-amz-copy-source-if-none-match")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_COPY_SOURCE_IF_MODIFIED_SINCE),
+            x_amz_copy_source_if_none_match: headers.get(xheader::X_AMZ_COPY_SOURCE_IF_NONE_MATCH),
             x_amz_copy_source_if_unmodified_since: headers
-                .get("x-amz-copy-source-if-unmodified-since")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            expires: headers
-                .get(header::EXPIRES)
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_grant_full_control: headers
-                .get("x-amz-grant-full-control")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_grant_read: headers
-                .get("x-amz-grant-read")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_grant_read_acp: headers
-                .get("x-amz-grant-read-acp")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_grant_write_acp: headers
-                .get("x-amz-grant-write-acp")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_metadata_directive: headers
-                .get("x-amz-metadata-directive")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_tagging_directive: headers
-                .get("x-amz-tagging-directive")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_server_side_encryption: headers
-                .get("x-amz-server-side-encryption")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_storage_class: headers
-                .get("x-amz-storage-class")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_website_redirect_location: headers
-                .get("x-amz-website-redirect-location")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_COPY_SOURCE_IF_UNMODIFIED_SINCE),
+            expires: headers.get(header::EXPIRES),
+            x_amz_grant_full_control: headers.get(xheader::X_AMZ_GRANT_FULL_CONTROL),
+            x_amz_grant_read: headers.get(xheader::X_AMZ_GRANT_READ),
+            x_amz_grant_read_acp: headers.get(xheader::X_AMZ_GRANT_READ_ACP),
+            x_amz_grant_write_acp: headers.get(xheader::X_AMZ_GRANT_WRITE_ACP),
+            x_amz_metadata_directive: headers.get(xheader::X_AMZ_METADATA_DIRECTIVE),
+            x_amz_tagging_directive: headers.get(xheader::X_AMZ_TAGGING_DIRECTIVE),
+            x_amz_server_side_encryption: headers.get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION),
+            x_amz_storage_class: headers.get(xheader::X_AMZ_STORAGE_CLASS),
+            x_amz_website_redirect_location: headers.get(xheader::X_AMZ_WEBSITE_REDIRECT_LOCATION),
             x_amz_server_side_encryption_customer_algorithm: headers
-                .get("x-amz-server-side-encryption-customer-algorithm")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_CUSTOMER_ALGORITHM),
             x_amz_server_side_encryption_customer_key: headers
-                .get("x-amz-server-side-encryption-customer-key")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_CUSTOMER_KEY),
             x_amz_server_side_encryption_customer_key_md5: headers
-                .get("x-amz-server-side-encryption-customer-key-md5")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_CUSTOMER_KEY_MD5),
             x_amz_server_side_encryption_aws_kms_key_id: headers
-                .get("x-amz-server-side-encryption-aws-kms-key-id")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_AWS_KMS_KEY_ID),
             x_amz_server_side_encryption_context: headers
-                .get("x-amz-server-side-encryption-context")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_CONTEXT),
             x_amz_server_side_encryption_bucket_key_enabled: headers
-                .get("x-amz-server-side-encryption-bucket-key-enabled")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_BUCKET_KEY_ENABLED),
             x_amz_copy_source_server_side_encryption_customer_algorithm: headers
-                .get("x-amz-copy-source-server-side-encryption-customer-algorithm")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_COPY_SOURCE_SERVER_SIDE_ENCRYPTION_CUSTOMER_ALGORITHM),
             x_amz_copy_source_server_side_encryption_customer_key: headers
-                .get("x-amz-copy-source-server-side-encryption-customer-key")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_COPY_SOURCE_SERVER_SIDE_ENCRYPTION_CUSTOMER_KEY),
             x_amz_copy_source_server_side_encryption_customer_key_md5: headers
-                .get("x-amz-copy-source-server-side-encryption-customer-key-md5")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_request_payer: headers
-                .get("x-amz-request-payer")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_tagging: headers
-                .get("x-amz-tagging")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_object_lock_mode: headers
-                .get("x-amz-object-lock-mode")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_COPY_SOURCE_SERVER_SIDE_ENCRYPTION_CUSTOMER_KEY_MD5),
+            x_amz_request_payer: headers.get(xheader::X_AMZ_REQUEST_PAYER),
+            x_amz_tagging: headers.get(xheader::X_AMZ_TAGGING),
+            x_amz_object_lock_mode: headers.get(xheader::X_AMZ_STORAGE_OBJECT_LOCK_MODE),
             x_amz_object_lock_retain_until_date: headers
-                .get("x-amz-object-lock-retain-until-date")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_STORAGE_OBJECT_LOCK_RETAIN_UNTIL_DATE),
             x_amz_object_lock_legal_hold: headers
-                .get("x-amz-object-lock-legal-hold")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
-            x_amz_expected_bucket_owner: headers
-                .get("x-amz-expected-bucket-owner")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_STORAGE_OBJECT_LOCK_LEGAL_HOLD),
+            x_amz_expected_bucket_owner: headers.get(xheader::X_AMZ_EXPECTED_BUCKET_OWNER),
             x_amz_source_expected_bucket_owner: headers
-                .get("x-amz-source-expected-bucket-owner")
-                .map(|x| x.to_str())
-                .transpose()?
-                .map(|x| x.to_owned()),
+                .get(xheader::X_AMZ_STORAGE_SOURCE_EXPECTED_BUCKET_OWNER),
         })
     }
 }
@@ -277,6 +143,7 @@ struct CopyObjectResult {
     #[serde(rename = "ETag")]
     etag: String,
     last_modified: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     checksum_type: Option<String>,
     #[serde(rename = "ChecksumCRC32", skip_serializing_if = "Option::is_none")]
     checksum_crc32: Option<String>,

@@ -1,5 +1,5 @@
 use crate::handler::{
-    common::{response::xml::Xml, s3_error::S3Error, time::format_timestamp},
+    common::{response::xml::Xml, s3_error::S3Error},
     Request,
 };
 use axum::{extract::Query, response::Response, RequestPartsExt};
@@ -8,12 +8,13 @@ use rkyv::{self, rancor::Error};
 use rpc_client_nss::{rpc::list_inodes_response, RpcClientNss};
 use serde::{Deserialize, Serialize};
 
+use super::Object;
 use crate::object_layout::ObjectLayout;
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-struct ListObjectsOptions {
+struct QueryOpts {
     delimiter: Option<String>,
     encoding_type: Option<String>,
     marker: Option<String>,
@@ -21,13 +22,15 @@ struct ListObjectsOptions {
     prefix: Option<String>,
 }
 
-#[derive(Default, Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 struct ListBucketResult {
     is_truncated: bool,
-    marker: String,
-    next_marker: String,
-    contents: Vec<Contents>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    marker: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_marker: Option<String>,
+    contents: Vec<Object>,
     name: String,
     prefix: String,
     delimiter: String,
@@ -36,8 +39,24 @@ struct ListBucketResult {
     encoding_type: String,
 }
 
+impl Default for ListBucketResult {
+    fn default() -> Self {
+        Self {
+            is_truncated: false,
+            marker: Default::default(),
+            next_marker: Default::default(),
+            contents: Default::default(),
+            name: Default::default(),
+            prefix: Default::default(),
+            delimiter: "/".into(),
+            max_keys: 1000,
+            common_prefixes: Default::default(),
+            encoding_type: "url".into(),
+        }
+    }
+}
 impl ListBucketResult {
-    fn contents(self, contents: Vec<Contents>) -> Self {
+    fn contents(self, contents: Vec<Object>) -> Self {
         Self { contents, ..self }
     }
 
@@ -59,48 +78,6 @@ impl ListBucketResult {
 
 #[derive(Default, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
-struct Contents {
-    checksum_algorithm: String,
-    checksum_type: String,
-    etag: String,
-    key: String,
-    last_modified: String, // timestamp
-    owner: Owner,
-    restore_status: Option<RestoreStatus>,
-    size: u64,
-    storage_class: String,
-}
-
-impl Contents {
-    fn from_obj_and_key(obj: ObjectLayout, key: String) -> Result<Self, S3Error> {
-        Ok(Self {
-            key,
-            last_modified: format_timestamp(obj.timestamp),
-            etag: "bf1d737a4d46a19f3bced6905cc8b902".into(), //obj.etag(),
-            size: obj.size()?,
-            storage_class: "STANDARD".into(),
-            ..Default::default()
-        })
-    }
-}
-
-#[derive(Default, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
-struct Owner {
-    display_name: String,
-    id: String,
-}
-
-#[allow(dead_code)]
-#[derive(Default, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
-struct RestoreStatus {
-    is_restore_in_progress: bool,
-    restore_expiry_date: String, // timestamp
-}
-
-#[derive(Default, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
 struct CommonPrefixes {
     prefix: String,
 }
@@ -110,7 +87,7 @@ pub async fn list_objects_handler(
     bucket: &Bucket,
     rpc_client_nss: &RpcClientNss,
 ) -> Result<Response, S3Error> {
-    let Query(opts): Query<ListObjectsOptions> = request.into_parts().0.extract().await?;
+    let Query(opts): Query<QueryOpts> = request.into_parts().0.extract().await?;
     tracing::debug!("list_objects {opts:?}");
 
     if let Some(encoding_type) = opts.encoding_type {
@@ -152,11 +129,11 @@ pub async fn list_objects_handler(
                 Ok(obj) => {
                     let mut key = x.key.clone();
                     key.pop(); // removing nss's trailing '\0'
-                    Contents::from_obj_and_key(obj, key)
+                    Object::from_layout_and_key(obj, key)
                 }
             }
         })
-        .collect::<Result<Vec<Contents>, S3Error>>()?;
+        .collect::<Result<Vec<Object>, S3Error>>()?;
 
     Xml(ListBucketResult::default()
         .contents(contents)

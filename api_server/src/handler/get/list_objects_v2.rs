@@ -13,7 +13,7 @@ use crate::object_layout::ObjectLayout;
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-struct ListObjectsV2Options {
+struct QueryOpts {
     list_type: Option<String>,
     continuation_token: Option<String>,
     delimiter: Option<String>,
@@ -24,11 +24,11 @@ struct ListObjectsV2Options {
     start_after: Option<String>,
 }
 
-#[derive(Default, Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 struct ListBucketResult {
     is_truncated: bool,
-    contents: Vec<Contents>,
+    contents: Vec<Object>,
     name: String,
     prefix: String,
     delimiter: String,
@@ -36,13 +36,35 @@ struct ListBucketResult {
     common_prefixes: Vec<CommonPrefixes>,
     encoding_type: String,
     key_count: usize,
-    continuation_token: String,
-    next_continuation_token: String,
-    start_after: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    continuation_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_continuation_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    start_after: Option<String>,
+}
+
+impl Default for ListBucketResult {
+    fn default() -> Self {
+        Self {
+            is_truncated: false,
+            contents: Default::default(),
+            name: Default::default(),
+            prefix: Default::default(),
+            delimiter: "/".into(),
+            max_keys: 1000,
+            common_prefixes: Default::default(),
+            encoding_type: "url".into(),
+            key_count: Default::default(),
+            continuation_token: Default::default(),
+            next_continuation_token: Default::default(),
+            start_after: Default::default(),
+        }
+    }
 }
 
 impl ListBucketResult {
-    fn contents(self, contents: Vec<Contents>) -> Self {
+    fn contents(self, contents: Vec<Object>) -> Self {
         Self {
             key_count: contents.len(),
             contents,
@@ -68,25 +90,31 @@ impl ListBucketResult {
 
 #[derive(Default, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
-struct Contents {
-    checksum_algorithm: String,
-    etag: String,
-    key: String,
-    last_modified: String, // timestamp
-    owner: Owner,
-    restore_status: Option<RestoreStatus>,
-    size: u64,
-    storage_class: String,
+pub struct Object {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checksum_algorithm: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checksum_type: Option<String>,
+    #[serde(rename = "ETag")]
+    pub etag: String,
+    pub key: String,
+    pub last_modified: String, // timestamp
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<Owner>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restore_status: Option<RestoreStatus>,
+    pub size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_class: Option<String>,
 }
 
-impl Contents {
-    fn from_obj_and_key(obj: ObjectLayout, key: String) -> Result<Self, S3Error> {
+impl Object {
+    pub(crate) fn from_layout_and_key(obj: ObjectLayout, key: String) -> Result<Self, S3Error> {
         Ok(Self {
             key,
             last_modified: format_timestamp(obj.timestamp),
-            etag: "bf1d737a4d46a19f3bced6905cc8b902".into(), //obj.etag(),
+            etag: obj.etag()?,
             size: obj.size()?,
-            storage_class: "STANDARD".into(),
             ..Default::default()
         })
     }
@@ -94,17 +122,17 @@ impl Contents {
 
 #[derive(Default, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
-struct Owner {
-    display_name: String,
-    id: String,
+pub struct Owner {
+    pub display_name: String,
+    pub id: String,
 }
 
 #[allow(dead_code)]
 #[derive(Default, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
-struct RestoreStatus {
-    is_restore_in_progress: bool,
-    restore_expiry_date: String, // timestamp
+pub struct RestoreStatus {
+    pub is_restore_in_progress: bool,
+    pub restore_expiry_date: String, // timestamp
 }
 
 #[derive(Default, Debug, Serialize, PartialEq, Eq)]
@@ -118,7 +146,7 @@ pub async fn list_objects_v2_handler(
     bucket: &Bucket,
     rpc_client_nss: &RpcClientNss,
 ) -> Result<Response, S3Error> {
-    let Query(opts): Query<ListObjectsV2Options> = request.into_parts().0.extract().await?;
+    let Query(opts): Query<QueryOpts> = request.into_parts().0.extract().await?;
     tracing::debug!("list_objects_v2 {opts:?}");
 
     // Sanity checks
@@ -169,11 +197,11 @@ pub async fn list_objects_v2_handler(
                 Ok(obj) => {
                     let mut key = x.key.clone();
                     key.pop(); // removing nss's trailing '\0'
-                    Contents::from_obj_and_key(obj, key)
+                    Object::from_layout_and_key(obj, key)
                 }
             }
         })
-        .collect::<Result<Vec<Contents>, S3Error>>()?;
+        .collect::<Result<Vec<Object>, S3Error>>()?;
 
     Xml(ListBucketResult::default()
         .contents(contents)

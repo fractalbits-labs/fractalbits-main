@@ -12,7 +12,7 @@ pub use get_object::{
 pub use get_object_attributes::get_object_attributes_handler;
 pub use list_multipart_uploads::list_multipart_uploads_handler;
 pub use list_objects::list_objects_handler;
-pub use list_objects_v2::list_objects_v2_handler;
+pub use list_objects_v2::{list_objects_v2_handler, Object};
 pub use list_parts::list_parts_handler;
 
 use super::common::authorization::Authorization;

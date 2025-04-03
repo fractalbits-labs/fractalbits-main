@@ -55,7 +55,7 @@ impl Default for ListBucketResult {
             max_keys: 1000,
             common_prefixes: Default::default(),
             encoding_type: "url".into(),
-            key_count: Default::default(),
+            key_count: 0,
             continuation_token: Default::default(),
             next_continuation_token: Default::default(),
             start_after: Default::default(),
@@ -64,12 +64,11 @@ impl Default for ListBucketResult {
 }
 
 impl ListBucketResult {
+    fn key_count(self, key_count: usize) -> Self {
+        Self { key_count, ..self }
+    }
     fn contents(self, contents: Vec<Object>) -> Self {
-        Self {
-            key_count: contents.len(),
-            contents,
-            ..self
-        }
+        Self { contents, ..self }
     }
 
     fn bucket_name(self, bucket_name: String) -> Self {
@@ -85,6 +84,27 @@ impl ListBucketResult {
 
     fn max_keys(self, max_keys: u32) -> Self {
         Self { max_keys, ..self }
+    }
+
+    fn is_truncated(self, is_truncated: bool) -> Self {
+        Self {
+            is_truncated,
+            ..self
+        }
+    }
+
+    fn next_continuation_token(self, next_continuation_token: Option<String>) -> Self {
+        Self {
+            next_continuation_token,
+            ..self
+        }
+    }
+
+    fn continuation_token(self, continuation_token: Option<String>) -> Self {
+        Self {
+            continuation_token,
+            ..self
+        }
     }
 }
 
@@ -169,12 +189,45 @@ pub async fn list_objects_v2_handler(
 
     let max_keys = opts.max_keys.unwrap_or(1000);
     let prefix = opts.prefix.unwrap_or("/".into());
-    let start_after = opts.start_after.unwrap_or_default();
+    let start_after = match opts.start_after {
+        Some(key) => key,
+        None => opts.continuation_token.clone().unwrap_or_default(),
+    };
+    let (objs, next_continuation_token) = fetch_objects(
+        bucket,
+        rpc_client_nss,
+        max_keys,
+        prefix.clone(),
+        start_after,
+    )
+    .await?;
+    Xml(ListBucketResult::default()
+        .key_count(objs.len())
+        .contents(objs)
+        .bucket_name(bucket.bucket_name.clone())
+        .prefix(prefix)
+        .max_keys(max_keys)
+        .continuation_token(opts.continuation_token)
+        .is_truncated(next_continuation_token.is_some())
+        .next_continuation_token(next_continuation_token))
+    .try_into()
+}
+
+async fn fetch_objects(
+    bucket: &Bucket,
+    rpc_client_nss: &RpcClientNss,
+    max_keys: u32,
+    prefix: String,
+    start_after: String,
+) -> Result<(Vec<Object>, Option<String>), S3Error> {
+    dbg!(max_keys);
+    dbg!(&prefix);
+    dbg!(&start_after);
     let resp = rpc_client_nss
         .list_inodes(
             bucket.root_blob_name.clone(),
             max_keys,
-            prefix.clone(),
+            prefix,
             start_after,
             true,
         )
@@ -188,8 +241,9 @@ pub async fn list_objects_v2_handler(
             return Err(S3Error::InternalError);
         }
     };
+    dbg!(inodes.len());
 
-    let contents = inodes
+    let objs = inodes
         .iter()
         .map(|x| {
             match rkyv::from_bytes::<ObjectLayout, Error>(&x.inode) {
@@ -203,10 +257,9 @@ pub async fn list_objects_v2_handler(
         })
         .collect::<Result<Vec<Object>, S3Error>>()?;
 
-    Xml(ListBucketResult::default()
-        .contents(contents)
-        .bucket_name(bucket.bucket_name.clone())
-        .prefix(prefix)
-        .max_keys(max_keys))
-    .try_into()
+    let next_continuation_token = match objs.last() {
+        None => None,
+        Some(&ref obj) => Some(format!("{}!", obj.key)), // append the first visible char "!"
+    };
+    Ok((objs, next_continuation_token))
 }

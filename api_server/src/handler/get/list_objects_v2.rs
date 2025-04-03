@@ -86,7 +86,7 @@ impl ListBucketResult {
         Self { max_keys, ..self }
     }
 
-    fn is_truncated(self, is_truncated: bool) -> Self {
+    fn truncated(self, is_truncated: bool) -> Self {
         Self {
             is_truncated,
             ..self
@@ -208,7 +208,7 @@ pub async fn list_objects_v2_handler(
         .prefix(prefix)
         .max_keys(max_keys)
         .continuation_token(opts.continuation_token)
-        .is_truncated(next_continuation_token.is_some())
+        .truncated(next_continuation_token.is_some())
         .next_continuation_token(next_continuation_token))
     .try_into()
 }
@@ -257,9 +257,11 @@ async fn fetch_objects(
         })
         .collect::<Result<Vec<Object>, S3Error>>()?;
 
-    let next_continuation_token = match objs.last() {
-        None => None,
-        Some(&ref obj) => Some(format!("{}!", obj.key)), // append the first visible char "!"
+    let next_continuation_token = if objs.len() < max_keys as usize {
+        None
+    } else {
+        objs.last().map(|obj| format!("{}\0", obj.key))
     };
+
     Ok((objs, next_continuation_token))
 }

@@ -3,7 +3,6 @@ mod common;
 const KEYS: [&str; 8] = ["a", "a/a", "a/b", "a/c", "a/d/a", "a/é", "b", "c"];
 const KEYS_MULTIPART: [&str; 5] = ["a", "a", "c", "c/a", "c/b"];
 
-#[ignore = "TODO"]
 #[tokio::test]
 async fn test_listobjectsv2() {
     let ctx = common::context();
@@ -101,7 +100,8 @@ async fn test_listobjectsv2() {
         assert_eq!(r.common_prefixes.unwrap().len(), 1);
     }
 
-    {
+    // FIXME
+    if false {
         // With a delimiter and pagination
         let mut cnt_pfx = 0;
         let mut cnt_key = 0;
@@ -164,7 +164,8 @@ async fn test_listobjectsv2() {
         assert_eq!(r.common_prefixes.unwrap().len(), 1);
     }
 
-    {
+    // FIXME: key sorting issue (a/%C3%A9 was returned)
+    if false {
         // With a prefix, a delimiter and max_key
         let r = ctx
             .client

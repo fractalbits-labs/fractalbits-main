@@ -40,7 +40,7 @@ struct ListBucketResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     delimiter: Option<String>,
     max_keys: u32,
-    common_prefixes: Vec<CommonPrefixes>,
+    common_prefixes: Vec<Prefix>,
     encoding_type: String,
     key_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,6 +100,13 @@ impl ListBucketResult {
 
     fn max_keys(self, max_keys: u32) -> Self {
         Self { max_keys, ..self }
+    }
+
+    fn common_prefixes(self, common_prefixes: Vec<Prefix>) -> Self {
+        Self {
+            common_prefixes,
+            ..self
+        }
     }
 
     fn key_count(self, key_count: usize) -> Self {
@@ -176,7 +183,7 @@ pub struct RestoreStatus {
 
 #[derive(Default, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
-struct CommonPrefixes {
+struct Prefix {
     prefix: String,
 }
 
@@ -207,18 +214,18 @@ pub async fn list_objects_v2_handler(
     }
 
     let max_keys = opts.max_keys.unwrap_or(1000);
-    let prefix = opts.prefix.unwrap_or("".into());
+    let prefix = format!("/{}", opts.prefix.unwrap_or_default());
     let delimiter = opts.delimiter.clone().unwrap_or("".into());
     if !delimiter.is_empty() && delimiter != "/" {
         tracing::warn!("Got delimiter: {delimiter}, which is not supported.");
         return Err(S3Error::UnsupportedArgument);
     }
     let start_after = match opts.start_after {
-        Some(ref start_after_key) => start_after_key.clone(),
-        None => opts.continuation_token.clone().unwrap_or_default(),
+        Some(ref start_after_key) => format!("/{}", start_after_key.clone()),
+        None => opts.continuation_token.clone().unwrap_or("/".into()),
     };
 
-    let (objs, next_continuation_token) = fetch_objects(
+    let (objs, common_prefixes, next_continuation_token) = fetch_objects(
         bucket,
         rpc_client_nss,
         max_keys,
@@ -236,6 +243,7 @@ pub async fn list_objects_v2_handler(
         .start_after(opts.start_after)
         .delimiter(opts.delimiter)
         .max_keys(max_keys)
+        .common_prefixes(common_prefixes)
         .continuation_token(opts.continuation_token)
         .truncated(next_continuation_token.is_some())
         .next_continuation_token(next_continuation_token))
@@ -249,13 +257,13 @@ async fn fetch_objects(
     prefix: String,
     delimiter: String,
     start_after: String,
-) -> Result<(Vec<Object>, Option<String>), S3Error> {
+) -> Result<(Vec<Object>, Vec<Prefix>, Option<String>), S3Error> {
     let resp = rpc_client_nss
         .list_inodes(
             bucket.root_blob_name.clone(),
             max_keys,
             prefix,
-            delimiter,
+            delimiter.clone(),
             start_after,
             true,
         )
@@ -270,25 +278,37 @@ async fn fetch_objects(
         }
     };
 
-    let objs = inodes
-        .iter()
-        .map(|x| {
-            match rkyv::from_bytes::<ObjectLayout, Error>(&x.inode) {
-                Err(e) => Err(e.into()),
-                Ok(obj) => {
-                    let mut key = x.key.clone();
-                    assert_eq!(Some('\0'), key.pop()); // removing nss's trailing '\0'
-                    Object::from_layout_and_key(obj, key)
-                }
-            }
-        })
-        .collect::<Result<Vec<Object>, S3Error>>()?;
-
-    let next_continuation_token = if objs.len() < max_keys as usize {
+    let next_continuation_token = if inodes.len() < max_keys as usize {
         None
     } else {
-        objs.last().map(|obj| obj.key.clone())
+        inodes.last().map(|inode| {
+            let mut key = inode.key.clone();
+            if key.ends_with('\0') {
+                key.pop();
+            }
+            key
+        })
     };
 
-    Ok((objs, next_continuation_token))
+    let mut objs = Vec::new();
+    let mut common_prefixes = Vec::new();
+    for inode_with_key in inodes.iter() {
+        if inode_with_key.inode.is_empty() {
+            common_prefixes.push(Prefix {
+                prefix: inode_with_key.key[1..].to_owned(), // remove first "/"
+            });
+            continue;
+        }
+
+        match rkyv::from_bytes::<ObjectLayout, Error>(&inode_with_key.inode) {
+            Err(e) => return Err(e.into()),
+            Ok(obj) => {
+                let mut key = inode_with_key.key[1..].to_owned();
+                assert_eq!(Some('\0'), key.pop()); // removing nss's trailing '\0'
+                objs.push(Object::from_layout_and_key(obj, key)?);
+            }
+        }
+    }
+
+    Ok((objs, common_prefixes, next_continuation_token))
 }

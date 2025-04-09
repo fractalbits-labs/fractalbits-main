@@ -168,11 +168,12 @@ impl BlobClient {
             return self.client_bss.put_blob(blob_id, block_number, body).await;
         }
 
+        let s3_key = format!("{blob_id}-{block_number}");
         let (res_s3, res_bss) = tokio::join!(
             self.client_s3
                 .put_object()
                 .bucket("mybucket")
-                .key(format!("{}-{}", blob_id.to_string(), block_number))
+                .key(s3_key)
                 .body(body.clone().into())
                 .send(),
             self.client_bss.put_blob(blob_id, block_number, body)
@@ -191,7 +192,7 @@ impl BlobClient {
     }
 
     pub async fn delete_blob(&self, blob_id: Uuid, block_number: u32) -> Result<(), RpcErrorBss> {
-        let s3_key = format!("{}-{}", blob_id.to_string(), block_number);
+        let s3_key = format!("{blob_id}-{block_number}");
         let (res_s3, res_bss) = tokio::join!(
             self.client_s3
                 .delete_object()

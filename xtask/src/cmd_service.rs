@@ -188,7 +188,8 @@ WorkingDirectory={pwd}
     );
     let minio_wait_secs = 5;
     let minio_url = "http://localhost:9000";
-    let mybucket = "s3://mybucket";
+    let bucket_name = "fractalbits-bucket";
+    let my_bucket = format!("s3://{bucket_name}");
     run_cmd! {
         mkdir -p etc;
         mkdir -p s3;
@@ -198,9 +199,9 @@ WorkingDirectory={pwd}
         systemctl --user start minio.service;
         info "Waiting ${minio_wait_secs}s for minio up";
         sleep $minio_wait_secs;
-        info "Creating s3 bucket (\"mybucket\") in minio ...";
+        info "Creating s3 bucket (\"$bucket_name\") in minio ...";
         AWS_ENDPOINT_URL_S3=$minio_url AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin
-            aws s3 mb $mybucket;
+            aws s3 mb $my_bucket;
     }?;
 
     Ok(())

@@ -172,7 +172,7 @@ impl BlobClient {
         let (res_s3, res_bss) = tokio::join!(
             self.client_s3
                 .put_object()
-                .bucket("mybucket")
+                .bucket("fractalbits-bucket")
                 .key(s3_key)
                 .body(body.clone().into())
                 .send(),
@@ -196,7 +196,7 @@ impl BlobClient {
         let (res_s3, res_bss) = tokio::join!(
             self.client_s3
                 .delete_object()
-                .bucket("mybucket")
+                .bucket("fractalbits-bucket")
                 .key(&s3_key)
                 .send(),
             self.client_bss.delete_blob(blob_id, block_number)

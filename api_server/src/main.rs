@@ -18,7 +18,7 @@ struct Opt {
         short = 'c',
         long = "config",
         long_help = "Config file path",
-        default_value = "etc/api_server_default.toml"
+        default_value = "etc/api_server_dev_config.toml"
     )]
     pub config_file: PathBuf,
 }

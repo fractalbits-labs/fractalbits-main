@@ -73,14 +73,7 @@ async fn any_handler_inner(
     let rpc_client_rss = app.get_rpc_client_rss();
     let VerifiedRequest {
         request, api_key, ..
-    } = match verify_request(
-        request,
-        &auth,
-        rpc_client_rss.clone(),
-        &app.config.s3_region,
-    )
-    .await
-    {
+    } = match verify_request(request, &auth, rpc_client_rss.clone(), &app.config.region).await {
         Ok(res) => res,
         Err(signature::error::Error::RpcErrorRss(RpcErrorRss::NotFound)) => {
             return Err(S3Error::InvalidAccessKeyId)
@@ -190,7 +183,7 @@ async fn bucket_handler(
                 request,
                 rpc_client_nss,
                 rpc_client_rss,
-                &app.config.s3_region,
+                &app.config.region,
             )
             .await
         }
@@ -203,7 +196,7 @@ async fn bucket_handler(
             bucket::head_bucket_handler(api_key, bucket_name, rpc_client_rss).await
         }
         BucketEndpoint::ListBuckets => {
-            bucket::list_buckets_handler(request, rpc_client_rss, &app.config.s3_region).await
+            bucket::list_buckets_handler(request, rpc_client_rss, &app.config.region).await
         }
     }
 }

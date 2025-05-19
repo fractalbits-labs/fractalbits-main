@@ -68,6 +68,7 @@ serde_bytes = "0.11"
 percent-encoding = "2.3.1"
 sync_wrapper = "1.0.2"
 http-range = "0.1.5"
+aws-config = "1.6.3"
 
 # Dev dependencies
 aws-sdk-s3 = "1.65.0"

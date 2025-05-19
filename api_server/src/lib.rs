@@ -8,12 +8,13 @@ use aws_sdk_s3::{
 };
 use axum::extract::FromRef;
 use bytes::Bytes;
-use config::ArcConfig;
+use config::{ArcConfig, S3CacheConfig};
 use futures::stream::{self, StreamExt};
 use object_layout::ObjectLayout;
 use rpc_client_bss::{RpcClientBss, RpcErrorBss};
 use rpc_client_nss::RpcClientNss;
 use rpc_client_rss::{ArcRpcClientRss, RpcClientRss};
+use serde::Deserialize;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -54,7 +55,7 @@ impl AppState {
 
         let mut blob_clients = Vec::with_capacity(Self::MAX_BLOB_IO_CONNECTION);
         for _i in 0..AppState::MAX_BLOB_IO_CONNECTION {
-            let blob_client = BlobClient::new(&config.bss_addr).await;
+            let blob_client = BlobClient::new(&config.bss_addr, &config.s3_cache).await;
             blob_clients.push(Arc::new(blob_client));
         }
 
@@ -137,16 +138,43 @@ pub struct BlobClient {
     pub client_s3: S3Client,
 }
 
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase")]
+struct ImdsCredentials {
+    code: String,
+    last_updated: String, // timestamp
+    #[serde(rename = "Type")]
+    cred_type: String,
+    access_key_id: String,
+    secret_access_key: String,
+    token: String,
+    expiration: String, // timestamp
+}
+
 impl BlobClient {
-    pub async fn new(bss_url: &str) -> Self {
+    pub async fn new(bss_url: &str, config: &S3CacheConfig) -> Self {
         let client_bss = RpcClientBss::new(bss_url)
             .await
             .expect("rpc client bss failure");
 
-        let credentials = Credentials::new("minioadmin", "minioadmin", None, None, "minio");
+        let (access_key_id, secret_access_key) = if config.s3_host.ends_with("amazonaws.com") {
+            let path = "/latest/meta-data/iam/security-credentials/ec2_to_access_s3";
+            let client = aws_config::imds::client::Client::builder().build();
+            let security_token = client
+                .get(path)
+                .await
+                .expect("failure communicating with IMDS");
+
+            let cred: ImdsCredentials = serde_json::from_str(security_token.as_ref()).unwrap();
+            (cred.access_key_id, cred.secret_access_key)
+        } else {
+            ("minioadmin".to_string(), "minioadmin".to_string())
+        };
+
+        let credentials = Credentials::new(access_key_id, secret_access_key, None, None, "");
         let s3_config = S3Config::builder()
-            .endpoint_url("http://127.0.0.1:9000")
-            .region(Region::from_static("us-east-1"))
+            .endpoint_url(format!("{}:{}", config.s3_host, config.s3_port))
+            .region(Region::new(config.s3_region.clone()))
             .credentials_provider(credentials)
             .behavior_version(BehaviorVersion::v2024_03_28())
             .build();

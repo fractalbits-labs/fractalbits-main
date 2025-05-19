@@ -136,6 +136,7 @@ impl AppState {
 pub struct BlobClient {
     pub client_bss: RpcClientBss,
     pub client_s3: S3Client,
+    s3_cache_bucket: String,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -157,21 +158,28 @@ impl BlobClient {
             .await
             .expect("rpc client bss failure");
 
-        let (access_key_id, secret_access_key) = if config.s3_host.ends_with("amazonaws.com") {
-            let path = "/latest/meta-data/iam/security-credentials/ec2_to_access_s3";
-            let client = aws_config::imds::client::Client::builder().build();
-            let security_token = client
-                .get(path)
-                .await
-                .expect("failure communicating with IMDS");
+        let (access_key_id, secret_access_key, session_token) =
+            if config.s3_host.ends_with("amazonaws.com") {
+                let path = "/latest/meta-data/iam/security-credentials/ec2_to_access_s3";
+                let client = aws_config::imds::client::Client::builder().build();
+                let security_token = client
+                    .get(path)
+                    .await
+                    .expect("failure communicating with IMDS");
 
-            let cred: ImdsCredentials = serde_json::from_str(security_token.as_ref()).unwrap();
-            (cred.access_key_id, cred.secret_access_key)
-        } else {
-            ("minioadmin".to_string(), "minioadmin".to_string())
-        };
+                let cred: ImdsCredentials = serde_json::from_str(security_token.as_ref()).unwrap();
+                (cred.access_key_id, cred.secret_access_key, Some(cred.token))
+            } else {
+                ("minioadmin".to_string(), "minioadmin".to_string(), None)
+            };
 
-        let credentials = Credentials::new(access_key_id, secret_access_key, None, None, "");
+        let credentials = Credentials::new(
+            access_key_id,
+            secret_access_key,
+            session_token,
+            None,
+            "s3_cache",
+        );
         let s3_config = S3Config::builder()
             .endpoint_url(format!("{}:{}", config.s3_host, config.s3_port))
             .region(Region::new(config.s3_region.clone()))
@@ -183,6 +191,7 @@ impl BlobClient {
         Self {
             client_bss,
             client_s3,
+            s3_cache_bucket: config.s3_bucket.clone(),
         }
     }
 
@@ -200,7 +209,7 @@ impl BlobClient {
         let (res_s3, res_bss) = tokio::join!(
             self.client_s3
                 .put_object()
-                .bucket("fractalbits-bucket")
+                .bucket(&self.s3_cache_bucket)
                 .key(s3_key)
                 .body(body.clone().into())
                 .send(),
@@ -224,7 +233,7 @@ impl BlobClient {
         let (res_s3, res_bss) = tokio::join!(
             self.client_s3
                 .delete_object()
-                .bucket("fractalbits-bucket")
+                .bucket(&self.s3_cache_bucket)
                 .key(&s3_key)
                 .send(),
             self.client_bss.delete_blob(blob_id, block_number)

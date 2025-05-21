@@ -116,17 +116,18 @@ impl RpcClient {
         while let Some(message) = input.recv().await {
             match message {
                 Message::Bytes(mut bytes) => {
-                    sender.write_buf(&mut bytes).await.unwrap();
+                    sender.write_all_buf(&mut bytes).await.unwrap();
                 }
                 Message::Frame(mut frame) => {
                     let mut header_bytes = BytesMut::with_capacity(MessageHeader::SIZE);
                     frame.header.encode(&mut header_bytes);
-                    sender.write_buf(&mut header_bytes).await.unwrap();
+                    sender.write_all_buf(&mut header_bytes).await.unwrap();
                     if !frame.body.is_empty() {
-                        sender.write_buf(&mut frame.body).await.unwrap();
+                        sender.write_all_buf(&mut frame.body).await.unwrap();
                     }
                 }
             }
+            sender.flush().await.unwrap();
         }
         Ok(())
     }

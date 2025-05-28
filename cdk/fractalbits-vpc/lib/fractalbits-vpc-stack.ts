@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as autoscaling from 'aws-cdk-lib/aws-autoscaling';
 
 export class FractalbitsVpcStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -83,7 +84,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       role: ec2Role,
     });
 
-    new ec2.Instance(this, 'root_server', {
+    const rootServerInstance = new ec2.Instance(this, 'root_server', {
       vpc,
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.T2, ec2.InstanceSize.MICRO),
       machineImage: ami,
@@ -92,7 +93,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       role: ec2Role,
     });
 
-    new ec2.Instance(this, 'nss_server', {
+    const bssServerInstance = new ec2.Instance(this, 'bss_server', {
       vpc,
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.T2, ec2.InstanceSize.MICRO),
       machineImage: ami,
@@ -101,19 +102,38 @@ export class FractalbitsVpcStack extends cdk.Stack {
       role: ec2Role,
     });
 
-    new ec2.Instance(this, 'bss_server', {
-      vpc,
+    const nssLaunchTemplate = new ec2.LaunchTemplate(this, 'NssLaunchTemplate', {
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.T2, ec2.InstanceSize.MICRO),
       machineImage: ami,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroup: sg,
       role: ec2Role,
+      httpTokens: ec2.LaunchTemplateHttpTokens.OPTIONAL,
+      httpEndpoint: true,
     });
+    const nssASG = new autoscaling.AutoScalingGroup(this, 'nssASG', {
+      vpc,
+      minCapacity: 1,
+      maxCapacity: 1,
+      desiredCapacity: 1,
+      launchTemplate: nssLaunchTemplate,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+    });
+    cdk.Tags.of(nssASG).add('Name', `${cdk.Stack.of(this).stackName}/nss_server/ASG`);
 
     // Outputs
-    new cdk.CfnOutput(this, 'PublicWebServerPublicIp', {
-      value: apiServerInstance.instancePublicIp,
-      description: 'The public IP address of the API Server.',
+    new cdk.CfnOutput(this, 'ApiServerId', {
+      value: apiServerInstance.instanceId,
+      description: 'EC2 instance API server ID',
+    });
+
+    new cdk.CfnOutput(this, 'RootServerId', {
+      value: rootServerInstance.instanceId,
+      description: 'EC2 instance root server ID',
+    });
+
+    new cdk.CfnOutput(this, 'BssServerId', {
+      value: bssServerInstance.instanceId,
+      description: 'EC2 instance bss server ID',
     });
   }
 }

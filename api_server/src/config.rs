@@ -8,8 +8,8 @@ use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
-    pub nss_addr: String,
     pub bss_addr: String,
+    pub nss_addr: String,
     pub rss_addr: String,
 
     pub port: u16,
@@ -42,8 +42,8 @@ impl Default for S3CacheConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            nss_addr: "127.0.0.1:9224".into(),
             bss_addr: "127.0.0.1:9225".into(),
+            nss_addr: "127.0.0.1:9224".into(),
             rss_addr: "127.0.0.1:8888".into(),
             port: 3000,
             region: "us-east-1".into(),

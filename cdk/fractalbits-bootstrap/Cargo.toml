@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+env_logger.workspace = true
 cmd_lib.workspace = true
 clap.workspace = true

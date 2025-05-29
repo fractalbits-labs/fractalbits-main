@@ -7,14 +7,22 @@ use cmd_lib::*;
     about = "Bootstrap for cloud ec2 instances"
 )]
 enum Cmd {
+    #[command(name = "api_server")]
     ApiServer,
+    #[command(name = "bss_server")]
     BssServer,
+    #[command(name = "nss_server")]
     NssServer,
+    #[command(name = "root_server")]
     RootServer,
 }
 
 #[cmd_lib::main]
 fn main() -> CmdResult {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format_target(false)
+        .init();
+
     match Cmd::parse() {
         Cmd::ApiServer => bootstrap_api_server(),
         Cmd::BssServer => bootstrap_bss_server(),

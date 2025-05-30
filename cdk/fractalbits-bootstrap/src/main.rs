@@ -9,6 +9,7 @@ use cmd_lib::*;
 use strum::{AsRefStr, EnumString};
 
 #[derive(Parser, AsRefStr, EnumString, Copy, Clone)]
+#[strum(serialize_all = "snake_case")]
 #[command(rename_all = "snake_case")]
 #[clap(
     name = "fractalbits-bootstrap",

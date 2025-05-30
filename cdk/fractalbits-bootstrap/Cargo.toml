@@ -7,3 +7,4 @@ edition = "2021"
 env_logger.workspace = true
 cmd_lib.workspace = true
 clap.workspace = true
+strum.workspace = true

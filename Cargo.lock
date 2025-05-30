@@ -1628,6 +1628,7 @@ dependencies = [
  "clap 4.5.27",
  "cmd_lib",
  "env_logger 0.11.6",
+ "strum",
 ]
 
 [[package]]

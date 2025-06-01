@@ -158,36 +158,36 @@ pub struct ArcRpcClient(pub Arc<RpcClient>);
 #[cfg(feature = "rss")]
 impl KvClient for ArcRpcClient {
     type Error = RpcError;
-    async fn put(&mut self, key: String, value: Versioned<Bytes>) -> Result<(), Self::Error> {
-        self.0.put(value.version, key.into(), value.data).await
+    async fn put(&mut self, key: String, value: Versioned<String>) -> Result<(), Self::Error> {
+        self.0.put(value.version, key, value.data).await
     }
 
-    async fn get(&mut self, key: String) -> Result<Versioned<Bytes>, Self::Error> {
-        self.0.get(key.into()).await.map(|x| x.into())
+    async fn get(&mut self, key: String) -> Result<Versioned<String>, Self::Error> {
+        self.0.get(key).await.map(|x| x.into())
     }
 
     async fn delete(&mut self, key: String) -> Result<(), Self::Error> {
-        self.0.delete(key.into()).await
+        self.0.delete(key).await
     }
 
-    async fn list(&mut self, prefix: String) -> Result<Vec<Bytes>, Self::Error> {
-        self.0.list(prefix.into()).await
+    async fn list(&mut self, prefix: String) -> Result<Vec<String>, Self::Error> {
+        self.0.list(prefix).await
     }
 
     async fn put_with_extra(
         &mut self,
         key: String,
-        value: Versioned<Bytes>,
+        value: Versioned<String>,
         extra_key: String,
-        extra_value: Versioned<Bytes>,
+        extra_value: Versioned<String>,
     ) -> Result<(), Self::Error> {
         self.0
             .put_with_extra(
                 value.version,
-                key.into(),
+                key,
                 value.data,
                 extra_value.version,
-                extra_key.into(),
+                extra_key,
                 extra_value.data,
             )
             .await
@@ -197,15 +197,10 @@ impl KvClient for ArcRpcClient {
         &mut self,
         key: String,
         extra_key: String,
-        extra_value: Versioned<Bytes>,
+        extra_value: Versioned<String>,
     ) -> Result<(), Self::Error> {
         self.0
-            .delete_with_extra(
-                key.into(),
-                extra_value.version,
-                extra_key.into(),
-                extra_value.data,
-            )
+            .delete_with_extra(key, extra_value.version, extra_key, extra_value.data)
             .await
     }
 }

@@ -2,13 +2,13 @@ use crate::{
     message::MessageHeader,
     rpc_client::{Message, RpcClient, RpcError},
 };
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use prost::Message as PbMessage;
 
 include!(concat!(env!("OUT_DIR"), "/rss_ops.rs"));
 
 impl RpcClient {
-    pub async fn put(&self, version: i64, key: Bytes, value: Bytes) -> Result<(), RpcError> {
+    pub async fn put(&self, version: i64, key: String, value: String) -> Result<(), RpcError> {
         let body = PutRequest {
             version,
             key,
@@ -40,11 +40,11 @@ impl RpcClient {
     pub async fn put_with_extra(
         &self,
         version: i64,
-        key: Bytes,
-        value: Bytes,
+        key: String,
+        value: String,
         extra_version: i64,
-        extra_key: Bytes,
-        extra_value: Bytes,
+        extra_key: String,
+        extra_value: String,
     ) -> Result<(), RpcError> {
         let body = PutWithExtraRequest {
             version,
@@ -80,7 +80,7 @@ impl RpcClient {
         }
     }
 
-    pub async fn get(&self, key: Bytes) -> Result<(i64, Bytes), RpcError> {
+    pub async fn get(&self, key: String) -> Result<(i64, String), RpcError> {
         let body = GetRequest { key };
 
         let mut header = MessageHeader::default();
@@ -105,7 +105,7 @@ impl RpcClient {
         }
     }
 
-    pub async fn delete(&self, key: Bytes) -> Result<(), RpcError> {
+    pub async fn delete(&self, key: String) -> Result<(), RpcError> {
         let body = DeleteRequest { key };
 
         let mut header = MessageHeader::default();
@@ -131,10 +131,10 @@ impl RpcClient {
 
     pub async fn delete_with_extra(
         &self,
-        key: Bytes,
+        key: String,
         extra_version: i64,
-        extra_key: Bytes,
-        extra_value: Bytes,
+        extra_key: String,
+        extra_value: String,
     ) -> Result<(), RpcError> {
         let body = DeleteWithExtraRequest {
             key,
@@ -168,7 +168,7 @@ impl RpcClient {
         }
     }
 
-    pub async fn list(&self, prefix: Bytes) -> Result<Vec<Bytes>, RpcError> {
+    pub async fn list(&self, prefix: String) -> Result<Vec<String>, RpcError> {
         let body = ListRequest { prefix };
 
         let mut header = MessageHeader::default();

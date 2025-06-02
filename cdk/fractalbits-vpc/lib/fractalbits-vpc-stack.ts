@@ -3,6 +3,7 @@ import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 
 export class FractalbitsVpcStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -19,12 +20,17 @@ export class FractalbitsVpcStack extends cdk.Stack {
       ],
     });
 
-    // S3 & SSM VPC Endpoints
+    // Add Gateway Endpoint for S3
     vpc.addGatewayEndpoint('S3Endpoint', {
       service: ec2.GatewayVpcEndpointAwsService.S3,
-      subnets: [{ subnetType: ec2.SubnetType.PUBLIC }, { subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
     });
 
+    // Add Gateway Endpoint for DynamoDB
+    vpc.addGatewayEndpoint('DynamoDbEndpoint', {
+      service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
+    });
+
+    // Add Interface Endpoint for SSM
     ['SSM', 'SSM_MESSAGES', 'EC2_MESSAGES'].forEach(service => {
       vpc.addInterfaceEndpoint(`${service}Endpoint`, {
         service: (ec2.InterfaceVpcEndpointAwsService as any)[service],
@@ -39,6 +45,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       managedPolicies: [
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FullAccess'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonDynamoDBFullAccess_v2'),
       ],
     });
 
@@ -46,7 +53,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const sg = new ec2.SecurityGroup(this, 'InstanceSG', {
       vpc,
       securityGroupName: 'FractalbitsInstanceSG',
-      description: 'Allow outbound only for SSM and S3 access',
+      description: 'Allow outbound only for SSM, DDB and S3 access',
       allowAllOutbound: true,
     });
 
@@ -59,6 +66,16 @@ export class FractalbitsVpcStack extends cdk.Stack {
       // No bucketName provided – name will be auto-generated
       removalPolicy: cdk.RemovalPolicy.DESTROY, // Delete bucket on stack delete
       autoDeleteObjects: true,                  // Empty bucket before deletion
+    });
+
+    new dynamodb.Table(this, 'FractalbitsTable', {
+      partitionKey: {
+        name: 'id',
+        type: dynamodb.AttributeType.STRING,
+      },
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // Delete table on stack delete
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      tableName: 'fractalbits-keys-and-buckets',
     });
 
     // Reusable function to create UserData

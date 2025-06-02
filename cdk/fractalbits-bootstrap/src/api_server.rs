@@ -2,7 +2,6 @@ use super::common::*;
 use cmd_lib::*;
 
 pub fn bootstrap(bucket_name: &str) -> CmdResult {
-    info!("Bootstrapping api_server ...");
     let service = super::Service::ApiServer;
     download_binary(service.as_ref())?;
     create_config(bucket_name)?;

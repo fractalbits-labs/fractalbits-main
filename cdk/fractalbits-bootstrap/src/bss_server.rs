@@ -2,7 +2,6 @@ use super::common::*;
 use cmd_lib::*;
 
 pub fn bootstrap() -> CmdResult {
-    info!("Bootstrapping bss_server ...");
     let service = super::Service::BssServer;
     download_binary(service.as_ref())?;
     create_systemd_unit_file(service)?;

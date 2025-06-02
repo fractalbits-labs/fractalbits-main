@@ -9,7 +9,7 @@ use cmd_lib::*;
 use strum::{AsRefStr, EnumString};
 
 #[derive(Parser)]
-struct Cli {
+struct Opts {
     #[clap(long, long_help = "S3 bucket name for fractalbits service")]
     bucket: String,
 
@@ -41,11 +41,17 @@ fn main() -> CmdResult {
         .format_target(false)
         .init();
 
-    let cli = Cli::parse();
-    match cli.service {
-        Service::ApiServer => api_server::bootstrap(&cli.bucket),
+    let opts = Opts::parse();
+    info!(
+        "Bootstrapping {} with s3 bucket {} ...",
+        opts.service.as_ref(),
+        opts.bucket
+    );
+
+    match opts.service {
+        Service::ApiServer => api_server::bootstrap(&opts.bucket),
         Service::BssServer => bss_server::bootstrap(),
-        Service::NssServer => nss_server::bootstrap(&cli.bucket),
+        Service::NssServer => nss_server::bootstrap(&opts.bucket),
         Service::RootServer => root_server::bootstrap(),
     }
 }

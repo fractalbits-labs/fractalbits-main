@@ -124,7 +124,7 @@ pub fn start_rss_service(build_mode: BuildMode) -> CmdResult {
         AWS_ACCESS_KEY_ID=fakeMyKeyId
         AWS_SECRET_ACCESS_KEY=fakeSecretAccessKey
         AWS_ENDPOINT_URL_DYNAMODB="http://localhost:8000"
-        ./target/debug/rss_admin api-key init-test
+        ./target/debug/rss_admin api-key init-test;
     }?;
 
     create_systemd_unit_file(ServiceName::Rss, build_mode)?;
@@ -220,7 +220,7 @@ WorkingDirectory={pwd}/rss
             --table-name $DDB_TABLE_NAME
             --attribute-definitions AttributeName=id,AttributeType=S
             --key-schema AttributeName=id,KeyType=HASH
-            --provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=1
+            --provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=1;
     }?;
 
     Ok(())

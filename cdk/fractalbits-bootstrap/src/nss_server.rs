@@ -2,8 +2,6 @@ use super::common::*;
 use cmd_lib::*;
 
 pub fn bootstrap(bucket_name: &str) -> CmdResult {
-    info!("Bootstrapping nss_server ...");
-
     download_binary("mkfs")?;
     run_cmd! {
         mkdir -p /var/data;

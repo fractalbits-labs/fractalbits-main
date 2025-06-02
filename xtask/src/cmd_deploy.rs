@@ -18,7 +18,7 @@ pub fn run_cmd_deploy() -> CmdResult {
 
     run_cmd! {
         info "Building with zigbuild";
-        cargo zigbuild --target x86_64-unknown-linux-gnu --release;
+        cargo zigbuild --target x86_64-unknown-linux-gnu;
     }?;
 
     info!("Uploading Rust-built binaries");
@@ -34,7 +34,7 @@ pub fn run_cmd_deploy() -> CmdResult {
 
     run_cmd! {
         info "Building Zig project";
-        zig build -Dcpu=x86_64_v3 --release=safe 2>&1;
+        zig build -Dcpu=x86_64_v3 2>&1;
     }?;
 
     info!("Uploading Zig-built binaries");
@@ -42,16 +42,6 @@ pub fn run_cmd_deploy() -> CmdResult {
     for bin in &zig_bins {
         run_cmd!(aws s3 cp zig-out/bin/$bin $bucket)?;
     }
-
-    info!("Uploading etcd binary");
-    const DOWNLOAD_URL: &str = "https://github.com/etcd-io/etcd/releases/download";
-    const ETCD_VER: &str = "v3.6.0";
-    let tar_file = format!("etcd-{ETCD_VER}-linux-amd64.tar.gz");
-    run_cmd! {
-        curl -sS -L ${DOWNLOAD_URL}/${ETCD_VER}/${tar_file} -o $tar_file;
-        tar xf $tar_file;
-        aws s3 cp ./etcd-v3.6.0-linux-amd64/etcd $bucket;
-    }?;
 
     Ok(())
 }

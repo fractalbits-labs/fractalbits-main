@@ -18,23 +18,15 @@ pub fn download_binary(file_name: &str) -> CmdResult {
 
 pub fn create_systemd_unit_file(service: Service) -> CmdResult {
     let service_name = service.as_ref();
-    let (requires, exec_start) = match service {
-        Service::ApiServer => (
-            "",
-            format!("{BIN_PATH}{service_name} -c {ETC_PATH}{API_SERVER_CONFIG}"),
-        ),
-        Service::NssServer => (
-            "",
-            format!("{BIN_PATH}{service_name} -c {ETC_PATH}{NSS_SERVER_CONFIG}"),
-        ),
-        Service::BssServer => ("", format!("{BIN_PATH}{service_name}")),
-        Service::RootServer => ("etcd.service", format!("{BIN_PATH}{service_name}")),
+    let exec_start = match service {
+        Service::ApiServer => format!("{BIN_PATH}{service_name} -c {ETC_PATH}{API_SERVER_CONFIG}"),
+        Service::NssServer => format!("{BIN_PATH}{service_name} -c {ETC_PATH}{NSS_SERVER_CONFIG}"),
+        Service::BssServer => format!("{BIN_PATH}{service_name}"),
+        Service::RootServer => format!("{BIN_PATH}{service_name}"),
     };
     let systemd_unit_content = format!(
         r##"[Unit]
 Description={service_name} Service
-Requires={requires}
-After={requires}
 
 [Service]
 LimitNOFILE=1000000

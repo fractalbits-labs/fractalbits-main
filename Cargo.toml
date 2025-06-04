@@ -7,9 +7,9 @@ members = [
     "api_server/rpc_client/nss",
     "api_server/rpc_client/rss",
     "api_server/bucket_tables",
+    "cdk/fractalbits-bootstrap",
     "root_server",
     "root_server/admin",
-    "cdk/fractalbits-bootstrap",
     "xtask",
 ]
 resolver = "2"

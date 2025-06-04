@@ -94,11 +94,12 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const createInstance = (
       id: string,
       privateIp: string,
-      subnetType: ec2.SubnetType
+      subnetType: ec2.SubnetType,
+      instanceType: ec2.InstanceType
     ): ec2.Instance => {
       return new ec2.Instance(this, id, {
         vpc,
-        instanceType: ec2.InstanceType.of(ec2.InstanceClass.T2, ec2.InstanceSize.MICRO),
+        instanceType: instanceType,
         machineImage: ec2.MachineImage.latestAmazonLinux2023(),
         vpcSubnets: { subnetType },
         securityGroup: sg,
@@ -109,17 +110,36 @@ export class FractalbitsVpcStack extends cdk.Stack {
     };
 
     // Define instance metadata
+    const t2_micro = ec2.InstanceType.of(ec2.InstanceClass.T2, ec2.InstanceSize.MICRO);
+    const m5_large = ec2.InstanceType.of(ec2.InstanceClass.M5, ec2.InstanceSize.LARGE);
     const instanceConfigs = [
-      { id: 'api_server', ip: '10.0.0.11', subnet: ec2.SubnetType.PUBLIC },
-      { id: 'root_server', ip: '10.0.1.254', subnet: ec2.SubnetType.PRIVATE_ISOLATED },
-      { id: 'bss_server', ip: '10.0.1.10', subnet: ec2.SubnetType.PRIVATE_ISOLATED },
-      { id: 'nss_server', ip: '10.0.1.100', subnet: ec2.SubnetType.PRIVATE_ISOLATED },
+      { id: 'api_server', ip: '10.0.0.11', subnet: ec2.SubnetType.PUBLIC, instanceType: t2_micro },
+      { id: 'root_server', ip: '10.0.1.254', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t2_micro },
+      { id: 'bss_server', ip: '10.0.1.10', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t2_micro },
+      { id: 'nss_server', ip: '10.0.1.100', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: m5_large },
     ];
 
     const instances: Record<string, ec2.Instance> = {};
 
-    instanceConfigs.forEach(({ id, ip, subnet }) => {
-      instances[id] = createInstance(id, ip, subnet);
+    instanceConfigs.forEach(({ id, ip, subnet, instanceType }) => {
+      instances[id] = createInstance(id, ip, subnet, instanceType);
+    });
+
+    // Create EBS Volume with Multi-Attach for nss_server
+    const ebsVolume = new ec2.CfnVolume(this, 'MultiAttachVolume', {
+      availabilityZone: vpc.availabilityZones[0],
+      size: 10, // Size in GiB
+      volumeType: 'io2',
+      iops: 100,
+      multiAttachEnabled: true,
+      tags: [{ key: 'Name', value: 'MultiAttachVolume' }],
+    });
+
+    // Attach volume to nss_server instances (only one should use it at a time)
+    new ec2.CfnVolumeAttachment(this, 'AttachVolumeToActive', {
+      instanceId: instances['nss_server'].instanceId,
+      volumeId: ebsVolume.ref,
+      device: '/dev/xvdf',
     });
 
     // Outputs

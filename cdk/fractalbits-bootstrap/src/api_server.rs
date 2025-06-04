@@ -7,8 +7,8 @@ pub fn bootstrap(bucket_name: &str) -> CmdResult {
     create_config(bucket_name)?;
     create_systemd_unit_file(service)?;
     run_cmd! {
-        info "Sleep 10s to wait for other ec2 instances";
-        sleep 10;
+        info "Sleep 20s to wait for other ec2 instances";
+        sleep 20;
         info "Starting api_server.service";
         systemctl start api_server.service;
     }?;

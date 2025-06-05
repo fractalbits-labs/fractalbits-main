@@ -2,10 +2,10 @@ use super::common::*;
 use cmd_lib::*;
 
 pub fn bootstrap(bucket_name: &str) -> CmdResult {
-    let service = super::Service::ApiServer;
-    download_binary(service.as_ref())?;
+    let service_name = "api_server";
+    download_binary(service_name)?;
     create_config(bucket_name)?;
-    create_systemd_unit_file(service)?;
+    create_systemd_unit_file(service_name)?;
     run_cmd! {
         info "Sleep 20s to wait for other ec2 instances";
         sleep 20;

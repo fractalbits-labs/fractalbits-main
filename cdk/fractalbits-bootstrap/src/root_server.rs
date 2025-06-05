@@ -5,9 +5,9 @@ pub fn bootstrap() -> CmdResult {
     download_binary("rss_admin")?;
     run_cmd!($BIN_PATH/rss_admin api-key init-test)?;
 
-    let service = super::Service::RootServer;
-    download_binary(service.as_ref())?;
-    create_systemd_unit_file(service)?;
+    let service_name = "root_server";
+    download_binary(service_name)?;
+    create_systemd_unit_file(service_name)?;
     run_cmd! {
         info "Starting root_server.service";
         systemctl start root_server.service;

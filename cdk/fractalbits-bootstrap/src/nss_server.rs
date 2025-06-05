@@ -3,46 +3,56 @@ use std::{thread::sleep, time::Duration};
 use super::common::*;
 use cmd_lib::*;
 
-pub fn bootstrap(bucket_name: &str) -> CmdResult {
+pub fn bootstrap(bucket_name: &str, secondary: bool) -> CmdResult {
     download_binary("mkfs")?;
-
     const EBS: &str = "/dev/xvdf";
-    loop {
-        if let Ok(true) = std::fs::exists(EBS) {
-            break;
-        }
-        sleep(Duration::from_millis(100));
-    }
-
-    info!("Checking filesystem on {EBS}");
-    if run_cmd!(file -s $EBS | grep -q filesystem).is_err() {
+    const MNT: &str = "/var/data";
+    if secondary {
         run_cmd! {
-            info "Formatting $EBS with XFS";
-            mkfs -t xfs $EBS;
+            info "Creating mount point and fstab entry for secondary";
+            mkdir -p $MNT;
+            echo "$EBS $MNT xfs defaults,nofail 0 2" >> /etc/fstab;
+        }?;
+    } else {
+        loop {
+            if let Ok(true) = std::fs::exists(EBS) {
+                break;
+            }
+            sleep(Duration::from_millis(100));
+        }
+
+        info!("Checking filesystem on {EBS}");
+        if run_cmd!(file -s $EBS | grep -q filesystem).is_err() {
+            run_cmd! {
+                info "Formatting $EBS with XFS";
+                mkfs -t xfs $EBS;
+            }?;
+        }
+
+        run_cmd! {
+            info "Mounting $EBS to $MNT";
+            mkdir -p $MNT;
+            mount $EBS $MNT;
+            echo "$EBS $MNT xfs defaults,nofail 0 2" >> /etc/fstab;
+        }?;
+
+        run_cmd! {
+            info "Formatting for nss_server";
+            cd /var/data;
+            $BIN_PATH/mkfs;
         }?;
     }
 
-    run_cmd! {
-        info "Mounting $EBS to /var/data";
-        mkdir -p /var/data;
-        mount $EBS /var/data;
-        echo "$EBS /var/data xfs defaults,nofail 0 2" >> /etc/fstab;
-    }?;
-
-    run_cmd! {
-        info "Formatting for nss_server";
-        cd /var/data;
-        $BIN_PATH/mkfs;
-    }?;
-
-    let service = super::Service::NssServer;
-    download_binary(service.as_ref())?;
+    let service_name = "nss_server";
+    download_binary(service_name)?;
     create_config(bucket_name)?;
-    create_systemd_unit_file(service)?;
-    run_cmd! {
-        info "Starting nss_server.service";
-        systemctl start nss_server.service;
-    }?;
+    create_systemd_unit_file(service_name)?;
+    if !secondary {
+        run_cmd! {
+            info "Starting nss_server.service";
+            systemctl start nss_server.service;
+        }?;
+    }
     Ok(())
 }
 

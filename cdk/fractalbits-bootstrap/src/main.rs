@@ -8,16 +8,7 @@ use clap::Parser;
 use cmd_lib::*;
 use strum::{AsRefStr, EnumString};
 
-#[derive(Parser)]
-struct Opts {
-    #[clap(long, long_help = "S3 bucket name for fractalbits service")]
-    bucket: String,
-
-    #[command(subcommand)]
-    service: Service,
-}
-
-#[derive(Parser, AsRefStr, EnumString, Copy, Clone)]
+#[derive(Parser, AsRefStr, EnumString, Clone)]
 #[strum(serialize_all = "snake_case")]
 #[command(rename_all = "snake_case")]
 #[clap(
@@ -26,11 +17,23 @@ struct Opts {
 )]
 enum Service {
     #[clap(about = "Run on api_server instance to bootstrap fractalbits service(s)")]
-    ApiServer,
+    ApiServer {
+        #[clap(long, long_help = "S3 bucket name for fractalbits service")]
+        bucket: String,
+    },
+
     #[clap(about = "Run on bss_server instance to bootstrap fractalbits service(s)")]
     BssServer,
+
     #[clap(about = "Run on nss_server instance to bootstrap fractalbits service(s)")]
-    NssServer,
+    NssServer {
+        #[clap(long, long_help = "S3 bucket name for fractalbits service")]
+        bucket: String,
+
+        #[clap(long, long_help = "As secondary instance")]
+        secondary: bool,
+    },
+
     #[clap(about = "Run on root_server instance to bootstrap fractalbits service(s)")]
     RootServer,
 }
@@ -40,18 +43,14 @@ fn main() -> CmdResult {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_target(false)
         .init();
+    let args: Vec<String> = std::env::args().collect();
+    info!("Bootstrapping: {args:?}");
 
-    let opts = Opts::parse();
-    info!(
-        "Bootstrapping {} with s3 bucket {} ...",
-        opts.service.as_ref(),
-        opts.bucket
-    );
-
-    match opts.service {
-        Service::ApiServer => api_server::bootstrap(&opts.bucket),
+    let service = Service::parse();
+    match service {
+        Service::ApiServer { bucket } => api_server::bootstrap(&bucket),
         Service::BssServer => bss_server::bootstrap(),
-        Service::NssServer => nss_server::bootstrap(&opts.bucket),
+        Service::NssServer { bucket, secondary } => nss_server::bootstrap(&bucket, secondary),
         Service::RootServer => root_server::bootstrap(),
     }
 }

@@ -79,13 +79,13 @@ export class FractalbitsVpcStack extends cdk.Stack {
     });
 
     // Reusable function to create UserData
-    const createUserData = (serverName: string): ec2.UserData => {
+    const createUserData = (bootstrapOptions: string): ec2.UserData => {
       const userData = ec2.UserData.forLinux();
       userData.addCommands(
         'set -e',
         `aws s3 cp --no-progress s3://fractalbits-builds-${region}/fractalbits-bootstrap /opt/fractalbits/bin/`,
         'chmod -v +x /opt/fractalbits/bin/fractalbits-bootstrap',
-        `/opt/fractalbits/bin/fractalbits-bootstrap --bucket=${bucket.bucketName} ${serverName}`,
+        `/opt/fractalbits/bin/fractalbits-bootstrap ${bootstrapOptions}`,
       );
       return userData;
     };
@@ -95,7 +95,8 @@ export class FractalbitsVpcStack extends cdk.Stack {
       id: string,
       privateIp: string,
       subnetType: ec2.SubnetType,
-      instanceType: ec2.InstanceType
+      instanceType: ec2.InstanceType,
+      bootstrapOptions: string
     ): ec2.Instance => {
       return new ec2.Instance(this, id, {
         vpc,
@@ -105,24 +106,55 @@ export class FractalbitsVpcStack extends cdk.Stack {
         securityGroup: sg,
         role: ec2Role,
         privateIpAddress: privateIp,
-        userData: createUserData(id),
+        userData: createUserData(bootstrapOptions),
       });
     };
 
     // Define instance metadata
     const t2_micro = ec2.InstanceType.of(ec2.InstanceClass.T2, ec2.InstanceSize.MICRO);
     const m5_large = ec2.InstanceType.of(ec2.InstanceClass.M5, ec2.InstanceSize.LARGE);
+    const bucket_name = bucket.bucketName;
     const instanceConfigs = [
-      { id: 'api_server', ip: '10.0.0.11', subnet: ec2.SubnetType.PUBLIC, instanceType: t2_micro },
-      { id: 'root_server', ip: '10.0.1.254', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t2_micro },
-      { id: 'bss_server', ip: '10.0.1.10', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t2_micro },
-      { id: 'nss_server', ip: '10.0.1.100', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: m5_large },
+      {
+        id: 'api_server',
+        ip: '10.0.0.11',
+        subnet: ec2.SubnetType.PUBLIC,
+        instanceType: t2_micro,
+        bootstrapOptions: `api_server --bucket=${bucket_name}`
+      },
+      {
+        id: 'root_server',
+        ip: '10.0.1.254',
+        subnet: ec2.SubnetType.PRIVATE_ISOLATED,
+        instanceType: t2_micro,
+        bootstrapOptions: `root_server`
+      },
+      {
+        id: 'bss_server',
+        ip: '10.0.1.10',
+        subnet: ec2.SubnetType.PRIVATE_ISOLATED,
+        instanceType: t2_micro,
+        bootstrapOptions: `bss_server` },
+      {
+        id: 'nss_server_primary',
+        ip: '10.0.1.100',
+        subnet: ec2.SubnetType.PRIVATE_ISOLATED,
+        instanceType: m5_large,
+        bootstrapOptions: `nss_server --bucket=${bucket_name}`
+      },
+      {
+        id: 'nss_server_secondary',
+        ip: '10.0.1.200',
+        subnet: ec2.SubnetType.PRIVATE_ISOLATED,
+        instanceType: m5_large,
+        bootstrapOptions: `nss_server --bucket=${bucket_name} --secondary`
+      },
     ];
 
     const instances: Record<string, ec2.Instance> = {};
 
-    instanceConfigs.forEach(({ id, ip, subnet, instanceType }) => {
-      instances[id] = createInstance(id, ip, subnet, instanceType);
+    instanceConfigs.forEach(({ id, ip, subnet, instanceType, bootstrapOptions }) => {
+      instances[id] = createInstance(id, ip, subnet, instanceType, bootstrapOptions);
     });
 
     // Create EBS Volume with Multi-Attach for nss_server
@@ -137,7 +169,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
     // Attach volume to nss_server instances (only one should use it at a time)
     new ec2.CfnVolumeAttachment(this, 'AttachVolumeToActive', {
-      instanceId: instances['nss_server'].instanceId,
+      instanceId: instances['nss_server_primary'].instanceId,
       volumeId: ebsVolume.ref,
       device: '/dev/xvdf',
     });

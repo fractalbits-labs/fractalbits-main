@@ -1,4 +1,3 @@
-use super::Service;
 use cmd_lib::*;
 
 pub const BIN_PATH: &str = "/opt/fractalbits/bin/";
@@ -9,26 +8,30 @@ pub const API_SERVER_CONFIG: &str = "api_server_cloud_config.toml";
 pub fn download_binary(file_name: &str) -> CmdResult {
     let builds_bucket = format!("s3://fractalbits-builds-{}", get_current_aws_region()?);
     run_cmd! {
-        info "Downloading $file_name from $builds_bucket to $BIN_PATH ...";
+        info "Downloading $file_name from $builds_bucket to $BIN_PATH";
         aws s3 cp --no-progress $builds_bucket/$file_name $BIN_PATH;
         chmod +x $BIN_PATH/$file_name
     }?;
     Ok(())
 }
 
-pub fn create_systemd_unit_file(service: Service) -> CmdResult {
-    let service_name = service.as_ref();
-    let exec_start = match service {
-        Service::ApiServer => format!("{BIN_PATH}{service_name} -c {ETC_PATH}{API_SERVER_CONFIG}"),
-        Service::NssServer => format!("{BIN_PATH}{service_name} -c {ETC_PATH}{NSS_SERVER_CONFIG}"),
-        Service::BssServer => format!("{BIN_PATH}{service_name}"),
-        Service::RootServer => format!("{BIN_PATH}{service_name}"),
+pub fn create_systemd_unit_file(service_name: &str) -> CmdResult {
+    let mut requires = "";
+    let exec_start = match service_name {
+        "api_server" => format!("{BIN_PATH}{service_name} -c {ETC_PATH}{API_SERVER_CONFIG}"),
+        "nss_server" => {
+            requires = "var-data.mount";
+            format!("{BIN_PATH}{service_name} -c {ETC_PATH}{NSS_SERVER_CONFIG}")
+        }
+        "bss_server" => format!("{BIN_PATH}{service_name}"),
+        "root_server" => format!("{BIN_PATH}{service_name}"),
+        _ => unreachable!(),
     };
     let systemd_unit_content = format!(
         r##"[Unit]
 Description={service_name} Service
-After=network-online.target
-Wants=network-online.target
+After=network-online.target {requires}
+Requires={requires}
 
 [Service]
 LimitNOFILE=1000000

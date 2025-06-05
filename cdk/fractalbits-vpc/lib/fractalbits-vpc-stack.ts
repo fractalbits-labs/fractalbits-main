@@ -78,17 +78,15 @@ export class FractalbitsVpcStack extends cdk.Stack {
       tableName: 'fractalbits-keys-and-buckets',
     });
 
-    // Reusable function to create UserData
-    const createUserData = (bootstrapOptions: string): ec2.UserData => {
-      const userData = ec2.UserData.forLinux();
-      userData.addCommands(
-        'set -e',
-        `aws s3 cp --no-progress s3://fractalbits-builds-${region}/fractalbits-bootstrap /opt/fractalbits/bin/`,
-        'chmod -v +x /opt/fractalbits/bin/fractalbits-bootstrap',
-        `/opt/fractalbits/bin/fractalbits-bootstrap ${bootstrapOptions}`,
-      );
-      return userData;
-    };
+    new dynamodb.Table(this, 'EBSFailoverStateTable', {
+      partitionKey: {
+        name: 'VolumeId',
+        type: dynamodb.AttributeType.STRING,
+      },
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // Delete table on stack delete
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      tableName: 'ebs-failover-state',
+    });
 
     // Reusable function to create instances
     const createInstance = (
@@ -96,7 +94,6 @@ export class FractalbitsVpcStack extends cdk.Stack {
       privateIp: string,
       subnetType: ec2.SubnetType,
       instanceType: ec2.InstanceType,
-      bootstrapOptions: string
     ): ec2.Instance => {
       return new ec2.Instance(this, id, {
         vpc,
@@ -106,7 +103,6 @@ export class FractalbitsVpcStack extends cdk.Stack {
         securityGroup: sg,
         role: ec2Role,
         privateIpAddress: privateIp,
-        userData: createUserData(bootstrapOptions),
       });
     };
 
@@ -120,41 +116,37 @@ export class FractalbitsVpcStack extends cdk.Stack {
         ip: '10.0.0.11',
         subnet: ec2.SubnetType.PUBLIC,
         instanceType: t2_micro,
-        bootstrapOptions: `api_server --bucket=${bucket_name}`
       },
       {
         id: 'root_server',
         ip: '10.0.1.254',
         subnet: ec2.SubnetType.PRIVATE_ISOLATED,
         instanceType: t2_micro,
-        bootstrapOptions: `root_server`
       },
       {
         id: 'bss_server',
         ip: '10.0.1.10',
         subnet: ec2.SubnetType.PRIVATE_ISOLATED,
         instanceType: t2_micro,
-        bootstrapOptions: `bss_server` },
+      },
       {
         id: 'nss_server_primary',
         ip: '10.0.1.100',
         subnet: ec2.SubnetType.PRIVATE_ISOLATED,
         instanceType: m5_large,
-        bootstrapOptions: `nss_server --bucket=${bucket_name}`
       },
       {
         id: 'nss_server_secondary',
         ip: '10.0.1.200',
         subnet: ec2.SubnetType.PRIVATE_ISOLATED,
         instanceType: m5_large,
-        bootstrapOptions: `nss_server --bucket=${bucket_name} --secondary`
       },
     ];
 
     const instances: Record<string, ec2.Instance> = {};
 
-    instanceConfigs.forEach(({ id, ip, subnet, instanceType, bootstrapOptions }) => {
-      instances[id] = createInstance(id, ip, subnet, instanceType, bootstrapOptions);
+    instanceConfigs.forEach(({ id, ip, subnet, instanceType}) => {
+      instances[id] = createInstance(id, ip, subnet, instanceType);
     });
 
     // Create EBS Volume with Multi-Attach for nss_server
@@ -166,6 +158,46 @@ export class FractalbitsVpcStack extends cdk.Stack {
       multiAttachEnabled: true,
       tags: [{ key: 'Name', value: 'MultiAttachVolume' }],
     });
+
+    // Create UserData: we need to make it a separate step since we want to get the instance/volume ids
+    const primary_nss = instances['nss_server_primary'].instanceId;
+    const secondary_nss = instances['nss_server_secondary'].instanceId;
+    const ebs_volume_id = ebsVolume.attrVolumeId;
+    const createUserData = (bootstrapOptions: string): ec2.UserData => {
+      const userData = ec2.UserData.forLinux();
+      userData.addCommands(
+        'set -e',
+        `aws s3 cp --no-progress s3://fractalbits-builds-${region}/fractalbits-bootstrap /opt/fractalbits/bin/`,
+        'chmod -v +x /opt/fractalbits/bin/fractalbits-bootstrap',
+        `/opt/fractalbits/bin/fractalbits-bootstrap ${bootstrapOptions}`,
+      );
+      return userData;
+    };
+
+    const instanceBootstrapOptions = [
+      {
+        id: 'api_server',
+        bootstrapOptions: `api_server --bucket=${bucket_name}`
+      },
+      {
+        id: 'root_server',
+        bootstrapOptions: `root_server --primary_instance_id=${primary_nss} --secondary_instance_id=${secondary_nss} --volume_id=${ebs_volume_id}`
+      },
+      {
+        id: 'bss_server',
+        bootstrapOptions: `bss_server` },
+      {
+        id: 'nss_server_primary',
+        bootstrapOptions: `nss_server --bucket=${bucket_name}`
+      },
+      {
+        id: 'nss_server_secondary',
+        bootstrapOptions: `nss_server --bucket=${bucket_name} --secondary`
+      },
+    ];
+    instanceBootstrapOptions.forEach(({id, bootstrapOptions}) => {
+      instances[id].addUserData(createUserData(bootstrapOptions).render())
+    })
 
     // Attach volume to nss_server instances (only one should use it at a time)
     new ec2.CfnVolumeAttachment(this, 'AttachVolumeToActive', {

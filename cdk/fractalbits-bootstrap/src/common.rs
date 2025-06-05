@@ -23,8 +23,7 @@ pub fn create_systemd_unit_file(service_name: &str) -> CmdResult {
             requires = "var-data.mount";
             format!("{BIN_PATH}{service_name} -c {ETC_PATH}{NSS_SERVER_CONFIG}")
         }
-        "bss_server" => format!("{BIN_PATH}{service_name}"),
-        "root_server" => format!("{BIN_PATH}{service_name}"),
+        "bss_server" | "root_server" | "ebs-failover" => format!("{BIN_PATH}{service_name}"),
         _ => unreachable!(),
     };
     let systemd_unit_content = format!(

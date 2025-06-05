@@ -29,6 +29,7 @@ pub fn run_cmd_deploy() -> CmdResult {
         "root_server",
         "rss_admin",
         "fractalbits-bootstrap",
+        "ebs-failover",
     ];
     for bin in &rust_bins {
         run_cmd!(aws s3 cp target/x86_64-unknown-linux-gnu/$BUILD_MODE/$bin $bucket)?;

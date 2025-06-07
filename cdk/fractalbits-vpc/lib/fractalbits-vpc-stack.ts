@@ -114,7 +114,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       { id: 'root_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t2_micro },
       { id: 'bss_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t2_micro },
       { id: 'nss_server_primary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: m5_large },
-      { id: 'nss_server_secondary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: m5_large },
+      // { id: 'nss_server_secondary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: m5_large },
     ];
 
     const instances: Record<string, ec2.Instance> = {};

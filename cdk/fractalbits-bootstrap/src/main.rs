@@ -41,9 +41,6 @@ enum Service {
 
         #[clap(long, long_help = "Multi-attached EBS volume ID")]
         volume_id: String,
-
-        #[clap(long, long_help = "As secondary instance")]
-        secondary: bool,
     },
 
     #[clap(about = "Run on root_server instance to bootstrap fractalbits service(s)")]
@@ -76,11 +73,7 @@ fn main() -> CmdResult {
             rss_ip,
         } => api_server::bootstrap(&bucket, &bss_ip, &nss_ip, &rss_ip),
         Service::BssServer => bss_server::bootstrap(),
-        Service::NssServer {
-            bucket,
-            secondary,
-            volume_id,
-        } => nss_server::bootstrap(&bucket, &volume_id, secondary),
+        Service::NssServer { bucket, volume_id } => nss_server::bootstrap(&bucket, &volume_id),
         Service::RootServer {
             primary_instance_id,
             secondary_instance_id,

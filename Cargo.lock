@@ -1685,6 +1685,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "format-ebs"
+version = "0.1.0"
+dependencies = [
+ "cmd_lib",
+]
+
+[[package]]
 name = "fractalbits-bootstrap"
 version = "0.1.0"
 dependencies = [

@@ -43,7 +43,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       roleName: 'FractalbitsInstanceRole',
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
       managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMFullAccess'),
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FullAccess'),
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonDynamoDBFullAccess_v2'),
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEC2FullAccess'),
@@ -169,7 +169,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       },
       {
         id: 'nss_server_secondary',
-        bootstrapOptions: `nss_server --bucket=${bucket_name} --volume_id=${ebs_volume_id} --secondary`
+        bootstrapOptions: `nss_server --bucket=${bucket_name} --volume_id=${ebs_volume_id}`
       },
     ];
     instanceBootstrapOptions.forEach(({id, bootstrapOptions}) => {

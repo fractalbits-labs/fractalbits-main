@@ -7,7 +7,7 @@ pub fn bootstrap() -> CmdResult {
     create_systemd_unit_file(service_name)?;
     run_cmd! {
         info "Starting bss_server.service";
-        systemctl start bss_server.service;
+        systemctl enable --now bss_server.service;
     }?;
     Ok(())
 }

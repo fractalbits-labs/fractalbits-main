@@ -10,7 +10,7 @@ pub fn bootstrap(bucket_name: &str, bss_ip: &str, nss_ip: &str, rss_ip: &str) ->
         info "Sleep 20s to wait for other ec2 instances";
         sleep 20;
         info "Starting api_server.service";
-        systemctl start api_server.service;
+        systemctl enable --now api_server.service;
     }?;
     Ok(())
 }

@@ -1,6 +1,10 @@
 use super::common::*;
 use cmd_lib::*;
 
+const COMMAND_TIMEOUT_SECONDS: u64 = 300;
+const POLL_INTERVAL_SECONDS: u64 = 5;
+const MAX_POLL_ATTEMPTS: u64 = 60;
+
 pub fn bootstrap(
     primary_instance_id: &str,
     secondary_instance_id: &str,
@@ -14,10 +18,92 @@ pub fn bootstrap(
     create_systemd_unit_file(service_name)?;
     run_cmd! {
         info "Starting root_server.service";
-        systemctl start root_server.service;
+        systemctl enable --now root_server.service;
     }?;
 
+    // Format EBS with SSM
+    let ebs_dev = format! {
+        "/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_{}",
+        volume_id.replace("-", "")
+    };
+    wait_for_ssm_ready(primary_instance_id);
+    run_cmd_with_ssm(
+        primary_instance_id,
+        &format! {"sudo /opt/fractalbits/bin/format-ebs {ebs_dev}"},
+    )?;
+    run_cmd_with_ssm(
+        primary_instance_id,
+        "sudo systemctl enable --now nss_server",
+    )?;
+    run_cmd_with_ssm(secondary_instance_id, "sudo systemctl enable nss_server")?;
+
     bootstrap_ebs_failover_service(primary_instance_id, secondary_instance_id, volume_id)?;
+
+    Ok(())
+}
+
+fn wait_for_ssm_ready(instance_id: &str) {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let result = run_fun! {
+            aws ssm describe-instance-information
+                --filters "Key=InstanceIds,Values=$instance_id"
+                --output json | jq -r ".InstanceInformationList[0].PingStatus"
+        };
+        info!("Ping {instance_id} status: {result:?}");
+        match result {
+            Ok(ref s) if s == "Online" => break,
+            _ => std::thread::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECONDS)),
+        };
+        if attempt >= MAX_POLL_ATTEMPTS {
+            cmd_die!("Timed out while waiting for SSM after $MAX_POLL_ATTEMPTS attempts.");
+        }
+    }
+}
+
+fn run_cmd_with_ssm(instance_id: &str, cmd: &str) -> CmdResult {
+    let command_id = run_fun! {
+        info "Running ${cmd} on ${instance_id} with SSM";
+        aws ssm send-command
+            --instance-ids "$instance_id"
+            --document-name "AWS-RunShellScript"
+            --parameters "commands=[\'$cmd\']"
+            --timeout-seconds "$COMMAND_TIMEOUT_SECONDS"
+            --query "Command.CommandId"
+            --output text
+    }?;
+    info!("Command sent to {instance_id} successfully. Command ID: {command_id}. Polling for results...");
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let invocation_json = run_fun! {
+            aws ssm get-command-invocation
+                --command-id "$command_id"
+                --instance-id "$instance_id"
+        }?;
+        let status = run_fun!(echo $invocation_json | jq -r .Status)?;
+
+        info!("Command status from {instance_id} is: {status}");
+        match status.as_ref() {
+            "Success" => break,
+            "Failed" => {
+                error!("Command execution failed on the remote instance.");
+                let error_output = run_fun!(echo $invocation_json | jq -r .StandardErrorContent)?;
+                cmd_die!("Remote Error Output:\n---\n${error_output}---");
+            }
+            "TimedOut" => {
+                cmd_die!("Command timed out on the remote instance after $COMMAND_TIMEOUT_SECONDS seconds.");
+            }
+            _ => {
+                // Status is Pending, InProgress, Cancelling, etc.
+                std::thread::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECONDS));
+            }
+        }
+        if attempt >= MAX_POLL_ATTEMPTS {
+            cmd_die!("Timed out polling for command result after $MAX_POLL_ATTEMPTS attempts.");
+        }
+    }
 
     Ok(())
 }
@@ -52,7 +138,7 @@ fencing_timeout_seconds = 300                  # Max time to wait for instance t
         mkdir -p $ETC_PATH;
         echo $config_content > $ETC_PATH/${service_name}-config.toml;
         info "Starting ${service_name}.service";
-        systemctl start ${service_name}.service;
+        systemctl enable --now ${service_name}.service;
     }?;
 
     Ok(())

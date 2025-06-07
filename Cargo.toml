@@ -8,6 +8,7 @@ members = [
     "api_server/rpc_client/rss",
     "api_server/bucket_tables",
     "cdk/fractalbits-bootstrap",
+    "tools/format-ebs",
     "root_server",
     "root_server/admin",
     "root_server/ebs-failover",

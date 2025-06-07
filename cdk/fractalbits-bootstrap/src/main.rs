@@ -6,10 +6,8 @@ mod root_server;
 
 use clap::Parser;
 use cmd_lib::*;
-use strum::{AsRefStr, EnumString};
 
-#[derive(Parser, AsRefStr, EnumString, Clone)]
-#[strum(serialize_all = "snake_case")]
+#[derive(Parser)]
 #[command(rename_all = "snake_case")]
 #[clap(
     name = "fractalbits-bootstrap",

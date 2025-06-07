@@ -12,7 +12,11 @@ pub fn bootstrap(bucket_name: &str, volume_id: &str) -> CmdResult {
     create_ebs_mount_unit(volume_id)?;
     create_udev_rule(volume_id)?;
     create_systemd_unit_file(service_name)?;
-    // Note the nss_server service is not enabled until EBS formatted from root_server
+    run_cmd! {
+        info "Enabling ${service_name}.service";
+        systemctl enable ${service_name}.service;
+    }?;
+    // Note the nss_server service is not started until EBS formatted from root_server
     Ok(())
 }
 
@@ -60,7 +64,8 @@ fn create_udev_rule(volume_id: &str) -> CmdResult {
         r##"KERNEL=="nvme*n*", SUBSYSTEM=="block", ENV{{ID_SERIAL}}=="Amazon_Elastic_Block_Store_{volume_id}_1", TAG+="systemd", ENV{{SYSTEMD_WANTS}}="nss_server.service""##
     );
     run_cmd! {
-        echo $content > /etc/udev/rules.d/99-ebs.rules;
+        echo $content > $ETC_PATH/99-ebs.rules;
+        ln -s $ETC_PATH/99-ebs.rules /etc/udev/rules.d/;
     }?;
 
     Ok(())

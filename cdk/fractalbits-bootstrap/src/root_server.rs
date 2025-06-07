@@ -31,11 +31,6 @@ pub fn bootstrap(
         primary_instance_id,
         &format! {"sudo /opt/fractalbits/bin/format-ebs {ebs_dev}"},
     )?;
-    run_cmd_with_ssm(
-        primary_instance_id,
-        "sudo systemctl enable --now nss_server",
-    )?;
-    run_cmd_with_ssm(secondary_instance_id, "sudo systemctl enable nss_server")?;
 
     bootstrap_ebs_failover_service(primary_instance_id, secondary_instance_id, volume_id)?;
 

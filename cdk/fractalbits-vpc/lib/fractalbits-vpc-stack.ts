@@ -135,7 +135,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
     // Create UserData: we need to make it a separate step since we want to get the instance/volume ids
     const primary_nss = instances['nss_server_primary'].instanceId;
-    const secondary_nss = instances['nss_server_secondary'].instanceId;
+    const secondary_nss = instances['nss_server_secondary']?.instanceId ?? null;
     const ebs_volume_id = ebsVolume.volumeId;
     const bss_ip = instances["bss_server"].instancePrivateIp;
     const nss_ip = instances["nss_server_primary"].instancePrivateIp;
@@ -173,7 +173,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       },
     ];
     instanceBootstrapOptions.forEach(({id, bootstrapOptions}) => {
-      instances[id].addUserData(createUserData(bootstrapOptions).render())
+      instances[id]?.addUserData(createUserData(bootstrapOptions).render())
     })
 
     // Attach volume to primary nss_server instance

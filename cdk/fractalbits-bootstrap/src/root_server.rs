@@ -32,7 +32,9 @@ pub fn bootstrap(
         &format! {"sudo /opt/fractalbits/bin/format-ebs {ebs_dev}"},
     )?;
 
-    bootstrap_ebs_failover_service(primary_instance_id, secondary_instance_id, volume_id)?;
+    if secondary_instance_id != "null" {
+        bootstrap_ebs_failover_service(primary_instance_id, secondary_instance_id, volume_id)?;
+    }
 
     Ok(())
 }

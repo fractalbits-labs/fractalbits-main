@@ -1,7 +1,7 @@
 use super::common::*;
 use cmd_lib::*;
 
-pub fn bootstrap(bucket_name: &str, volume_id: &str, num_nvme_disks: u32) -> CmdResult {
+pub fn bootstrap(bucket_name: &str, volume_id: &str, num_nvme_disks: usize) -> CmdResult {
     if num_nvme_disks != 0 {
         format_local_nvme_disks(num_nvme_disks)?;
     }
@@ -75,25 +75,33 @@ fn create_ebs_udev_rule(volume_id: &str) -> CmdResult {
     Ok(())
 }
 
-fn format_local_nvme_disks(num_nvme_disks: u32) -> CmdResult {
-    const DATA_CACHE_MNT: &str = "/data2/cache";
-    run_cmd!(yum install -y nvme-cli mdadm)?;
+fn format_local_nvme_disks(num_nvme_disks: usize) -> CmdResult {
+    run_cmd! {
+        info "Installing rpms (nvme-cli, mdadm)";
+        yum install -y -q nvme-cli mdadm >/dev/null;
+    }?;
     let nvme_disks = run_fun! {
         nvme list
             | grep -v "Amazon Elastic Block Store"
             | awk r##"/nvme[0-9]n[0-9]/ {print $1}"##
-            | tr '\n' ' '
     }?;
-    // FIXME: somehow cmd_lib's $[] is not working here
-    let create_md0_cmd = format!(
-        "mdadm --create --verbose /dev/md0 --level=0 --raid-devices={num_nvme_disks} {nvme_disks}"
-    );
+    let nvme_disks: &Vec<&str> = &nvme_disks.split("\n").collect();
+    info!("Found local nvme disks: {nvme_disks:?}");
+    let num = nvme_disks.len();
+    if num != num_nvme_disks {
+        cmd_die!("Found $num local nvme disks, expected: $num_nvme_disks");
+    }
+
+    const DATA_CACHE_MNT: &str = "/data2/cache";
     run_cmd! {
-        info "Creating md0 on $nvme_disks";
-        bash -c $create_md0_cmd;
+        info "Zeroing superblocks";
+        mdadm -q --zero-superblock $[nvme_disks];
+
+        info "Creating md0";
+        mdadm -q --create /dev/md0 --level=0 --raid-devices=${num_nvme_disks} $[nvme_disks];
 
         info "Creating XFS on /dev/md0";
-        mkfs.xfs /dev/md0;
+        mkfs.xfs -q /dev/md0;
 
         info "Mounting to $DATA_CACHE_MNT";
         mkdir -p $DATA_CACHE_MNT;

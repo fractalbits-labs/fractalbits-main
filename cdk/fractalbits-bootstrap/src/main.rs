@@ -41,7 +41,7 @@ enum Service {
         volume_id: String,
 
         #[clap(long, long_help = "Number of NVME disks")]
-        num_nvme_disks: u32,
+        num_nvme_disks: usize,
     },
 
     #[clap(about = "Run on root_server instance to bootstrap fractalbits service(s)")]

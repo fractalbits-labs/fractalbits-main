@@ -107,8 +107,8 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
     // Define instance metadata
     const t2_micro = ec2.InstanceType.of(ec2.InstanceClass.T2, ec2.InstanceSize.MICRO);
-    const nss_instance_type = ec2.InstanceType.of(ec2.InstanceClass.M5, ec2.InstanceSize.LARGE);
-    const nss_num_nvme_disks = 0;
+    const nss_instance_type = ec2.InstanceType.of(ec2.InstanceClass.M5D, ec2.InstanceSize.XLARGE4);
+    const nss_num_nvme_disks = 2;
     const bucket_name = bucket.bucketName;
     const instanceConfigs = [
       { id: 'api_server', subnet: ec2.SubnetType.PUBLIC, instanceType: t2_micro },

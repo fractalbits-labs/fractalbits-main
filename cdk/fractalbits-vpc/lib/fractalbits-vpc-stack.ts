@@ -107,14 +107,14 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
     // Define instance metadata
     const t2_micro = ec2.InstanceType.of(ec2.InstanceClass.T2, ec2.InstanceSize.MICRO);
-    const m5_large = ec2.InstanceType.of(ec2.InstanceClass.M5, ec2.InstanceSize.LARGE);
+    const nss_instance_type = ec2.InstanceType.of(ec2.InstanceClass.M5D, ec2.InstanceSize.XLARGE4);
     const bucket_name = bucket.bucketName;
     const instanceConfigs = [
       { id: 'api_server', subnet: ec2.SubnetType.PUBLIC, instanceType: t2_micro },
       { id: 'root_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t2_micro },
       { id: 'bss_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t2_micro },
-      { id: 'nss_server_primary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: m5_large },
-      // { id: 'nss_server_secondary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: m5_large },
+      { id: 'nss_server_primary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nss_instance_type },
+      // { id: 'nss_server_secondary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nss_instance_type },
     ];
 
     const instances: Record<string, ec2.Instance> = {};

@@ -1,6 +1,6 @@
 use cmd_lib::*;
 
-pub fn run_cmd_deploy() -> CmdResult {
+pub fn run_cmd_deploy(use_s3_backend: bool) -> CmdResult {
     // Get AWS region
     let awk_opts = r#"{{print $2}}"#;
     let region = run_fun!(aws configure list | grep region | awk $awk_opts)?;
@@ -39,7 +39,7 @@ pub fn run_cmd_deploy() -> CmdResult {
 
     run_cmd! {
         info "Building Zig project";
-        zig build -Dcpu=x86_64_v3 --release=safe 2>&1;
+        zig build -Dcpu=x86_64_v3 -Duse_s3_backend=$use_s3_backend --release=safe 2>&1;
     }?;
 
     info!("Uploading Zig-built binaries");

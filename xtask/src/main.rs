@@ -7,7 +7,7 @@ pub mod cmd_service;
 mod cmd_tool;
 
 use build::BuildMode;
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use cmd_lib::*;
 use strum::{AsRefStr, EnumString};
 
@@ -15,30 +15,22 @@ pub const TEST_BUCKET_ROOT_BLOB_NAME: &str = "947ef2be-44b2-4ac2-969b-2574eb8566
 pub const TS_FMT: &str = "%b %d %H:%M:%.S";
 
 #[derive(Parser)]
+#[command(rename_all = "snake_case")]
 #[clap(name = "xtask", about = "Misc project related tasks")]
 enum Cmd {
     #[clap(about = "Run benchmark for api_server/nss_rpc/bss_rpc")]
     Bench {
         #[clap(
-            short = 'w',
-            long = "workload",
+            long,
             long_help = "Run with pre-defined workload (read/write)",
             default_value = "write"
         )]
         workload: BenchWorkload,
 
-        #[clap(
-            short = 'f',
-            long = "with_flame_graph",
-            long_help = "Run with perf tool and generate flamegraph"
-        )]
+        #[clap(long, long_help = "Run with perf tool and generate flamegraph")]
         with_flame_graph: bool,
 
-        #[clap(
-            short = 'l',
-            long = "nss_data_on_local",
-            long_help = "Nss data on local disks (without s3)"
-        )]
+        #[clap(long, long_help = "Nss data on local disks (without s3)")]
         nss_data_on_local: bool,
 
         #[clap(long_help = "api_server/nss_rpc/bss_rpc")]
@@ -67,7 +59,10 @@ enum Cmd {
     Tool(ToolKind),
 
     #[clap(about = "Deploy binaries to s3 builds bucket")]
-    Deploy,
+    Deploy {
+        #[clap(long, action=ArgAction::Set, default_value = "true", num_args = 0..=1)]
+        use_s3_backend: bool,
+    },
 }
 
 #[derive(Clone, AsRefStr, EnumString)]
@@ -156,7 +151,7 @@ fn main() -> CmdResult {
             cmd_service::run_cmd_service(BuildMode::Debug, action, service)?
         }
         Cmd::Tool(tool_kind) => cmd_tool::run_cmd_tool(tool_kind)?,
-        Cmd::Deploy => cmd_deploy::run_cmd_deploy()?,
+        Cmd::Deploy { use_s3_backend } => cmd_deploy::run_cmd_deploy(use_s3_backend)?,
     }
     Ok(())
 }

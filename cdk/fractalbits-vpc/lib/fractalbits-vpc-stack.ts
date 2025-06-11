@@ -118,15 +118,15 @@ export class FractalbitsVpcStack extends cdk.Stack {
     };
 
     // Define instance metadata
-    const t4g_small = ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.MICRO);
-    const nss_instance_type = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
-    const nss_num_nvme_disks = 1;
-    const bucket_name = bucket.bucketName;
+    const t4gSmall = ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.SMALL);
+    const nssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
+    const nssNumNvmeDisks = 1;
+    const bucketName = bucket.bucketName;
     const instanceConfigs = [
-      { id: 'api_server', subnet: ec2.SubnetType.PUBLIC, instanceType: t4g_small },
-      { id: 'root_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t4g_small },
-      { id: 'bss_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t4g_small },
-      { id: 'nss_server_primary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nss_instance_type },
+      { id: 'api_server', subnet: ec2.SubnetType.PUBLIC, instanceType: t4gSmall },
+      { id: 'root_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t4gSmall },
+      { id: 'bss_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t4gSmall },
+      { id: 'nss_server_primary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nssInstanceType },
       // { id: 'nss_server_secondary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nss_instance_type },
     ];
 
@@ -152,32 +152,32 @@ export class FractalbitsVpcStack extends cdk.Stack {
     });
 
     // Create UserData: we need to make it a separate step since we want to get the instance/volume ids
-    const primary_nss = instances['nss_server_primary'].instanceId;
-    const secondary_nss = instances['nss_server_secondary']?.instanceId ?? null;
-    const ebs_volume_id = ebsVolume.volumeId;
-    const bss_ip = instances["bss_server"].instancePrivateIp;
-    const nss_ip = instances["nss_server_primary"].instancePrivateIp;
-    const rss_ip = instances["root_server"].instancePrivateIp;
+    const primaryNss = instances['nss_server_primary'].instanceId;
+    const secondaryNss = instances['nss_server_secondary']?.instanceId ?? null;
+    const ebsVolumeId = ebsVolume.volumeId;
+    const bssIp = instances["bss_server"].instancePrivateIp;
+    const nssIp = instances["nss_server_primary"].instancePrivateIp;
+    const rssIp = instances["root_server"].instancePrivateIp;
     const cpuArch = "aarch64";
     const instanceBootstrapOptions = [
       {
         id: 'api_server',
-        bootstrapOptions: `api_server --bucket=${bucket_name} --bss_ip=${bss_ip} --nss_ip=${nss_ip} --rss_ip=${rss_ip}`
+        bootstrapOptions: `api_server --bucket=${bucketName} --bss_ip=${bssIp} --nss_ip=${nssIp} --rss_ip=${rssIp}`
       },
       {
         id: 'root_server',
-        bootstrapOptions: `root_server --primary_instance_id=${primary_nss} --secondary_instance_id=${secondary_nss} --volume_id=${ebs_volume_id}`
+        bootstrapOptions: `root_server --primary_instance_id=${primaryNss} --secondary_instance_id=${secondaryNss} --volume_id=${ebsVolumeId}`
       },
       {
         id: 'bss_server',
         bootstrapOptions: `bss_server` },
       {
         id: 'nss_server_primary',
-        bootstrapOptions: `nss_server --bucket=${bucket_name} --volume_id=${ebs_volume_id} --num_nvme_disks=${nss_num_nvme_disks}`
+        bootstrapOptions: `nss_server --bucket=${bucketName} --volume_id=${ebsVolumeId} --num_nvme_disks=${nssNumNvmeDisks}`
       },
       {
         id: 'nss_server_secondary',
-        bootstrapOptions: `nss_server --bucket=${bucket_name} --volume_id=${ebs_volume_id} --num_nvme_disks=${nss_num_nvme_disks}`
+        bootstrapOptions: `nss_server --bucket=${bucketName} --volume_id=${ebsVolumeId} --num_nvme_disks=${nssNumNvmeDisks}`
       },
     ];
     instanceBootstrapOptions.forEach(({id, bootstrapOptions}) => {
@@ -202,7 +202,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'VolumeId', {
-      value: ebs_volume_id,
+      value: ebsVolumeId,
       description: 'EBS volume ID',
     });
   }

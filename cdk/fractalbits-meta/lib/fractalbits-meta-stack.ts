@@ -81,7 +81,7 @@ export class FractalbitsMetaStack extends cdk.Stack {
 
     const nssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
     const cpuArch = "aarch64";
-    const nssBootstrapOptions = `nss_bench --num_nvme_disks=2`;
+    const nssBootstrapOptions = `nss_bench --num_nvme_disks=1`;
     let nssInstance = createInstance("nss_bench", ec2.SubnetType.PRIVATE_ISOLATED, nssInstanceType);
     nssInstance.addUserData(createUserData(cpuArch, nssBootstrapOptions).render());
 

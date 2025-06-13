@@ -67,6 +67,19 @@ export class FractalbitsMetaStack extends cdk.Stack {
         role: ec2Role,
       });
     };
+    const nssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
+    const cpuArch = "aarch64";
+    let nssInstance = createInstance("nss_bench", ec2.SubnetType.PRIVATE_ISOLATED, nssInstanceType);
+    // Create EBS Volume with Multi-Attach capabilities
+    const ebsVolume = new ec2.Volume(this, 'MultiAttachVolume', {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      availabilityZone: vpc.availabilityZones[0],
+      size: cdk.Size.gibibytes(20),
+      volumeType: ec2.EbsDeviceVolumeType.IO2,
+      iops: 10000,
+      enableMultiAttach: true,
+    });
+
     const createUserData = (cpuArch: string, bootstrapOptions: string): ec2.UserData => {
       const region = cdk.Stack.of(this).region;
       const userData = ec2.UserData.forLinux();
@@ -78,12 +91,15 @@ export class FractalbitsMetaStack extends cdk.Stack {
       );
       return userData;
     };
-
-    const nssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
-    const cpuArch = "aarch64";
-    const nssBootstrapOptions = `nss_bench --num_nvme_disks=1`;
-    let nssInstance = createInstance("nss_bench", ec2.SubnetType.PRIVATE_ISOLATED, nssInstanceType);
+    const nssBootstrapOptions = `nss_bench --volume_id=${ebsVolume.volumeId} --num_nvme_disks=1`;
     nssInstance.addUserData(createUserData(cpuArch, nssBootstrapOptions).render());
+
+    // Attach volume
+    new ec2.CfnVolumeAttachment(this, 'AttachVolumeToActive', {
+      instanceId: nssInstance.instanceId,
+      device: '/dev/xvdf',
+      volumeId: ebsVolume.volumeId,
+    });
 
     new cdk.CfnOutput(this, 'nssBenchId', {
       value: nssInstance.instanceId,

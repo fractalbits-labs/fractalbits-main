@@ -48,7 +48,7 @@ enum Cmd {
         #[clap(long_help = "stop/start/restart")]
         action: ServiceAction,
         #[clap(
-            long_help = "all/api_server/nss/bss/ddb_local/minio",
+            long_help = "all/api_server/bss/nss/minio/ddb_local",
             default_value = "all"
         )]
         service: ServiceName,

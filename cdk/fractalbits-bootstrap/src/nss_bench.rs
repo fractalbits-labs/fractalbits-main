@@ -7,6 +7,7 @@ pub fn bootstrap(bucket_name: &str, volume_id: &str, num_nvme_disks: usize) -> C
     assert_ne!(num_nvme_disks, 0);
     install_rpms()?;
     format_local_nvme_disks(num_nvme_disks)?;
+    create_coredump_conf()?;
 
     for bin in [
         "nss_server",
@@ -30,7 +31,6 @@ pub fn bootstrap(bucket_name: &str, volume_id: &str, num_nvme_disks: usize) -> C
         info "Formatting EBS: $ebs_dev (see detailed logs with `journalctl _COMM=format-ebs`)";
         /opt/fractalbits/bin/format-ebs $ebs_dev;
 
-        mkdir -p /data/local;
         cd /data;
 
         info "Running nss mkfs";

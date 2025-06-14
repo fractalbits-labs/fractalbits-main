@@ -40,6 +40,8 @@ BindsTo={requires}
 [Service]
 LimitNOFILE=1000000
 LimitCORE=infinity
+Restart=always
+RestartSec=5s
 WorkingDirectory=/data
 ExecStart={exec_start}
 
@@ -152,4 +154,17 @@ WantedBy=multi-user.target
     }?;
 
     Ok(())
+}
+
+pub fn create_coredump_conf() -> CmdResult {
+    let cores_location = "/data/local/coredumps";
+    let file = "99-coredump.conf";
+    let content = format!("kernel.core_pattern={cores_location}/core.%e.%p.%t");
+    run_cmd! {
+        info "Setting up coredump location ($cores_location)";
+        mkdir -p $cores_location;
+        echo $content > ${ETC_PATH}${file};
+        ln -sf ${ETC_PATH}${file} /etc/sysctl.d;
+        sysctl -p /etc/sysctl.d/${file};
+    }
 }

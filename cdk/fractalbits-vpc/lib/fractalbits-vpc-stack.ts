@@ -139,9 +139,9 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const ebsVolume = new ec2.Volume(this, 'MultiAttachVolume', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       availabilityZone: vpc.availabilityZones[0],
-      size: cdk.Size.gibibytes(10),
+      size: cdk.Size.gibibytes(20),
       volumeType: ec2.EbsDeviceVolumeType.IO2,
-      iops: 100,
+      iops: 10000,
       enableMultiAttach: true,
     });
     // Attach volume to primary nss_server instance

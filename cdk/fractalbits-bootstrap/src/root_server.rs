@@ -22,14 +22,11 @@ pub fn bootstrap(
     }?;
 
     // Format EBS with SSM
-    let ebs_dev = format! {
-        "/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_{}",
-        volume_id.replace("-", "")
-    };
+    let ebs_dev = get_volume_dev(volume_id);
     wait_for_ssm_ready(primary_instance_id);
     run_cmd_with_ssm(
         primary_instance_id,
-        &format! {"sudo /opt/fractalbits/bin/format-ebs {ebs_dev}"},
+        &format! {"sudo /opt/fractalbits/bin/format-ebs --ebs_dev {ebs_dev}"},
     )?;
 
     if secondary_instance_id != "null" {

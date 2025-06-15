@@ -20,11 +20,8 @@ pub fn create_systemd_unit_file(service_name: &str) -> CmdResult {
     let mut requires = "";
     let exec_start = match service_name {
         "api_server" => format!("{BIN_PATH}{service_name} -c {ETC_PATH}{API_SERVER_CONFIG}"),
-        "nss_server" => {
-            requires = "data-ebs.mount";
-            format!("{BIN_PATH}{service_name} -c {ETC_PATH}{NSS_SERVER_CONFIG}")
-        }
-        "nss_bench" => {
+        "nss_server" | "nss_bench" => {
+            requires = "data-ebs.mount data-local.mount";
             format!("{BIN_PATH}nss_server -c {ETC_PATH}{NSS_SERVER_CONFIG}")
         }
         "bss_server" | "root_server" | "ebs-failover" => format!("{BIN_PATH}{service_name}"),
@@ -36,12 +33,15 @@ Description={service_name} Service
 After=network-online.target {requires}
 Requires={requires}
 BindsTo={requires}
+# Limit to 3 restarts within a 10-minute (600 second) interval
+StartLimitIntervalSec=600
+StartLimitBurst=3
 
 [Service]
 LimitNOFILE=1000000
 LimitCORE=infinity
-Restart=always
-RestartSec=5s
+Restart=on-failure
+RestartSec=5
 WorkingDirectory=/data
 ExecStart={exec_start}
 
@@ -55,8 +55,8 @@ WantedBy=multi-user.target
         mkdir -p /data;
         mkdir -p $ETC_PATH;
         echo $systemd_unit_content > ${ETC_PATH}${service_file};
-        info "Linking ${ETC_PATH}${service_file} into /etc/systemd/system";
-        systemctl link ${ETC_PATH}${service_file} --force --quiet;
+        info "Enabling ${ETC_PATH}${service_file}";
+        systemctl enable ${ETC_PATH}${service_file} --force --quiet;
     }?;
     Ok(())
 }
@@ -156,7 +156,7 @@ WantedBy=multi-user.target
     Ok(())
 }
 
-pub fn create_coredump_conf() -> CmdResult {
+pub fn create_coredump_config() -> CmdResult {
     let cores_location = "/data/local/coredumps";
     let file = "99-coredump.conf";
     let content = format!("kernel.core_pattern={cores_location}/core.%e.%p.%t");
@@ -167,4 +167,19 @@ pub fn create_coredump_conf() -> CmdResult {
         ln -sf ${ETC_PATH}${file} /etc/sysctl.d;
         sysctl -p /etc/sysctl.d/${file};
     }
+}
+
+pub fn get_volume_dev(volume_id: &str) -> String {
+    // Sanitize: convert vol-07451bc901d5e1e09 → vol07451bc901d5e1e09
+    let volume_id = &volume_id.replace("-", "");
+    format!("/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_{volume_id}")
+}
+
+pub fn install_rpms(rpms: &[&str]) -> CmdResult {
+    run_cmd! {
+        info "Installing ${rpms:?}";
+        yum install -y -q $[rpms] >/dev/null;
+    }?;
+
+    Ok(())
 }

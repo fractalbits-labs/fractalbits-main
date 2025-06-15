@@ -32,7 +32,6 @@ pub fn build_bss_nss_server(mode: BuildMode) -> CmdResult {
             sudo apt install -y protobuf-compiler;
         }?;
     }
-    std::env::set_var("PROTOC_PATH", "/usr/bin/protoc");
 
     let opts = match mode {
         BuildMode::Debug => "",

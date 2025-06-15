@@ -7,8 +7,7 @@ pub fn run_cmd_deploy(use_s3_backend: bool, release_mode: bool, target_arm: bool
     let bucket_name = get_build_bucket_name()?;
     let bucket = format!("s3://{bucket_name}");
 
-    // Note: rust always uses release mode, to reduce binaries sizes for now
-    // let rust_build_opt = if release_mode { "--release" } else { "" };
+    // Note: rust always uses release mode, to reduce binaries sizes
     let rust_build_opt = "--release";
     let zig_build_opt = if release_mode { "--release=safe" } else { "" };
     let rust_build_target = if target_arm {
@@ -21,7 +20,7 @@ pub fn run_cmd_deploy(use_s3_backend: bool, release_mode: bool, target_arm: bool
     } else {
         "cpu=cascadelake"
     };
-    std::env::set_var("PROTOC_PATH", "/usr/bin/protoc");
+
     run_cmd! {
         info "Building Rust projects with zigbuild";
         cargo zigbuild --target $rust_build_target $rust_build_opt;

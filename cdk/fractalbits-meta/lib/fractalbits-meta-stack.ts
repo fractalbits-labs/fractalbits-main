@@ -84,7 +84,7 @@ export class FractalbitsMetaStack extends cdk.Stack {
     };
     const instanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
     const cpuArch = "aarch64";
-    let instance = createInstance(`{props.serviceName}_bench`, ec2.SubnetType.PRIVATE_ISOLATED, instanceType);
+    let instance = createInstance(`${props.serviceName}_bench`, ec2.SubnetType.PRIVATE_ISOLATED, instanceType);
     if (props.serviceName == "nss") {
       // Create EBS Volume with Multi-Attach capabilities
       const ebsVolume = new ec2.Volume(this, 'MultiAttachVolume', {

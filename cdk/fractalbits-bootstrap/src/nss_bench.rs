@@ -18,12 +18,7 @@ pub fn bootstrap(bucket_name: &str, volume_id: &str, num_nvme_disks: usize) -> C
 
     let volume_dev = get_volume_dev(volume_id);
     run_cmd! {
-        cd /data;
-
-        info "Generating random 10_000_000 keys";
-        /opt/fractalbits/bin/test_art --gen --size 10000000;
-
-        info "Formatting EBS: $volume_dev (see detailed logs with `journalctl _COMM=format-nss`)";
+        info "Formatting nss with ebs $volume_dev (see detailed logs with `journalctl _COMM=format-nss`)";
         /opt/fractalbits/bin/format-nss --dev_mode --ebs_dev $volume_dev;
     }?;
     Ok(())

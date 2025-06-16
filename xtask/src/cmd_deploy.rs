@@ -54,6 +54,7 @@ pub fn run_cmd_deploy(use_s3_backend: bool, release_mode: bool, target_arm: bool
         "mkfs",
         "fbs",      // to create test art tree for benchmarking nss_rpc
         "test_art", // to create test.data for benchmarking nss_rpc
+        "s3_blob_client",
     ];
     for bin in &zig_bins {
         run_cmd!(aws s3 cp zig-out/bin/$bin $bucket/$prefix/$bin)?;

@@ -118,14 +118,17 @@ export class FractalbitsVpcStack extends cdk.Stack {
     };
 
     // Define instance metadata
-    const t4gSmall = ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.SMALL);
     const nssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
+    const bssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
+    const rssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.C7G, ec2.InstanceSize.MEDIUM);
+    const apiInstanceType = ec2.InstanceType.of(ec2.InstanceClass.C7G, ec2.InstanceSize.LARGE);
     const nssNumNvmeDisks = 1;
+    const bssNumNvmeDisks = 1;
     const bucketName = bucket.bucketName;
     const instanceConfigs = [
-      { id: 'api_server', subnet: ec2.SubnetType.PUBLIC, instanceType: t4gSmall },
-      { id: 'root_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t4gSmall },
-      { id: 'bss_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: t4gSmall },
+      { id: 'api_server', subnet: ec2.SubnetType.PUBLIC, instanceType: apiInstanceType },
+      { id: 'root_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: rssInstanceType },
+      { id: 'bss_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: bssInstanceType },
       { id: 'nss_server_primary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nssInstanceType },
       // { id: 'nss_server_secondary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nss_instance_type },
     ];
@@ -170,7 +173,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       },
       {
         id: 'bss_server',
-        bootstrapOptions: `bss_server` },
+        bootstrapOptions: `bss_server --num_nvme_disks=${bssNumNvmeDisks}` },
       {
         id: 'nss_server_primary',
         bootstrapOptions: `nss_server --bucket=${bucketName} --volume_id=${ebsVolumeId} --num_nvme_disks=${nssNumNvmeDisks}`

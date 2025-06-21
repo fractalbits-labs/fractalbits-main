@@ -29,7 +29,6 @@ pub fn run_cmd_deploy(use_s3_backend: bool, release_mode: bool, target_arm: bool
         zig build -Duse_s3_backend=$use_s3_backend $[zig_build_target] $zig_build_opt 2>&1;
     }?;
 
-    let prefix = if target_arm { "aarch64" } else { "x86_64" };
     info!("Uploading Rust-built binaries");
     let rust_bins = [
         "api_server",
@@ -41,8 +40,8 @@ pub fn run_cmd_deploy(use_s3_backend: bool, release_mode: bool, target_arm: bool
         "rewrk_rpc",
         "xtask",
     ];
-    // let rust_build_mode = if release_mode { "release" } else { "debug" };
     let rust_build_mode = "release";
+    let prefix = if target_arm { "aarch64" } else { "x86_64" };
     for bin in &rust_bins {
         run_cmd!(aws s3 cp target/$rust_build_target/$rust_build_mode/$bin $bucket/$prefix/$bin)?;
     }

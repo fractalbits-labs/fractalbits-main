@@ -1,4 +1,4 @@
-use crate::{cmd_service, ServiceName, TEST_BUCKET_ROOT_BLOB_NAME};
+use crate::{cmd_service, BuildMode, ServiceName, TEST_BUCKET_ROOT_BLOB_NAME};
 use cmd_lib::*;
 
 pub fn run_cmd_precheckin() -> CmdResult {
@@ -20,6 +20,14 @@ pub fn run_cmd_precheckin() -> CmdResult {
         zig build test --summary all 2>&1;
     }?;
 
+    run_s3_api_tests()?;
+    run_art_tests()?;
+
+    info!("Precheckin is OK");
+    Ok(())
+}
+
+fn run_art_tests() -> CmdResult {
     let rand_log = "test_art_random.log";
     run_cmd! {
         info "Running art tests (random) with log $rand_log";
@@ -72,27 +80,25 @@ pub fn run_cmd_precheckin() -> CmdResult {
         e
     })?;
 
-    run_s3_api_tests()?;
-
-    info!("Precheckin is OK");
     Ok(())
 }
 
 fn run_s3_api_tests() -> CmdResult {
+    cmd_service::stop_service(ServiceName::All)?;
     run_cmd! {
-        info "Stopping previous service(s)";
-        ignore cargo xtask service stop;
-
         info "Removing previous buckets (ddb_local) data";
-        rm -f data/rss/shared-local-instance.db;
+        cd data;
+        rm -f rss/shared-local-instance.db;
+        info "Formatting nss_server";
+        ../zig-out/bin/nss_server format;
+    }?;
 
-        info "Starting services";
-        cargo xtask service start;
-
+    cmd_service::start_services(BuildMode::Debug, ServiceName::All)?;
+    run_cmd! {
         info "Run cargo tests (s3 api tests)";
         cargo test;
+    }?;
+    let _ = cmd_service::stop_service(ServiceName::All);
 
-        info "Stopping services";
-        ignore cargo xtask service stop;
-    }
+    Ok(())
 }

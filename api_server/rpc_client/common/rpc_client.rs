@@ -55,8 +55,7 @@ pub struct RpcClient {
 }
 
 impl RpcClient {
-    pub async fn new(url: &str) -> Result<Self, RpcError> {
-        let stream = TcpStream::connect(url).await?;
+    pub async fn new(stream: TcpStream) -> Result<Self, RpcError> {
         stream.set_nodelay(true)?;
         let (receiver, sender) = stream.into_split();
 

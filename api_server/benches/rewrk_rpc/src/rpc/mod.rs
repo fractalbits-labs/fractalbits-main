@@ -9,6 +9,7 @@ use futures::future::join_all;
 use futures_util::stream::FuturesUnordered;
 use rpc_client_bss::RpcClientBss;
 use rpc_client_nss::RpcClientNss;
+use tokio::net::TcpStream;
 use tokio::task::JoinHandle;
 use tokio::time::{timeout_at, Instant};
 use uuid::Uuid;
@@ -400,11 +401,13 @@ impl RewrkConnector {
     }
 
     async fn connect_nss(&self) -> anyhow::Result<RpcClientNss> {
-        Ok(RpcClientNss::new(&self.host).await.unwrap())
+        let stream = TcpStream::connect(&self.host).await?;
+        Ok(RpcClientNss::new(stream).await.unwrap())
     }
 
     async fn connect_bss(&self) -> anyhow::Result<RpcClientBss> {
-        Ok(RpcClientBss::new(&self.host).await.unwrap())
+        let stream = TcpStream::connect(&self.host).await?;
+        Ok(RpcClientBss::new(stream).await.unwrap())
     }
 
     #[allow(dead_code)]

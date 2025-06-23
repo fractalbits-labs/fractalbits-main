@@ -64,6 +64,7 @@ pub fn context() -> Context {
 
 pub fn build_client() -> Client {
     let credentials = Credentials::new(TEST_KEY, TEST_SECRET, None, None, "fractalbits-integ-bits");
+    #[allow(deprecated)]
     let config = Config::builder()
         .endpoint_url(format!("http://127.0.0.1:{}", DEFAULT_PORT))
         .region(Region::from_static("us-east-1"))

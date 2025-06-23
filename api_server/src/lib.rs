@@ -17,7 +17,10 @@ use rpc_client_rss::{ArcRpcClientRss, RpcClientRss};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::{
+    net::TcpStream,
+    sync::mpsc::{self, Receiver, Sender},
+};
 use uuid::Uuid;
 
 pub type BlobId = uuid::Uuid;
@@ -49,8 +52,10 @@ impl AppState {
         for _i in 0..AppState::MAX_NSS_CONNECTION {
             let mut wait_secs = 0;
             let rpc_client_nss = loop {
-                if let Ok(client) = RpcClientNss::new(&config.nss_addr).await {
-                    break client;
+                if let Ok(stream) = TcpStream::connect(&config.nss_addr).await {
+                    if let Ok(client) = RpcClientNss::new(stream).await {
+                        break client;
+                    }
                 }
                 wait_secs += 1;
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -78,8 +83,10 @@ impl AppState {
 
         let mut wait_secs = 0;
         let rpc_client_rss = loop {
-            if let Ok(client) = RpcClientRss::new(&config.rss_addr).await {
-                break client;
+            if let Ok(stream) = TcpStream::connect(&config.rss_addr).await {
+                if let Ok(client) = RpcClientRss::new(stream).await {
+                    break client;
+                }
             }
             wait_secs += 1;
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -122,7 +129,8 @@ impl AppState {
         bss_ip: &str,
         mut input: Receiver<(BlobId, usize)>,
     ) -> Result<(), RpcErrorBss> {
-        let rpc_client_bss = &RpcClientBss::new(bss_ip).await?;
+        let stream = TcpStream::connect(bss_ip).await?;
+        let rpc_client_bss = &RpcClientBss::new(stream).await?;
         while let Some((blob_id, block_numbers)) = input.recv().await {
             let deleted = stream::iter(0..block_numbers)
                 .map(|block_number| async move {
@@ -157,7 +165,10 @@ pub struct BlobClient {
 
 impl BlobClient {
     pub async fn new(bss_url: &str, config: &S3CacheConfig) -> Self {
-        let client_bss = RpcClientBss::new(bss_url)
+        let stream = TcpStream::connect(bss_url)
+            .await
+            .expect("bss connection failed");
+        let client_bss = RpcClientBss::new(stream)
             .await
             .expect("rpc client bss failure");
 

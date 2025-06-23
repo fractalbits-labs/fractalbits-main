@@ -107,7 +107,7 @@ impl<C: KvClient, F: TableSchema> Table<C, F> {
         let json = self.kv_client.get(full_key).await?;
         Ok((
             json.version,
-            serde_json::from_slice(&json.data.as_bytes()).unwrap(),
+            serde_json::from_slice(json.data.as_bytes()).unwrap(),
         )
             .into())
     }

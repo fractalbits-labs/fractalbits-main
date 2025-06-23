@@ -25,7 +25,7 @@ pub type Handle = JoinHandle<anyhow::Result<WorkerResult>>;
 const TEST_BUCKET_ROOT_BLOB_NAME: &str = "947ef2be-44b2-4ac2-969b-2574eb85662b";
 
 fn read_keys(filename: &str, num_tasks: usize, keys_limit: usize) -> Vec<VecDeque<String>> {
-    let file = File::open(filename).expect(&format!("open {filename} failed"));
+    let file = File::open(filename).unwrap_or_else(|_| panic!("open {filename} failed"));
     let mut res = vec![VecDeque::new(); num_tasks];
     let mut i = 0;
     let mut total = 0;

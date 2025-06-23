@@ -7,6 +7,7 @@ mod root_server;
 use clap::Parser;
 use cmd_lib::*;
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Parser)]
 #[command(rename_all = "snake_case")]
 #[clap(

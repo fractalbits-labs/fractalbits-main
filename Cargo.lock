@@ -3417,11 +3417,15 @@ dependencies = [
 name = "rpc_client_bss"
 version = "0.1.0"
 dependencies = [
+ "bb8",
  "bytemuck",
  "bytes",
  "fake 3.1.0",
+ "metrics",
+ "metrics-exporter-prometheus",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-retry",
  "tokio-stream",
  "tokio-util",
  "tracing",
@@ -3453,14 +3457,18 @@ dependencies = [
 name = "rpc_client_rss"
 version = "0.1.0"
 dependencies = [
+ "bb8",
  "bucket_tables",
  "bytemuck",
  "bytes",
+ "metrics",
+ "metrics-exporter-prometheus",
  "prost",
  "prost-build",
  "serde",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-retry",
  "tokio-stream",
  "tokio-util",
  "tracing",

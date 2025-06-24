@@ -13,6 +13,10 @@ tokio-util.workspace = true
 tokio-stream.workspace = true
 uuid.workspace = true
 fake.workspace = true
+bb8.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+tokio-retry.workspace = true
 
 [features]
 default = ["bss"]

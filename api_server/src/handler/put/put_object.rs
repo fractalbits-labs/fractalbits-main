@@ -16,7 +16,7 @@ use crate::{
         Request,
     },
     object_layout::*,
-    BlobClient, BlobId,
+    AppState, BlobId,
 };
 use axum::{
     body::Body,
@@ -27,18 +27,17 @@ use bucket_tables::bucket_table::Bucket;
 use futures::{StreamExt, TryStreamExt};
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
 use rpc_client_bss::message::MessageHeader;
-use rpc_client_nss::{rpc::put_inode_response, RpcClientNss};
+use rpc_client_nss::rpc::put_inode_response;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 use super::block_data_stream::BlockDataStream;
 
 pub async fn put_object_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
-    blob_client: Arc<BlobClient>,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
     let headers = extract_metadata_headers(request.headers())?;
@@ -57,6 +56,7 @@ pub async fn put_object_handler(
     let (body_stream, checksummer) = req_body.streaming_with_checksums();
     let body_data_stream = Body::from_stream(body_stream).into_data_stream();
     let blob_id = Uuid::now_v7();
+    let blob_client = app.get_blob_client();
     let size = BlockDataStream::new(body_data_stream, ObjectLayout::DEFAULT_BLOCK_SIZE)
         .enumerate()
         .map(|(i, block_data)| {
@@ -103,6 +103,7 @@ pub async fn put_object_handler(
         }),
     };
     let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new())?;
+    let rpc_client_nss = app.get_rpc_client_nss();
     let resp = rpc_client_nss
         .put_inode(
             bucket.root_blob_name.clone(),

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{body::Body, http::header, response::Response};
 use bucket_tables::{
     api_key_table::{ApiKey, ApiKeyTable},
@@ -6,11 +8,14 @@ use bucket_tables::{
     table::{Table, Versioned},
 };
 use bytes::Buf;
-use rpc_client_nss::{rpc::create_root_inode_response, RpcClientNss};
+use rpc_client_nss::rpc::create_root_inode_response;
 use rpc_client_rss::{ArcRpcClientRss, RpcErrorRss};
 use serde::{Deserialize, Serialize};
 
-use crate::handler::{common::s3_error::S3Error, Request};
+use crate::{
+    handler::{common::s3_error::S3Error, Request},
+    AppState,
+};
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
@@ -40,12 +45,10 @@ struct BucketConfig {
 }
 
 pub async fn create_bucket_handler(
+    app: Arc<AppState>,
     api_key: Versioned<ApiKey>,
     bucket_name: String,
     request: Request,
-    rpc_client_nss: &RpcClientNss,
-    rpc_client_rss: ArcRpcClientRss,
-    region: &str,
 ) -> Result<Response, S3Error> {
     let api_key_id = {
         if api_key.data.authorized_buckets.contains_key(&bucket_name) {
@@ -62,11 +65,12 @@ pub async fn create_bucket_handler(
         let create_bucket_conf: CreateBucketConfiguration =
             quick_xml::de::from_reader(body.reader())?;
         let location_constraint = create_bucket_conf.location_constraint;
-        if !location_constraint.is_empty() && location_constraint != region {
+        if !location_constraint.is_empty() && location_constraint != app.config.region {
             return Err(S3Error::InvalidLocationConstraint);
         }
     }
 
+    let rpc_client_nss = app.get_rpc_client_nss();
     let resp = rpc_client_nss
         .create_root_inode(bucket_name.clone())
         .await?;
@@ -78,6 +82,7 @@ pub async fn create_bucket_handler(
         }
     };
 
+    let rpc_client_rss = app.get_rpc_client_rss();
     let retry_times = 10;
     for i in 0..retry_times {
         let mut bucket_table: Table<ArcRpcClientRss, BucketTable> =

@@ -1,14 +1,17 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
-use crate::handler::{
-    common::{
-        get_raw_object,
-        response::xml::{Xml, XmlnsS3},
-        s3_error::S3Error,
-        signature::checksum::ChecksumValue,
-        time, xheader,
+use crate::{
+    handler::{
+        common::{
+            get_raw_object,
+            response::xml::{Xml, XmlnsS3},
+            s3_error::S3Error,
+            signature::checksum::ChecksumValue,
+            time, xheader,
+        },
+        Request,
     },
-    Request,
+    AppState,
 };
 use axum::{
     extract::Query,
@@ -18,7 +21,6 @@ use axum::{
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
 use bucket_tables::bucket_table::Bucket;
-use rpc_client_nss::RpcClientNss;
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
@@ -176,14 +178,15 @@ struct Part {
 }
 
 pub async fn get_object_attributes_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
 ) -> Result<Response, S3Error> {
     let mut parts = request.into_parts().0;
     let Query(_query_opts): Query<QueryOpts> = parts.extract().await?;
     let header_opts = HeaderOpts::from_headers(&parts.headers)?;
+    let rpc_client_nss = app.get_rpc_client_nss();
     let obj = get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key.clone()).await?;
     let last_modified = time::format_http_date(obj.timestamp);
 

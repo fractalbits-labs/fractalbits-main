@@ -1,21 +1,22 @@
+use std::sync::Arc;
+
 use axum::{body::Body, response::Response};
 use bucket_tables::{
     api_key_table::{ApiKey, ApiKeyTable},
     bucket_table::{Bucket, BucketTable},
     table::{Table, Versioned},
 };
-// use rand::Rng;
-use rpc_client_nss::{rpc::delete_root_inode_response, RpcClientNss};
+use rpc_client_nss::rpc::delete_root_inode_response;
 use rpc_client_rss::{ArcRpcClientRss, RpcErrorRss};
 
 use crate::handler::{common::s3_error::S3Error, Request};
+use crate::AppState;
 
 pub async fn delete_bucket_handler(
+    app: Arc<AppState>,
     api_key: Versioned<ApiKey>,
     bucket: &Bucket,
     _request: Request,
-    rpc_client_nss: &RpcClientNss,
-    rpc_client_rss: ArcRpcClientRss,
 ) -> Result<Response, S3Error> {
     let api_key_id = {
         if !api_key
@@ -28,6 +29,7 @@ pub async fn delete_bucket_handler(
         api_key.data.key_id.clone()
     };
 
+    let rpc_client_nss = app.get_rpc_client_nss();
     let resp = rpc_client_nss
         .delete_root_inode(bucket.root_blob_name.clone())
         .await?;
@@ -42,6 +44,7 @@ pub async fn delete_bucket_handler(
         }
     };
 
+    let rpc_client_rss = app.get_rpc_client_rss();
     let retry_times = 10;
     for i in 0..retry_times {
         let mut bucket_table: Table<ArcRpcClientRss, BucketTable> =

@@ -12,7 +12,6 @@ use futures::{StreamExt, TryStreamExt};
 use rpc_client_nss::RpcClientNss;
 use serde::Deserialize;
 
-use crate::BlobId;
 use crate::{
     handler::{
         common::{
@@ -27,6 +26,7 @@ use crate::{
     object_layout::{MpuState, ObjectState},
     BlobClient,
 };
+use crate::{AppState, BlobId};
 use bucket_tables::bucket_table::Bucket;
 
 #[derive(Debug, Deserialize)]
@@ -86,19 +86,20 @@ impl<'a> HeaderOpts<'a> {
 }
 
 pub async fn get_object_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
-    blob_client: Arc<BlobClient>,
 ) -> Result<Response, S3Error> {
     let mut parts = request.into_parts().0;
     let Query(query_opts): Query<QueryOpts> = parts.extract().await?;
     let header_opts = HeaderOpts::from_headers(&parts.headers)?;
+    let rpc_client_nss = app.get_rpc_client_nss();
     let object = get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key.clone()).await?;
     let total_size = object.size()?;
     let range = parse_range_header(header_opts.range, total_size)?;
     let checksum_mode_enabled = header_opts.x_amz_checksum_mode_enabled;
+    let blob_client = app.get_blob_client();
     match (query_opts.part_number, range) {
         (_, None) => {
             let (body, body_size) = get_object_content(

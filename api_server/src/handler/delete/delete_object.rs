@@ -1,21 +1,24 @@
+use std::sync::Arc;
+
 use axum::{body::Body, response::Response};
 use rkyv::{self, rancor::Error};
-use rpc_client_nss::{rpc::delete_inode_response, RpcClientNss};
+use rpc_client_nss::rpc::delete_inode_response;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
     handler::common::{list_raw_objects, mpu_get_part_prefix, s3_error::S3Error},
     object_layout::{MpuState, ObjectLayout, ObjectState},
-    BlobId,
+    AppState, BlobId,
 };
 use bucket_tables::bucket_table::Bucket;
 
 pub async fn delete_object_handler(
+    app: Arc<AppState>,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
+    let rpc_client_nss = app.get_rpc_client_nss();
     let resp = rpc_client_nss
         .delete_inode(bucket.root_blob_name.clone(), key.clone())
         .await?;

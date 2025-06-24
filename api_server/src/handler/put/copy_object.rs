@@ -16,7 +16,7 @@ use crate::{
         Request,
     },
     object_layout::*,
-    BlobClient, BlobId,
+    AppState, BlobClient, BlobId,
 };
 use axum::{
     body::Body,
@@ -194,18 +194,18 @@ impl CopyObjectResult {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn copy_object_handler(
+    app: Arc<AppState>,
     request: Request,
     api_key: Versioned<ApiKey>,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
-    blob_client: Arc<BlobClient>,
-    rpc_client_rss: ArcRpcClientRss,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
     let header_opts = HeaderOpts::from_headers(request.headers())?;
+    let rpc_client_nss = app.get_rpc_client_nss();
+    let blob_client = app.get_blob_client();
+    let rpc_client_rss = app.get_rpc_client_rss();
     let (source_obj, body) = get_copy_source_object(
         api_key,
         &header_opts.x_amz_copy_source,
@@ -216,11 +216,10 @@ pub async fn copy_object_handler(
     .await?;
 
     put_object_handler(
+        app,
         Request::new(ReqBody::from(body)),
         bucket,
         key,
-        rpc_client_nss,
-        blob_client,
         blob_deletion,
     )
     .await?;

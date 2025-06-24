@@ -2,14 +2,13 @@ use std::sync::Arc;
 
 use axum::response::Response;
 use axum::{http::HeaderValue, response};
-use rpc_client_nss::RpcClientNss;
 use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 
 use crate::handler::common::{mpu_get_part_prefix, s3_error::S3Error};
 use crate::handler::put::put_object_handler;
 use crate::handler::Request;
-use crate::{BlobClient, BlobId};
+use crate::{AppState, BlobId};
 use bucket_tables::bucket_table::Bucket;
 
 #[allow(dead_code)]
@@ -33,13 +32,12 @@ struct ResponseHeaders {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn upload_part_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
     key: String,
     part_number: u64,
     upload_id: String,
-    rpc_client_nss: &RpcClientNss,
-    blob_client: Arc<BlobClient>,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
     if !(1..=10_000).contains(&part_number) {
@@ -48,15 +46,7 @@ pub async fn upload_part_handler(
     // TODO: check upload_id
 
     let key = mpu_get_part_prefix(key, part_number);
-    put_object_handler(
-        request,
-        bucket,
-        key,
-        rpc_client_nss,
-        blob_client,
-        blob_deletion,
-    )
-    .await?;
+    put_object_handler(app, request, bucket, key, blob_deletion).await?;
 
     let mut resp = response::Response::default();
     let etag = format!("{upload_id}{part_number}");

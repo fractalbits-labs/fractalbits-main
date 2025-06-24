@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use std::hash::Hasher;
+use std::{collections::HashSet, sync::Arc};
 
 use crate::{
     handler::{
@@ -17,7 +17,7 @@ use crate::{
         Request,
     },
     object_layout::{MpuState, ObjectCoreMetaData, ObjectState},
-    BlobId,
+    AppState, BlobId,
 };
 use axum::{http::HeaderValue, response::Response};
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -27,7 +27,7 @@ use crc32c::Crc32cHasher as Crc32c;
 use crc32fast::Hasher as Crc32;
 use md5::Digest;
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
-use rpc_client_nss::{rpc::put_inode_response, RpcClientNss};
+use rpc_client_nss::rpc::put_inode_response;
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::Sha256;
@@ -214,11 +214,11 @@ impl MpuChecksummer {
 }
 
 pub async fn complete_multipart_upload_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
     key: String,
     upload_id: String,
-    rpc_client_nss: &RpcClientNss,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
     let headers = extract_metadata_headers(request.headers())?;
@@ -228,6 +228,7 @@ pub async fn complete_multipart_upload_handler(
     let mut valid_part_numbers: HashSet<u32> =
         req_body.part.iter().map(|part| part.part_number).collect();
 
+    let rpc_client_nss = app.get_rpc_client_nss();
     let mut object =
         get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key.clone()).await?;
     if object.version_id.simple().to_string() != upload_id {
@@ -273,13 +274,7 @@ pub async fn complete_multipart_upload_handler(
         return Err(S3Error::InvalidPart);
     }
     for mpu_key in invalid_part_keys.iter() {
-        delete_object_handler(
-            bucket,
-            mpu_key.clone(),
-            rpc_client_nss,
-            blob_deletion.clone(),
-        )
-        .await?;
+        delete_object_handler(app.clone(), bucket, mpu_key.clone(), blob_deletion.clone()).await?;
     }
 
     let etag = gen_etag();

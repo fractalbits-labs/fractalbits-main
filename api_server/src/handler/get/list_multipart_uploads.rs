@@ -1,12 +1,16 @@
-use crate::handler::{
-    common::{
-        response::xml::{Xml, XmlnsS3},
-        s3_error::S3Error,
+use std::sync::Arc;
+
+use crate::{
+    handler::{
+        common::{
+            response::xml::{Xml, XmlnsS3},
+            s3_error::S3Error,
+        },
+        Request,
     },
-    Request,
+    AppState,
 };
 use axum::{extract::Query, response::Response, RequestPartsExt};
-use rpc_client_nss::RpcClientNss;
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
@@ -73,8 +77,8 @@ struct CommonPrefixes {
 }
 
 pub async fn list_multipart_uploads_handler(
+    _app: Arc<AppState>,
     request: Request,
-    _rpc_client_nss: &RpcClientNss,
 ) -> Result<Response, S3Error> {
     let Query(_opts): Query<ListMultipartUploadsOptions> = request.into_parts().0.extract().await?;
     Xml(ListMultipartUploadsResult::default()).try_into()

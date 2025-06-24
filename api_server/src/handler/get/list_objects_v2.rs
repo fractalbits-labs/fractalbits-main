@@ -1,10 +1,15 @@
-use crate::handler::{
-    common::{
-        response::xml::{Xml, XmlnsS3},
-        s3_error::S3Error,
-        time::format_timestamp,
+use std::sync::Arc;
+
+use crate::{
+    handler::{
+        common::{
+            response::xml::{Xml, XmlnsS3},
+            s3_error::S3Error,
+            time::format_timestamp,
+        },
+        Request,
     },
-    Request,
+    AppState,
 };
 use axum::{extract::Query, response::Response, RequestPartsExt};
 use bucket_tables::bucket_table::Bucket;
@@ -188,9 +193,9 @@ pub struct Prefix {
 }
 
 pub async fn list_objects_v2_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
-    rpc_client_nss: &RpcClientNss,
 ) -> Result<Response, S3Error> {
     let Query(opts): Query<QueryOpts> = request.into_parts().0.extract().await?;
     tracing::debug!("list_objects_v2 {opts:?}");
@@ -229,6 +234,7 @@ pub async fn list_objects_v2_handler(
         start_after = format!("/{start_after}");
     }
 
+    let rpc_client_nss = app.get_rpc_client_nss();
     let (objs, common_prefixes, next_continuation_token) = list_objects(
         bucket,
         rpc_client_nss,

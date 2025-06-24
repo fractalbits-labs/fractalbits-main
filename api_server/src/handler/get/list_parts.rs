@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::handler::common::mpu_parse_part_number;
 use crate::handler::common::{
     get_raw_object, list_raw_objects, mpu_get_part_prefix,
@@ -7,6 +9,7 @@ use crate::handler::common::{
     time,
 };
 use crate::object_layout::{MpuState, ObjectState};
+use crate::AppState;
 use axum::{extract::Query, response::Response, RequestPartsExt};
 use base64::prelude::*;
 use bucket_tables::bucket_table::Bucket;
@@ -87,13 +90,14 @@ struct Owner {
 }
 
 pub async fn list_parts_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
 ) -> Result<Response, S3Error> {
     let Query(query_opts): Query<QueryOpts> = request.into_parts().0.extract().await?;
     let max_parts = query_opts.max_parts.unwrap_or(1000);
+    let rpc_client_nss = app.get_rpc_client_nss();
     let object = get_raw_object(rpc_client_nss, bucket.root_blob_name.clone(), key.clone()).await?;
     if object.version_id.simple().to_string() != query_opts.upload_id {
         return Err(S3Error::NoSuchUpload);

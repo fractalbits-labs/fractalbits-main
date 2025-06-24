@@ -1,14 +1,18 @@
+use std::sync::Arc;
+
 use super::{list_objects, Object, Prefix};
-use crate::handler::{
-    common::{
-        response::xml::{Xml, XmlnsS3},
-        s3_error::S3Error,
+use crate::{
+    handler::{
+        common::{
+            response::xml::{Xml, XmlnsS3},
+            s3_error::S3Error,
+        },
+        Request,
     },
-    Request,
+    AppState,
 };
 use axum::{extract::Query, response::Response, RequestPartsExt};
 use bucket_tables::bucket_table::Bucket;
-use rpc_client_nss::RpcClientNss;
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
@@ -105,9 +109,9 @@ impl ListBucketResult {
 }
 
 pub async fn list_objects_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
-    rpc_client_nss: &RpcClientNss,
 ) -> Result<Response, S3Error> {
     let Query(opts): Query<QueryOpts> = request.into_parts().0.extract().await?;
     tracing::debug!("list_objects {opts:?}");
@@ -134,6 +138,7 @@ pub async fn list_objects_handler(
         None => "".into(),
     };
 
+    let rpc_client_nss = app.get_rpc_client_nss();
     let (objs, common_prefixes, next_continuation_token) = list_objects(
         bucket,
         rpc_client_nss,

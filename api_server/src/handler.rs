@@ -10,7 +10,7 @@ mod put;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::{AppState, BlobClient, BlobId};
+use crate::{AppState, BlobId};
 use axum::{
     body::Body,
     extract::{ConnectInfo, State},
@@ -33,8 +33,7 @@ use get::GetEndpoint;
 use head::HeadEndpoint;
 use post::PostEndpoint;
 use put::PutEndpoint;
-use rpc_client_nss::RpcClientNss;
-use rpc_client_rss::{ArcRpcClientRss, RpcErrorRss};
+use rpc_client_rss::RpcErrorRss;
 use tokio::sync::mpsc::Sender;
 
 pub type Request<T = ReqBody> = http::Request<T>;
@@ -90,48 +89,27 @@ async fn any_handler_inner(
         return Err(S3Error::AccessDenied);
     }
 
-    let rpc_client_nss = app.get_rpc_client_nss();
-    let blob_client = app.get_blob_client();
     let blob_deletion = app.blob_deletion.clone();
     match endpoint {
         Endpoint::Bucket(bucket_endpoint) => {
-            bucket_handler(
-                &app,
-                request,
-                api_key,
-                bucket_name,
-                rpc_client_nss,
-                rpc_client_rss,
-                bucket_endpoint,
-            )
-            .await
+            bucket_handler(app, request, api_key, bucket_name, bucket_endpoint).await
         }
         Endpoint::Head(head_endpoint) => {
             let bucket = bucket::resolve_bucket(bucket_name, rpc_client_rss.clone()).await?;
-            head_handler(request, &bucket, key, rpc_client_nss, head_endpoint).await
+            head_handler(app, request, &bucket, key, head_endpoint).await
         }
         Endpoint::Get(get_endpoint) => {
             let bucket = bucket::resolve_bucket(bucket_name, rpc_client_rss.clone()).await?;
-            get_handler(
-                request,
-                &bucket,
-                key,
-                rpc_client_nss,
-                blob_client,
-                get_endpoint,
-            )
-            .await
+            get_handler(app, request, &bucket, key, get_endpoint).await
         }
         Endpoint::Put(put_endpoint) => {
             let bucket = bucket::resolve_bucket(bucket_name, rpc_client_rss.clone()).await?;
             put_handler(
+                app,
                 request,
                 api_key,
                 &bucket,
                 key,
-                rpc_client_nss,
-                blob_client,
-                rpc_client_rss,
                 blob_deletion,
                 put_endpoint,
             )
@@ -139,216 +117,144 @@ async fn any_handler_inner(
         }
         Endpoint::Post(post_endpoint) => {
             let bucket = bucket::resolve_bucket(bucket_name, rpc_client_rss.clone()).await?;
-            post_handler(
-                request,
-                &bucket,
-                key,
-                rpc_client_nss,
-                blob_deletion,
-                post_endpoint,
-            )
-            .await
+            post_handler(app, request, &bucket, key, blob_deletion, post_endpoint).await
         }
         Endpoint::Delete(delete_endpoint) => {
             let bucket = bucket::resolve_bucket(bucket_name, rpc_client_rss.clone()).await?;
-            delete_handler(
-                request,
-                &bucket,
-                key,
-                rpc_client_nss,
-                blob_client,
-                blob_deletion,
-                delete_endpoint,
-            )
-            .await
+            delete_handler(app, request, &bucket, key, blob_deletion, delete_endpoint).await
         }
     }
 }
 
 async fn bucket_handler(
-    app: &Arc<AppState>,
+    app: Arc<AppState>,
     request: Request,
     api_key: Versioned<ApiKey>,
     bucket_name: String,
-    rpc_client_nss: &RpcClientNss,
-    rpc_client_rss: ArcRpcClientRss,
     endpoint: BucketEndpoint,
 ) -> Result<Response, S3Error> {
+    let rpc_client_rss = app.get_rpc_client_rss();
     match endpoint {
         BucketEndpoint::CreateBucket => {
-            bucket::create_bucket_handler(
-                api_key,
-                bucket_name,
-                request,
-                rpc_client_nss,
-                rpc_client_rss,
-                &app.config.region,
-            )
-            .await
+            bucket::create_bucket_handler(app, api_key, bucket_name, request).await
         }
         BucketEndpoint::DeleteBucket => {
             let bucket = bucket::resolve_bucket(bucket_name, rpc_client_rss.clone()).await?;
-            bucket::delete_bucket_handler(api_key, &bucket, request, rpc_client_nss, rpc_client_rss)
-                .await
+            bucket::delete_bucket_handler(app, api_key, &bucket, request).await
         }
-        BucketEndpoint::HeadBucket => {
-            bucket::head_bucket_handler(api_key, bucket_name, rpc_client_rss).await
-        }
-        BucketEndpoint::ListBuckets => {
-            bucket::list_buckets_handler(request, rpc_client_rss, &app.config.region).await
-        }
+        BucketEndpoint::HeadBucket => bucket::head_bucket_handler(app, api_key, bucket_name).await,
+        BucketEndpoint::ListBuckets => bucket::list_buckets_handler(app, request).await,
     }
 }
 
 async fn head_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
     endpoint: HeadEndpoint,
 ) -> Result<Response, S3Error> {
     match endpoint {
-        HeadEndpoint::HeadObject => {
-            head::head_object_handler(request, bucket, key, rpc_client_nss).await
-        }
+        HeadEndpoint::HeadObject => head::head_object_handler(app, request, bucket, key).await,
     }
 }
 
 async fn get_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
-    blob_client: Arc<BlobClient>,
     endpoint: GetEndpoint,
 ) -> Result<Response, S3Error> {
     match endpoint {
-        GetEndpoint::GetObject => {
-            get::get_object_handler(request, bucket, key, rpc_client_nss, blob_client).await
-        }
+        GetEndpoint::GetObject => get::get_object_handler(app, request, bucket, key).await,
         GetEndpoint::GetObjectAttributes => {
-            get::get_object_attributes_handler(request, bucket, key, rpc_client_nss).await
+            get::get_object_attributes_handler(app, request, bucket, key).await
         }
         GetEndpoint::ListMultipartUploads => {
-            get::list_multipart_uploads_handler(request, rpc_client_nss).await
+            get::list_multipart_uploads_handler(app, request).await
         }
-        GetEndpoint::ListObjects => {
-            get::list_objects_handler(request, bucket, rpc_client_nss).await
-        }
-        GetEndpoint::ListObjectsV2 => {
-            get::list_objects_v2_handler(request, bucket, rpc_client_nss).await
-        }
-        GetEndpoint::ListParts => {
-            get::list_parts_handler(request, bucket, key, rpc_client_nss).await
-        }
+        GetEndpoint::ListObjects => get::list_objects_handler(app, request, bucket).await,
+        GetEndpoint::ListObjectsV2 => get::list_objects_v2_handler(app, request, bucket).await,
+        GetEndpoint::ListParts => get::list_parts_handler(app, request, bucket, key).await,
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn put_handler(
+    app: Arc<AppState>,
     request: Request,
     api_key: Versioned<ApiKey>,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
-    blob_client: Arc<BlobClient>,
-    rpc_client_rss: ArcRpcClientRss,
     blob_deletion: Sender<(BlobId, usize)>,
     endpoint: PutEndpoint,
 ) -> Result<Response, S3Error> {
     match endpoint {
         PutEndpoint::PutObject => {
-            put::put_object_handler(
-                request,
-                bucket,
-                key,
-                rpc_client_nss,
-                blob_client,
-                blob_deletion,
-            )
-            .await
+            put::put_object_handler(app, request, bucket, key, blob_deletion).await
         }
         PutEndpoint::UploadPart(part_number, upload_id) => {
             put::upload_part_handler(
+                app,
                 request,
                 bucket,
                 key,
                 part_number,
                 upload_id,
-                rpc_client_nss,
-                blob_client,
                 blob_deletion,
             )
             .await
         }
         PutEndpoint::CopyObject => {
-            put::copy_object_handler(
-                request,
-                api_key,
-                bucket,
-                key,
-                rpc_client_nss,
-                blob_client,
-                rpc_client_rss,
-                blob_deletion,
-            )
-            .await
+            put::copy_object_handler(app, request, api_key, bucket, key, blob_deletion).await
         }
     }
 }
 
 async fn post_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
     blob_deletion: Sender<(BlobId, usize)>,
     endpoint: PostEndpoint,
 ) -> Result<Response, S3Error> {
     match endpoint {
         PostEndpoint::CompleteMultipartUpload(upload_id) => {
             post::complete_multipart_upload_handler(
+                app,
                 request,
                 bucket,
                 key,
                 upload_id,
-                rpc_client_nss,
                 blob_deletion,
             )
             .await
         }
         PostEndpoint::CreateMultipartUpload => {
-            post::create_multipart_upload_handler(request, bucket, key, rpc_client_nss).await
+            post::create_multipart_upload_handler(app, request, bucket, key).await
         }
         PostEndpoint::DeleteObjects => {
-            post::delete_objects_handler(request, bucket, rpc_client_nss, blob_deletion).await
+            post::delete_objects_handler(app, request, bucket, blob_deletion).await
         }
     }
 }
 
 async fn delete_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
-    blob_client: Arc<BlobClient>,
     blob_deletion: Sender<(BlobId, usize)>,
     endpoint: DeleteEndpoint,
 ) -> Result<Response, S3Error> {
     match endpoint {
         DeleteEndpoint::AbortMultipartUpload(upload_id) => {
-            delete::abort_multipart_upload_handler(
-                request,
-                bucket,
-                key,
-                upload_id,
-                rpc_client_nss,
-                blob_client,
-            )
-            .await
+            delete::abort_multipart_upload_handler(app, request, bucket, key, upload_id).await
         }
         DeleteEndpoint::DeleteObject => {
-            delete::delete_object_handler(bucket, key, rpc_client_nss, blob_deletion).await
+            delete::delete_object_handler(app, bucket, key, blob_deletion).await
         }
     }
 }

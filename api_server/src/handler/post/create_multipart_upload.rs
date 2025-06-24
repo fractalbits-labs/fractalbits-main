@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::handler::common::s3_error::S3Error;
@@ -5,11 +6,10 @@ use crate::handler::{
     common::response::xml::{Xml, XmlnsS3},
     Request,
 };
-use crate::object_layout::*;
+use crate::{object_layout::*, AppState};
 use axum::response::Response;
 use bucket_tables::bucket_table::Bucket;
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
-use rpc_client_nss::RpcClientNss;
 use serde::Serialize;
 
 #[allow(dead_code)]
@@ -40,10 +40,10 @@ struct InitiateMultipartUploadResult {
 }
 
 pub async fn create_multipart_upload_handler(
+    app: Arc<AppState>,
     _request: Request,
     bucket: &Bucket,
     key: String,
-    rpc_client_nss: &RpcClientNss,
 ) -> Result<Response, S3Error> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -57,6 +57,7 @@ pub async fn create_multipart_upload_handler(
         state: ObjectState::Mpu(MpuState::Uploading),
     };
     let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new())?;
+    let rpc_client_nss = app.get_rpc_client_nss();
     let _resp = rpc_client_nss
         .put_inode(
             bucket.root_blob_name.clone(),

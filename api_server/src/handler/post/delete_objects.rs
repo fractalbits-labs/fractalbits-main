@@ -1,14 +1,18 @@
-use crate::handler::common::{
-    response::xml::{Xml, XmlnsS3},
-    s3_error::S3Error,
-};
+use std::sync::Arc;
+
 use crate::handler::delete::delete_object_handler;
 use crate::handler::Request;
 use crate::BlobId;
+use crate::{
+    handler::common::{
+        response::xml::{Xml, XmlnsS3},
+        s3_error::S3Error,
+    },
+    AppState,
+};
 use axum::response::Response;
 use bucket_tables::bucket_table::Bucket;
 use bytes::Buf;
-use rpc_client_nss::RpcClientNss;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 
@@ -69,9 +73,9 @@ struct Error {
 }
 
 pub async fn delete_objects_handler(
+    app: Arc<AppState>,
     request: Request,
     bucket: &Bucket,
-    rpc_client_nss: &RpcClientNss,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
     let body = request.into_body().collect().await?;
@@ -79,7 +83,7 @@ pub async fn delete_objects_handler(
     let mut delete_result = DeleteResult::default();
     for obj in to_be_deleted.object {
         let key = format!("/{}\0", obj.key);
-        match delete_object_handler(bucket, key, rpc_client_nss, blob_deletion.clone()).await {
+        match delete_object_handler(app.clone(), bucket, key, blob_deletion.clone()).await {
             Ok(_) => {
                 let deleted = Deleted {
                     key: obj.key,

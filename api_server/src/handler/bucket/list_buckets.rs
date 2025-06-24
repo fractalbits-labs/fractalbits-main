@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{extract::Query, response::Response, RequestPartsExt};
 use bucket_tables::{
     bucket_table::{self, BucketTable},
@@ -6,13 +8,16 @@ use bucket_tables::{
 use rpc_client_rss::ArcRpcClientRss;
 use serde::{Deserialize, Serialize};
 
-use crate::handler::{
-    common::{
-        response::xml::{Xml, XmlnsS3},
-        s3_error::S3Error,
-        time::format_timestamp,
+use crate::{
+    handler::{
+        common::{
+            response::xml::{Xml, XmlnsS3},
+            s3_error::S3Error,
+            time::format_timestamp,
+        },
+        Request,
     },
-    Request,
+    AppState,
 };
 
 #[allow(dead_code)]
@@ -80,17 +85,17 @@ struct Owner {
 }
 
 pub async fn list_buckets_handler(
+    app: Arc<AppState>,
     request: Request,
-    rpc_client_rss: ArcRpcClientRss,
-    region: &str,
 ) -> Result<Response, S3Error> {
     let Query(_opts): Query<ListBucketsOptions> = request.into_parts().0.extract().await?;
+    let rpc_client_rss = app.get_rpc_client_rss();
     let mut bucket_table: Table<ArcRpcClientRss, BucketTable> = Table::new(rpc_client_rss.clone());
     let buckets: Vec<Bucket> = bucket_table
         .list()
         .await?
         .iter()
-        .map(|bucket| Bucket::from_table_with_region(bucket, region))
+        .map(|bucket| Bucket::from_table_with_region(bucket, &app.config.region))
         .collect();
     Xml(ListAllMyBucketsResult::from(buckets)).try_into()
 }

@@ -271,6 +271,24 @@ WorkingDirectory={pwd}/data
             aws s3 mb $my_bucket >/dev/null;
     }?;
 
+    let mut wait_new_buckets_secs = 0;
+    const TIMEOUT_SECS: i32 = 5;
+    loop {
+        if run_cmd! (
+            AWS_ENDPOINT_URL_S3=$minio_url AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin
+            aws s3api head-bucket --bucket $bucket_name &>/dev/null
+        ).is_ok() {
+            break;
+        }
+
+        wait_new_buckets_secs += 1;
+        if wait_new_buckets_secs >= TIMEOUT_SECS {
+            cmd_die!("timeout waiting for newly created bucket ${bucket_name}");
+        }
+
+        info!("waiting for newly created bucket {bucket_name}: {wait_new_buckets_secs}s");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
     Ok(())
 }
 

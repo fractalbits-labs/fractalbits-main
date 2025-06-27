@@ -8,6 +8,7 @@ use aws_sdk_s3::{
 };
 use axum::extract::FromRef;
 use bb8::{Pool, PooledConnection};
+use bucket_tables::table::Versioned;
 use bytes::Bytes;
 use config::{ArcConfig, S3CacheConfig};
 use futures::stream::{self, StreamExt};
@@ -28,7 +29,7 @@ pub type BlobId = uuid::Uuid;
 
 pub struct AppState {
     pub config: ArcConfig,
-    pub cache: Arc<Cache<String, String>>,
+    pub cache: Arc<Cache<String, Versioned<String>>>,
 
     rpc_clients_nss: Pool<RpcConnManagerNss>,
     rpc_clients_rss: Pool<RpcConnManagerRss>,

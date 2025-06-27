@@ -87,7 +87,7 @@ pub async fn create_bucket_handler(
         let rpc_client_rss = app.get_rpc_client_rss().await;
         let bucket_table: Table<RpcClientRss, BucketTable> =
             Table::new(&rpc_client_rss, Some(app.cache.clone()));
-        if bucket_table.get(bucket_name.clone()).await.is_ok() {
+        if bucket_table.get(bucket_name.clone(), false).await.is_ok() {
             return Err(S3Error::BucketAlreadyExists);
         }
 
@@ -101,7 +101,7 @@ pub async fn create_bucket_handler(
 
         let api_key_table: Table<RpcClientRss, ApiKeyTable> =
             Table::new(&rpc_client_rss, Some(app.cache.clone()));
-        let mut api_key = api_key_table.get(api_key_id.clone()).await?;
+        let mut api_key = api_key_table.get(api_key_id.clone(), false).await?;
         api_key
             .data
             .authorized_buckets

@@ -3,6 +3,7 @@
 use moka::future::Cache;
 use std::{marker::PhantomData, sync::Arc};
 
+#[derive(Clone)]
 pub struct Versioned<T: Sized> {
     pub version: i64,
     pub data: T,
@@ -58,11 +59,11 @@ pub trait KvClient {
 pub struct Table<'a, C: KvClient, F: TableSchema> {
     kv_client: &'a C,
     phantom: PhantomData<F>,
-    cache: Option<Arc<Cache<String, String>>>,
+    cache: Option<Arc<Cache<String, Versioned<String>>>>,
 }
 
 impl<'a, C: KvClient, F: TableSchema> Table<'a, C, F> {
-    pub fn new(kv_client: &'a C, cache: Option<Arc<Cache<String, String>>>) -> Self {
+    pub fn new(kv_client: &'a C, cache: Option<Arc<Cache<String, Versioned<String>>>>) -> Self {
         Self {
             kv_client,
             cache,
@@ -73,9 +74,20 @@ impl<'a, C: KvClient, F: TableSchema> Table<'a, C, F> {
     pub async fn put(&self, e: &Versioned<F::E>) -> Result<(), C::Error> {
         let full_key = Self::get_full_key(F::TABLE_NAME, &e.data.key());
         let data: String = serde_json::to_string(&e.data).unwrap();
-        self.kv_client
-            .put(full_key, (e.version, data).into())
-            .await?;
+        let versioned_data: Versioned<String> = (e.version, data).into();
+        match self
+            .kv_client
+            .put(full_key.clone(), versioned_data.clone())
+            .await
+        {
+            Ok(()) => {
+                if let Some(ref cache) = self.cache {
+                    tracing::debug!("caching data with full_key: {full_key}");
+                    cache.insert(full_key, versioned_data).await;
+                }
+            }
+            Err(e) => return Err(e),
+        }
         Ok(())
     }
 
@@ -89,24 +101,49 @@ impl<'a, C: KvClient, F: TableSchema> Table<'a, C, F> {
     {
         let full_key = Self::get_full_key(F::TABLE_NAME, &e.data.key());
         let data: String = serde_json::to_string(&e.data).unwrap();
+        let versioned_data: Versioned<String> = (e.version, data.clone()).into();
         let extra_full_key = Self::get_full_key(F2::TABLE_NAME, &extra.data.key());
         let extra_data: String = serde_json::to_string(&extra.data).unwrap();
-        self.kv_client
+        let extra_versioned_data: Versioned<String> = (extra.version, extra_data.clone()).into();
+        match self
+            .kv_client
             .put_with_extra(
-                full_key,
-                (e.version, data).into(),
-                extra_full_key,
-                (extra.version, extra_data).into(),
+                full_key.clone(),
+                versioned_data.clone(),
+                extra_full_key.clone(),
+                extra_versioned_data.clone(),
             )
-            .await?;
+            .await
+        {
+            Ok(_) => {
+                if let Some(ref cache) = self.cache {
+                    cache.insert(full_key, versioned_data).await;
+                    cache.insert(extra_full_key, extra_versioned_data).await;
+                }
+            }
+            Err(e) => return Err(e),
+        };
         Ok(())
     }
 
-    pub async fn get(&self, key: String) -> Result<Versioned<F::E>, C::Error>
+    pub async fn get(&self, key: String, try_cache: bool) -> Result<Versioned<F::E>, C::Error>
     where
         <F as TableSchema>::E: for<'s> serde::Deserialize<'s>,
     {
         let full_key = Self::get_full_key(F::TABLE_NAME, &key);
+        if try_cache {
+            if let Some(ref cache) = self.cache {
+                if let Some(json) = cache.get(&full_key).await {
+                    tracing::debug!("get cached data with full_key: {full_key}");
+                    return Ok((
+                        json.version,
+                        serde_json::from_slice(json.data.as_bytes()).unwrap(),
+                    )
+                        .into());
+                }
+            }
+        }
+
         let json = self.kv_client.get(full_key).await?;
         Ok((
             json.version,
@@ -129,7 +166,14 @@ impl<'a, C: KvClient, F: TableSchema> Table<'a, C, F> {
 
     pub async fn delete(&self, e: &F::E) -> Result<(), C::Error> {
         let full_key = Self::get_full_key(F::TABLE_NAME, &e.key());
-        self.kv_client.delete(full_key).await?;
+        match self.kv_client.delete(full_key.clone()).await {
+            Ok(()) => {
+                if let Some(ref cache) = self.cache {
+                    cache.invalidate(&full_key).await;
+                }
+            }
+            Err(e) => return Err(e),
+        }
         Ok(())
     }
 
@@ -144,9 +188,23 @@ impl<'a, C: KvClient, F: TableSchema> Table<'a, C, F> {
         let full_key = Self::get_full_key(F::TABLE_NAME, &e.key());
         let extra_full_key = Self::get_full_key(F2::TABLE_NAME, &extra.data.key());
         let extra_data: String = serde_json::to_string(&extra.data).unwrap();
-        self.kv_client
-            .delete_with_extra(full_key, extra_full_key, (extra.version, extra_data).into())
-            .await?;
+        match self
+            .kv_client
+            .delete_with_extra(
+                full_key.clone(),
+                extra_full_key.clone(),
+                (extra.version, extra_data).into(),
+            )
+            .await
+        {
+            Ok(()) => {
+                if let Some(ref cache) = self.cache {
+                    cache.invalidate(&full_key).await;
+                    cache.invalidate(&extra_full_key).await;
+                }
+            }
+            Err(e) => return Err(e),
+        }
         Ok(())
     }
 

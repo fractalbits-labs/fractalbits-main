@@ -11,3 +11,4 @@ serde_json.workspace = true
 hex.workspace = true
 rand.workspace = true
 moka.workspace = true
+tracing.workspace = true

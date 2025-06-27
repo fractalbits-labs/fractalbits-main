@@ -710,8 +710,7 @@ impl S3Error {
 impl S3Error {
     pub fn into_response_with_resource(self, resource: &str) -> Response {
         let body = format!(
-            r#"
-<?xml version="1.0" encoding="UTF-8"?>
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <Error>
     <Code>{}</Code>
     <Message>{}</Message>
@@ -737,8 +736,7 @@ impl S3Error {
 impl IntoResponse for S3Error {
     fn into_response(self) -> Response {
         let body = format!(
-            r#"
-<?xml version="1.0" encoding="UTF-8"?>
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <Error>
     <Code>{}</Code>
     <Message>{}</Message>

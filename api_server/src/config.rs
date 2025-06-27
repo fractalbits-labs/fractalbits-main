@@ -31,7 +31,7 @@ pub struct S3CacheConfig {
 impl Default for S3CacheConfig {
     fn default() -> Self {
         Self {
-            s3_host: "127.0.0.1".into(),
+            s3_host: "http://127.0.0.1".into(),
             s3_port: 9000,
             s3_region: "us-east-1".into(),
             s3_bucket: "fractalbits-bucket".into(),

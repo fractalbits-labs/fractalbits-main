@@ -15,7 +15,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[clap(name = "api_server", about = "API server")]
 struct Opt {
     #[clap(short = 'c', long = "config", long_help = "Config file path")]
-    pub config_file: PathBuf,
+    pub config_file: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -30,7 +30,10 @@ async fn main() {
         .init();
 
     let opt = Opt::parse();
-    let config = config::read_config(opt.config_file);
+    let config = match opt.config_file {
+        Some(config_file) => config::read_config(config_file),
+        None => config::Config::default(),
+    };
     let port = config.port;
     let app_state = AppState::new(ArcConfig(Arc::new(config))).await;
 

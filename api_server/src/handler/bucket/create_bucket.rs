@@ -52,13 +52,17 @@ pub async fn create_bucket_handler(
 ) -> Result<Response, S3Error> {
     let api_key_id = {
         if api_key.data.authorized_buckets.contains_key(&bucket_name) {
-            return Err(S3Error::BucketAlreadyExists);
+            return Err(S3Error::BucketAlreadyOwnedByYou);
         }
         if !api_key.data.allow_create_bucket {
             return Err(S3Error::AccessDenied);
         }
         api_key.data.key_id.clone()
     };
+
+    if !is_valid_bucket_name(&bucket_name) {
+        return Err(S3Error::InvalidBucketName);
+    }
 
     let body = request.into_body().collect().await?;
     if !body.is_empty() {
@@ -129,4 +133,26 @@ pub async fn create_bucket_handler(
 
     tracing::error!("Inserting {bucket_name} into api_key {api_key_id} failed after retrying {retry_times} times");
     Err(S3Error::InternalError)
+}
+
+// Check if a bucket name is valid.
+//
+// The requirements are listed here:
+// <https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html>
+fn is_valid_bucket_name(n: &str) -> bool {
+    // Bucket names must be between 3 and 63 characters
+    n.len() >= 3 && n.len() <= 63
+	// Bucket names must be composed of lowercase letters, numbers,
+	// dashes and dots
+	&& n.chars().all(|c| matches!(c, '.' | '-' | 'a'..='z' | '0'..='9'))
+	//  Bucket names must start and end with a letter or a number
+	&& !n.starts_with(&['-', '.'][..])
+	&& !n.ends_with(&['-', '.'][..])
+	// Bucket names must not be formatted as an IP address
+	&& n.parse::<std::net::IpAddr>().is_err()
+	// Bucket names must not start with "xn--"
+	&& !n.starts_with("xn--")
+	&& !n.contains(".xn--")
+	// Bucket names must not end with "-s3alias"
+	&& !n.ends_with("-s3alias")
 }

@@ -81,7 +81,8 @@ impl AppState {
         let manager = RpcConnManagerNss::new(resolved_addrs);
         let rpc_clients_nss = Pool::builder()
             .max_size(Self::NSS_CONNECTION_POOL_SIZE)
-            .min_idle(Some(2))
+            .min_idle(Some(8))
+            .max_lifetime(None)
             .build(manager)
             .await
             .expect("Failed to build nss rpc clients pool");
@@ -103,7 +104,8 @@ impl AppState {
         let manager = RpcConnManagerRss::new(resolved_addrs);
         let rpc_clients_rss = Pool::builder()
             .max_size(Self::RSS_CONNECTION_POOL_SIZE)
-            .min_idle(Some(2))
+            .min_idle(Some(8))
+            .max_lifetime(None)
             .build(manager)
             .await
             .expect("Failed to build rss rpc clients pool");
@@ -154,7 +156,8 @@ impl BlobClient {
         let clients_bss = Arc::new(
             Pool::builder()
                 .max_size(Self::BSS_CONNECTION_POOL_SIZE)
-                .min_idle(Some(2))
+                .min_idle(Some(8))
+                .max_lifetime(None)
                 .build(manager)
                 .await
                 .expect("Failed to build bss rpc clients pool"),

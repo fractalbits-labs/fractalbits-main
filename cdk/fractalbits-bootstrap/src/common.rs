@@ -27,8 +27,14 @@ fn download_binary(file_name: &str) -> CmdResult {
 pub fn create_systemd_unit_file(service_name: &str, enable_now: bool) -> CmdResult {
     let mut requires = "";
     let mut working_dir = "/data";
+    let mut env_settings = String::new();
     let exec_start = match service_name {
-        "api_server" => format!("{BIN_PATH}{service_name} -c {ETC_PATH}{API_SERVER_CONFIG}"),
+        "api_server" => {
+            env_settings = r##"
+Environment="RUST_LOG=info""##
+                .to_string();
+            format!("{BIN_PATH}{service_name} -c {ETC_PATH}{API_SERVER_CONFIG}")
+        }
         "nss_server" => {
             requires = "data-ebs.mount data-local.mount";
             format!("{BIN_PATH}nss_server serve -c {ETC_PATH}{NSS_SERVER_CONFIG}")
@@ -38,7 +44,12 @@ pub fn create_systemd_unit_file(service_name: &str, enable_now: bool) -> CmdResu
             working_dir = "/data/local";
             format!("{BIN_PATH}{service_name}")
         }
-        "root_server" | "ebs-failover" => format!("{BIN_PATH}{service_name}"),
+        "root_server" | "ebs-failover" => {
+            env_settings = r##"
+Environment="RUST_LOG=info""##
+                .to_string();
+            format!("{BIN_PATH}{service_name}")
+        }
         _ => unreachable!(),
     };
     let systemd_unit_content = format!(
@@ -56,7 +67,7 @@ LimitNOFILE=1000000
 LimitCORE=infinity
 Restart=on-failure
 RestartSec=5
-WorkingDirectory={working_dir}
+WorkingDirectory={working_dir}{env_settings}
 ExecStart={exec_start}
 
 [Install]

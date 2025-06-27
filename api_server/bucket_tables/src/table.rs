@@ -188,19 +188,20 @@ impl<'a, C: KvClient, F: TableSchema> Table<'a, C, F> {
         let full_key = Self::get_full_key(F::TABLE_NAME, &e.key());
         let extra_full_key = Self::get_full_key(F2::TABLE_NAME, &extra.data.key());
         let extra_data: String = serde_json::to_string(&extra.data).unwrap();
+        let extra_versioned_data: Versioned<String> = (extra.version, extra_data.clone()).into();
         match self
             .kv_client
             .delete_with_extra(
                 full_key.clone(),
                 extra_full_key.clone(),
-                (extra.version, extra_data).into(),
+                extra_versioned_data.clone(),
             )
             .await
         {
             Ok(()) => {
                 if let Some(ref cache) = self.cache {
                     cache.invalidate(&full_key).await;
-                    cache.invalidate(&extra_full_key).await;
+                    cache.insert(extra_full_key, extra_versioned_data).await;
                 }
             }
             Err(e) => return Err(e),

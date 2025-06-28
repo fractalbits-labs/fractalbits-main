@@ -9,6 +9,7 @@ pub fn run_cmd_precheckin() -> CmdResult {
         zig build 2>&1;
     }?;
 
+    cmd_service::create_dirs_for_bss_server()?;
     cmd_service::create_dirs_for_nss_server()?;
     cmd_service::start_minio_service()?;
     run_cmd! {
@@ -37,7 +38,6 @@ fn run_art_tests() -> CmdResult {
     let fbs_log = "data/fbs.log";
     let ts = ["ts", "-m", TS_FMT];
 
-    cmd_service::create_dirs_for_nss_server()?;
     cmd_service::start_minio_service()?;
     run_cmd! {
         info "Running art tests (random) with log $rand_log";

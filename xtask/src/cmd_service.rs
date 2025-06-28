@@ -66,6 +66,7 @@ pub fn start_services(service: ServiceName, build_mode: BuildMode) -> CmdResult 
 }
 
 pub fn start_bss_service(build_mode: BuildMode) -> CmdResult {
+    create_dirs_for_bss_server()?;
     create_systemd_unit_file(ServiceName::Bss, build_mode)?;
 
     let bss_wait_secs = 10;
@@ -396,6 +397,18 @@ pub fn create_dirs_for_nss_server() -> CmdResult {
     }?;
     for i in 0..256 {
         run_cmd!(mkdir -p data/local/meta_cache/blobs/dir$i)?;
+    }
+
+    Ok(())
+}
+
+pub fn create_dirs_for_bss_server() -> CmdResult {
+    info!("Creating necessary directories for bss_server");
+    run_cmd! {
+        mkdir -p data/bss;
+    }?;
+    for i in 0..256 {
+        run_cmd!(mkdir -p data/bss/dir$i)?;
     }
 
     Ok(())

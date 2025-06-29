@@ -1,5 +1,6 @@
 use super::common::*;
 use cmd_lib::*;
+use std::io::Error;
 
 const COMMAND_TIMEOUT_SECONDS: u64 = 300;
 const POLL_INTERVAL_SECONDS: u64 = 5;
@@ -98,10 +99,13 @@ fn run_cmd_with_ssm(instance_id: &str, cmd: &str) -> CmdResult {
             "Failed" => {
                 error!("Command execution failed on the remote instance.");
                 let error_output = run_fun!(echo $invocation_json | jq -r .StandardErrorContent)?;
-                cmd_die!("Remote Error Output:\n---\n${error_output}---");
+                return Err(Error::other(format!(
+                    "Remote Error Output:\n---\n{error_output}---"
+                )));
             }
             "TimedOut" => {
-                cmd_die!("Command timed out on the remote instance after $COMMAND_TIMEOUT_SECONDS seconds.");
+                return Err(Error::other(format!(
+                            "Command timed out on the remote instance after {COMMAND_TIMEOUT_SECONDS} seconds.")));
             }
             _ => {
                 // Status is Pending, InProgress, Cancelling, etc.
@@ -109,7 +113,9 @@ fn run_cmd_with_ssm(instance_id: &str, cmd: &str) -> CmdResult {
             }
         }
         if attempt >= MAX_POLL_ATTEMPTS {
-            cmd_die!("Timed out polling for command result after $MAX_POLL_ATTEMPTS attempts.");
+            return Err(Error::other(format!(
+                "Timed out polling for command result after {MAX_POLL_ATTEMPTS} attempts."
+            )));
         }
     }
 

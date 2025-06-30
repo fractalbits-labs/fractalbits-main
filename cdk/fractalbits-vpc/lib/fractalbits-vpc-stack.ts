@@ -4,6 +4,8 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as elbv2_targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
 
 export class FractalbitsVpcStack extends cdk.Stack {
   public readonly vpc: ec2.Vpc;
@@ -18,8 +20,6 @@ export class FractalbitsVpcStack extends cdk.Stack {
       maxAzs: 1,
       natGateways: 0,
       subnetConfiguration: [
-        // No publicSubnet for now
-        // { name: 'PublicSubnet', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
         { name: 'PrivateSubnet', subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 },
       ],
     });
@@ -135,7 +135,8 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const bssNumNvmeDisks = 1;
     const bucketName = bucket.bucketName;
     const instanceConfigs = [
-      { id: 'api_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: apiInstanceType, sg: publicSg},
+      { id: 'api_server_1', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: apiInstanceType, sg: publicSg},
+      { id: 'api_server_2', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: apiInstanceType, sg: publicSg},
       { id: 'root_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: rssInstanceType, sg: privateSg },
       { id: 'bss_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: bssInstanceType, sg: privateSg },
       { id: 'nss_server_primary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nssInstanceType, sg: privateSg },
@@ -145,6 +146,23 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const instances: Record<string, ec2.Instance> = {};
     instanceConfigs.forEach(({ id, subnet, instanceType, sg}) => {
       instances[id] = createInstance(id, subnet, instanceType, sg);
+    });
+
+    // NLB for API servers
+    const nlb = new elbv2.NetworkLoadBalancer(this, 'ApiNLB', {
+      vpc: this.vpc,
+      internetFacing: false,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+    });
+
+    const listener = nlb.addListener('ApiListener', { port: 80 });
+
+    listener.addTargets('ApiTargets', {
+      port: 80,
+      targets: [
+        new elbv2_targets.InstanceTarget(instances['api_server_1']),
+        new elbv2_targets.InstanceTarget(instances['api_server_2']),
+      ],
     });
 
     // Create EBS Volume with Multi-Attach for nss_server
@@ -173,7 +191,11 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const cpuArch = "aarch64";
     const instanceBootstrapOptions = [
       {
-        id: 'api_server',
+        id: 'api_server_1',
+        bootstrapOptions: `api_server --bucket=${bucketName} --bss_ip=${bssIp} --nss_ip=${nssIp} --rss_ip=${rssIp}`
+      },
+      {
+        id: 'api_server_2',
         bootstrapOptions: `api_server --bucket=${bucketName} --bss_ip=${bssIp} --nss_ip=${nssIp} --rss_ip=${rssIp}`
       },
       {
@@ -208,11 +230,10 @@ export class FractalbitsVpcStack extends cdk.Stack {
       });
     }
 
-    new cdk.CfnOutput(this, 'ApiServerIP', {
-      value: instances['api_server'].instancePrivateIp,
-      description: 'IP of the API server',
+    new cdk.CfnOutput(this, 'ApiNLBDnsName', {
+      value: nlb.loadBalancerDnsName,
+      description: 'DNS name of the API NLB',
     });
-    // No publicIP for now
 
     new cdk.CfnOutput(this, 'VolumeId', {
       value: ebsVolumeId,

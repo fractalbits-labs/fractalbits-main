@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import { createInstance, createUserData } from './ec2-utils';
 
 export class FractalbitsBenchVpcStack extends cdk.Stack {
   public readonly vpc: ec2.Vpc;
@@ -51,16 +52,11 @@ export class FractalbitsBenchVpcStack extends cdk.Stack {
     });
 
     // EC2 Instance
-    const instance = new ec2.Instance(this, 'BenchInstance', {
-      vpc: this.vpc,
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.C7G, ec2.InstanceSize.MEDIUM),
-      machineImage: ec2.MachineImage.latestAmazonLinux2023({
-        cpuType: ec2.AmazonLinuxCpuType.ARM_64,
-      }),
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      securityGroup: privateSg,
-      role: ec2Role,
-    });
+    const instance = createInstance(this, this.vpc, 'BenchInstance', ec2.SubnetType.PRIVATE_ISOLATED, ec2.InstanceType.of(ec2.InstanceClass.C7G, ec2.InstanceSize.MEDIUM), privateSg, ec2Role);
+
+    const cpuArch = "aarch64";
+    const bootstrapOptions = "bench_server";
+    instance.addUserData(createUserData(this, cpuArch, bootstrapOptions).render());
 
     // Outputs
     new cdk.CfnOutput(this, 'BenchInstanceId', {

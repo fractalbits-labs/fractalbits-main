@@ -6,6 +6,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as elbv2_targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
+import { createInstance, createUserData } from './ec2-utils';
 
 export class FractalbitsVpcStack extends cdk.Stack {
   public readonly vpc: ec2.Vpc;
@@ -96,36 +97,6 @@ export class FractalbitsVpcStack extends cdk.Stack {
       tableName: 'ebs-failover-state',
     });
 
-    // Reusable functions to create instances
-    const createInstance = (
-      id: string,
-      subnetType: ec2.SubnetType,
-      instanceType: ec2.InstanceType,
-      sg: ec2.SecurityGroup,
-    ): ec2.Instance => {
-      return new ec2.Instance(this, id, {
-        vpc: this.vpc,
-        instanceType: instanceType,
-        machineImage: ec2.MachineImage.latestAmazonLinux2023({
-          cpuType: ec2.AmazonLinuxCpuType.ARM_64,
-        }),
-        vpcSubnets: { subnetType },
-        securityGroup: sg,
-        role: ec2Role,
-      });
-    };
-    const createUserData = (cpuArch: string, bootstrapOptions: string): ec2.UserData => {
-      const region = cdk.Stack.of(this).region;
-      const userData = ec2.UserData.forLinux();
-      userData.addCommands(
-        'set -ex',
-        `aws s3 cp --no-progress s3://fractalbits-builds-${region}/${cpuArch}/fractalbits-bootstrap /opt/fractalbits/bin/`,
-        'chmod +x /opt/fractalbits/bin/fractalbits-bootstrap',
-        `/opt/fractalbits/bin/fractalbits-bootstrap ${bootstrapOptions}`,
-      );
-      return userData;
-    };
-
     // Define instance metadata
     const nssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
     const bssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
@@ -145,7 +116,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
     const instances: Record<string, ec2.Instance> = {};
     instanceConfigs.forEach(({ id, subnet, instanceType, sg}) => {
-      instances[id] = createInstance(id, subnet, instanceType, sg);
+      instances[id] = createInstance(this, this.vpc, id, subnet, instanceType, sg, ec2Role);
     });
 
     // NLB for API servers
@@ -215,7 +186,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       },
     ];
     instanceBootstrapOptions.forEach(({id, bootstrapOptions}) => {
-      instances[id]?.addUserData(createUserData(cpuArch, bootstrapOptions).render())
+      instances[id]?.addUserData(createUserData(this, cpuArch, bootstrapOptions).render())
     })
 
     // Outputs

@@ -1,4 +1,5 @@
 mod api_server;
+mod bench_server;
 mod bss_server;
 mod common;
 mod nss_server;
@@ -66,6 +67,12 @@ enum Service {
         #[clap(long, long_help = "Multi-attached EBS volume ID")]
         volume_id: String,
     },
+
+    #[clap(about = "Run on bench_server instance to bootstrap fractalbits service(s)")]
+    BenchServer {
+        #[clap(long, long_help = "Service endpoint for benchmark")]
+        service_endpoint: String,
+    },
 }
 
 #[cmd_lib::main]
@@ -97,6 +104,7 @@ fn main() -> CmdResult {
             secondary_instance_id,
             volume_id,
         } => root_server::bootstrap(&primary_instance_id, &secondary_instance_id, &volume_id)?,
+        Service::BenchServer { service_endpoint } => bench_server::bootstrap(&service_endpoint)?,
     }
 
     run_cmd!(touch $CLOUD_INIT_DONE_FILE)?;

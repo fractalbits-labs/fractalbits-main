@@ -7,6 +7,7 @@ pub const BSS_SERVER_CONFIG: &str = "bss_server_cloud_config.toml";
 pub const NSS_SERVER_CONFIG: &str = "nss_server_cloud_config.toml";
 pub const ROOT_SERVER_CONFIG: &str = "root_server_cloud_config.toml";
 pub const CLOUD_INIT_DONE_FILE: &str = "/opt/fractalbits/.cloud_init_done";
+pub const BENCH_SERVER_WORKLOAD_CONFIG: &str = "/opt/fractalbits/etc/bench_workload.yaml";
 
 pub fn download_binaries(file_list: &[&str]) -> CmdResult {
     for file_name in file_list {
@@ -51,6 +52,9 @@ Environment="RUST_LOG=info""##
             requires = "data-local.mount";
             working_dir = "/data/local";
             format!("{BIN_PATH}{service_name} -c {ETC_PATH}{BSS_SERVER_CONFIG}")
+        }
+        "bench_server" => {
+            format!("{BIN_PATH}wrap run {ETC_PATH}{BENCH_SERVER_WORKLOAD_CONFIG}")
         }
         "ebs-failover" => {
             env_settings = r##"

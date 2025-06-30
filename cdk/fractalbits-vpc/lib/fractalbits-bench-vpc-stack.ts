@@ -4,10 +4,14 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { createInstance, createUserData } from './ec2-utils';
 
+interface FractalbitsBenchVpcStackProps extends cdk.StackProps {
+  serviceEndpoint: string;
+}
+
 export class FractalbitsBenchVpcStack extends cdk.Stack {
   public readonly vpc: ec2.Vpc;
 
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props: FractalbitsBenchVpcStackProps) {
     super(scope, id, props);
 
     // === VPC Configuration ===
@@ -55,7 +59,7 @@ export class FractalbitsBenchVpcStack extends cdk.Stack {
     const instance = createInstance(this, this.vpc, 'BenchInstance', ec2.SubnetType.PRIVATE_ISOLATED, ec2.InstanceType.of(ec2.InstanceClass.C7G, ec2.InstanceSize.MEDIUM), privateSg, ec2Role);
 
     const cpuArch = "aarch64";
-    const bootstrapOptions = "bench_server";
+    const bootstrapOptions = `bench_server --service_endpoint=${props.serviceEndpoint}`;
     instance.addUserData(createUserData(this, cpuArch, bootstrapOptions).render());
 
     // Outputs

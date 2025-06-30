@@ -12,6 +12,7 @@ const vpcStack = new FractalbitsVpcStack(app, 'FractalbitsVpcStack', {
 
 const benchVpcStack = new FractalbitsBenchVpcStack(app, 'FractalbitsBenchVpcStack', {
   env: {},
+  serviceEndpoint: vpcStack.nlbLoadBalancerDnsName,
 });
 
 new PeeringStack(app, 'PeeringStack', {

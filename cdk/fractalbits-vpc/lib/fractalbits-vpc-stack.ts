@@ -9,6 +9,7 @@ import * as elbv2_targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
 import { createInstance, createUserData } from './ec2-utils';
 
 export class FractalbitsVpcStack extends cdk.Stack {
+  public readonly nlbLoadBalancerDnsName: string;
   public readonly vpc: ec2.Vpc;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -205,6 +206,8 @@ export class FractalbitsVpcStack extends cdk.Stack {
       value: nlb.loadBalancerDnsName,
       description: 'DNS name of the API NLB',
     });
+
+    this.nlbLoadBalancerDnsName = nlb.loadBalancerDnsName;
 
     new cdk.CfnOutput(this, 'VolumeId', {
       value: ebsVolumeId,

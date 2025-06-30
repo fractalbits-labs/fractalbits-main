@@ -15,12 +15,9 @@ host: {service_endpoint}
 access-key: test_api_key
 secret-key: test_api_secret
 bucket: warp-benchmark-bucket
-tls: false
-
 warp-client:
   - warp-client-1:7761
   - warp-client-2:7761
-
 duration: 10m
 obj.size: 4KB
 concurrent: 50

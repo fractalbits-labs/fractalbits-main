@@ -6,33 +6,37 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 
 export class FractalbitsVpcStack extends cdk.Stack {
+  public readonly vpc: ec2.Vpc;
+
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
     // === VPC Configuration ===
-    const vpc = new ec2.Vpc(this, 'FractalbitsVpc', {
+    this.vpc = new ec2.Vpc(this, 'FractalbitsVpc', {
       vpcName: 'fractalbits-vpc',
+      ipAddresses: ec2.IpAddresses.cidr('10.0.0.0/16'),
       maxAzs: 1,
       natGateways: 0,
       subnetConfiguration: [
-        { name: 'PublicSubnet', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
+        // No publicSubnet for now
+        // { name: 'PublicSubnet', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
         { name: 'PrivateSubnet', subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 },
       ],
     });
 
     // Add Gateway Endpoint for S3
-    vpc.addGatewayEndpoint('S3Endpoint', {
+    this.vpc.addGatewayEndpoint('S3Endpoint', {
       service: ec2.GatewayVpcEndpointAwsService.S3,
     });
 
     // Add Gateway Endpoint for DynamoDB
-    vpc.addGatewayEndpoint('DynamoDbEndpoint', {
+    this.vpc.addGatewayEndpoint('DynamoDbEndpoint', {
       service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
     });
 
     // Add Interface Endpoint for EC2 and SSM
     ['SSM', 'SSM_MESSAGES', 'EC2', 'EC2_MESSAGES'].forEach(service => {
-      vpc.addInterfaceEndpoint(`${service}Endpoint`, {
+      this.vpc.addInterfaceEndpoint(`${service}Endpoint`, {
         service: (ec2.InterfaceVpcEndpointAwsService as any)[service],
         subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       });
@@ -51,7 +55,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
     });
 
     const publicSg = new ec2.SecurityGroup(this, 'PublicInstanceSG', {
-      vpc,
+      vpc: this.vpc,
       securityGroupName: 'FractalbitsPublicInstanceSG',
       description: 'Allow inbound on port 80 for public access, and outbound for SSM, DDB, S3',
       allowAllOutbound: true,
@@ -59,12 +63,12 @@ export class FractalbitsVpcStack extends cdk.Stack {
     publicSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow HTTP access from anywhere');
 
     const privateSg = new ec2.SecurityGroup(this, 'PrivateInstanceSG', {
-      vpc,
+      vpc: this.vpc,
       securityGroupName: 'FractalbitsPrivateInstanceSG',
       description: 'Allow inbound on port 8088 (e.g., from internal sources), and outbound for SSM, DDB, S3',
       allowAllOutbound: true,
     });
-    privateSg.addIngressRule(ec2.Peer.ipv4(vpc.vpcCidrBlock), ec2.Port.tcp(8088), 'Allow access to port 8088 from within VPC');
+    privateSg.addIngressRule(ec2.Peer.ipv4(this.vpc.vpcCidrBlock), ec2.Port.tcp(8088), 'Allow access to port 8088 from within VPC');
 
     const bucket = new s3.Bucket(this, 'Bucket', {
       // No bucketName provided – name will be auto-generated
@@ -100,7 +104,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       sg: ec2.SecurityGroup,
     ): ec2.Instance => {
       return new ec2.Instance(this, id, {
-        vpc,
+        vpc: this.vpc,
         instanceType: instanceType,
         machineImage: ec2.MachineImage.latestAmazonLinux2023({
           cpuType: ec2.AmazonLinuxCpuType.ARM_64,
@@ -131,7 +135,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const bssNumNvmeDisks = 1;
     const bucketName = bucket.bucketName;
     const instanceConfigs = [
-      { id: 'api_server', subnet: ec2.SubnetType.PUBLIC, instanceType: apiInstanceType, sg: publicSg},
+      { id: 'api_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: apiInstanceType, sg: publicSg},
       { id: 'root_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: rssInstanceType, sg: privateSg },
       { id: 'bss_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: bssInstanceType, sg: privateSg },
       { id: 'nss_server_primary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nssInstanceType, sg: privateSg },
@@ -146,7 +150,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
     // Create EBS Volume with Multi-Attach for nss_server
     const ebsVolume = new ec2.Volume(this, 'MultiAttachVolume', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
-      availabilityZone: vpc.availabilityZones[0],
+      availabilityZone: this.vpc.availabilityZones[0],
       size: cdk.Size.gibibytes(20),
       volumeType: ec2.EbsDeviceVolumeType.IO2,
       iops: 10000,
@@ -204,10 +208,11 @@ export class FractalbitsVpcStack extends cdk.Stack {
       });
     }
 
-    new cdk.CfnOutput(this, 'ServicePublicIP', {
-      value: instances['api_server'].instancePublicIp,
-      description: 'Public IP of the API server',
+    new cdk.CfnOutput(this, 'ApiServerIP', {
+      value: instances['api_server'].instancePrivateIp,
+      description: 'IP of the API server',
     });
+    // No publicIP for now
 
     new cdk.CfnOutput(this, 'VolumeId', {
       value: ebsVolumeId,

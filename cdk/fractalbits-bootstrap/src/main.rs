@@ -1,4 +1,5 @@
 mod api_server;
+mod bench_client;
 mod bench_server;
 mod bss_server;
 mod common;
@@ -68,11 +69,14 @@ enum Service {
         volume_id: String,
     },
 
-    #[clap(about = "Run on bench_server instance to bootstrap fractalbits service(s)")]
+    #[clap(about = "Run on bench_server instance to benchmark fractalbits service(s)")]
     BenchServer {
         #[clap(long, long_help = "Service endpoint for benchmark")]
         service_endpoint: String,
     },
+
+    #[clap(about = "Run on bench_client instance to benchmark fractalbits service(s)")]
+    BenchClient {},
 }
 
 #[cmd_lib::main]
@@ -105,6 +109,7 @@ fn main() -> CmdResult {
             volume_id,
         } => root_server::bootstrap(&primary_instance_id, &secondary_instance_id, &volume_id)?,
         Service::BenchServer { service_endpoint } => bench_server::bootstrap(&service_endpoint)?,
+        Service::BenchClient {} => bench_client::bootstrap()?,
     }
 
     run_cmd!(touch $CLOUD_INIT_DONE_FILE)?;

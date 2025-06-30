@@ -54,7 +54,10 @@ Environment="RUST_LOG=info""##
             format!("{BIN_PATH}{service_name} -c {ETC_PATH}{BSS_SERVER_CONFIG}")
         }
         "bench_server" => {
-            format!("{BIN_PATH}wrap run {ETC_PATH}{BENCH_SERVER_WORKLOAD_CONFIG}")
+            format!("{BIN_PATH}warp run {ETC_PATH}{BENCH_SERVER_WORKLOAD_CONFIG}")
+        }
+        "bench_client" => {
+            format!("{BIN_PATH}warp client")
         }
         "ebs-failover" => {
             env_settings = r##"

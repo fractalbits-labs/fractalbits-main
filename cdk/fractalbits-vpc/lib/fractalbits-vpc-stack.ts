@@ -8,11 +8,15 @@ import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as elbv2_targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
 import { createInstance, createUserData } from './ec2-utils';
 
+export interface FractalbitsVpcStackProps extends cdk.StackProps {
+  numApiServers: number;
+}
+
 export class FractalbitsVpcStack extends cdk.Stack {
   public readonly nlbLoadBalancerDnsName: string;
   public readonly vpc: ec2.Vpc;
 
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props: FractalbitsVpcStackProps) {
     super(scope, id, props);
 
     // === VPC Configuration ===
@@ -106,14 +110,17 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const nssNumNvmeDisks = 1;
     const bssNumNvmeDisks = 1;
     const bucketName = bucket.bucketName;
+
     const instanceConfigs = [
-      { id: 'api_server_1', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: apiInstanceType, sg: publicSg},
-      { id: 'api_server_2', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: apiInstanceType, sg: publicSg},
       { id: 'root_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: rssInstanceType, sg: privateSg },
       { id: 'bss_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: bssInstanceType, sg: privateSg },
       { id: 'nss_server_primary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nssInstanceType, sg: privateSg },
       // { id: 'nss_server_secondary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nss_instance_type, sg: privateSg },
     ];
+
+    for (let i = 1; i <= props.numApiServers; i++) {
+      instanceConfigs.push({ id: `api_server_${i}`, subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: apiInstanceType, sg: publicSg });
+    }
 
     const instances: Record<string, ec2.Instance> = {};
     instanceConfigs.forEach(({ id, subnet, instanceType, sg}) => {
@@ -129,12 +136,14 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
     const listener = nlb.addListener('ApiListener', { port: 80 });
 
+    const apiServerTargets = [];
+    for (let i = 1; i <= props.numApiServers; i++) {
+      apiServerTargets.push(new elbv2_targets.InstanceTarget(instances[`api_server_${i}`]));
+    }
+
     listener.addTargets('ApiTargets', {
       port: 80,
-      targets: [
-        new elbv2_targets.InstanceTarget(instances['api_server_1']),
-        new elbv2_targets.InstanceTarget(instances['api_server_2']),
-      ],
+      targets: apiServerTargets,
     });
 
     // Create EBS Volume with Multi-Attach for nss_server
@@ -161,15 +170,8 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const nssIp = instances["nss_server_primary"].instancePrivateIp;
     const rssIp = instances["root_server"].instancePrivateIp;
     const cpuArch = "aarch64";
+
     const instanceBootstrapOptions = [
-      {
-        id: 'api_server_1',
-        bootstrapOptions: `api_server --bucket=${bucketName} --bss_ip=${bssIp} --nss_ip=${nssIp} --rss_ip=${rssIp}`
-      },
-      {
-        id: 'api_server_2',
-        bootstrapOptions: `api_server --bucket=${bucketName} --bss_ip=${bssIp} --nss_ip=${nssIp} --rss_ip=${rssIp}`
-      },
       {
         id: 'root_server',
         bootstrapOptions: `root_server --primary_instance_id=${primaryNss} --secondary_instance_id=${secondaryNss} --volume_id=${ebsVolumeId}`
@@ -186,6 +188,14 @@ export class FractalbitsVpcStack extends cdk.Stack {
         bootstrapOptions: `nss_server --bucket=${bucketName} --volume_id=${ebsVolumeId} --num_nvme_disks=${nssNumNvmeDisks}`
       },
     ];
+
+    for (let i = 1; i <= props.numApiServers; i++) {
+      instanceBootstrapOptions.push({
+        id: `api_server_${i}`,
+        bootstrapOptions: `api_server --bucket=${bucketName} --bss_ip=${bssIp} --nss_ip=${nssIp} --rss_ip=${rssIp}`
+      });
+    }
+
     instanceBootstrapOptions.forEach(({id, bootstrapOptions}) => {
       instances[id]?.addUserData(createUserData(this, cpuArch, bootstrapOptions).render())
     })

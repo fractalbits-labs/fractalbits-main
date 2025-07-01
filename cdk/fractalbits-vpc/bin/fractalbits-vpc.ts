@@ -6,8 +6,11 @@ import { PeeringStack } from '../lib/fractalbits-peering-stack';
 
 const app = new cdk.App();
 
+const numApiServers = app.node.tryGetContext('numApiServers') ?? 2;
+
 const vpcStack = new FractalbitsVpcStack(app, 'FractalbitsVpcStack', {
   env: {},
+  numApiServers: numApiServers,
 });
 
 const benchClientCount = app.node.tryGetContext('benchClientCount') ?? 2;

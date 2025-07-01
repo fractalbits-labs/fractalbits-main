@@ -45,6 +45,8 @@ export class FractalbitsBenchVpcStack extends cdk.Stack {
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
       managedPolicies: [
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMFullAccess'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FullAccess'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonDynamoDBFullAccess_v2'),
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEC2FullAccess'),
       ],
     });

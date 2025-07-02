@@ -3,6 +3,8 @@ mod delete_bucket;
 mod head_bucket;
 mod list_buckets;
 
+pub use create_bucket::create_bucket_handler;
+pub use delete_bucket::delete_bucket_handler;
 pub use head_bucket::head_bucket_handler;
 pub use list_buckets::list_buckets_handler;
 
@@ -12,8 +14,6 @@ use bucket_tables::{
     bucket_table::{Bucket, BucketTable},
     table::Table,
 };
-pub use create_bucket::create_bucket_handler;
-pub use delete_bucket::delete_bucket_handler;
 use metrics::histogram;
 use rpc_client_rss::{RpcClientRss, RpcErrorRss};
 use std::time::Instant;

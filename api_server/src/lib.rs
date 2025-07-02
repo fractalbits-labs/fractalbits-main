@@ -12,12 +12,17 @@ use bucket_tables::table::Versioned;
 use bytes::Bytes;
 use config::{ArcConfig, S3CacheConfig};
 use futures::stream::{self, StreamExt};
+use metrics::histogram;
 use moka::future::Cache;
 use object_layout::ObjectLayout;
 use rpc_client_bss::{RpcConnManagerBss, RpcErrorBss};
 use rpc_client_nss::RpcConnManagerNss;
 use rpc_client_rss::RpcConnManagerRss;
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -118,7 +123,11 @@ impl AppState {
     }
 
     pub async fn get_rpc_client_nss(&self) -> PooledConnection<RpcConnManagerNss> {
-        self.rpc_clients_nss.get().await.unwrap()
+        let start = Instant::now();
+        let res = self.rpc_clients_nss.get().await.unwrap();
+        histogram!("get_rpc_client_nanos", "type" => "nss")
+            .record(start.elapsed().as_nanos() as f64);
+        res
     }
 
     pub fn get_blob_client(&self) -> Arc<BlobClient> {
@@ -126,7 +135,11 @@ impl AppState {
     }
 
     pub async fn get_rpc_client_rss(&self) -> PooledConnection<RpcConnManagerRss> {
-        self.rpc_clients_rss.get().await.unwrap()
+        let start = Instant::now();
+        let res = self.rpc_clients_rss.get().await.unwrap();
+        histogram!("get_rpc_client_nanos", "type" => "rss")
+            .record(start.elapsed().as_nanos() as f64);
+        res
     }
 }
 
@@ -239,7 +252,10 @@ impl BlobClient {
         block_number: u32,
         body: Bytes,
     ) -> Result<usize, RpcErrorBss> {
+        let start = Instant::now();
         let rpc_client_bss = self.clients_bss.get().await.unwrap();
+        histogram!("get_rpc_client_nanos", "type" => "bss")
+            .record(start.elapsed().as_nanos() as f64);
         if block_number == 0 && body.len() < ObjectLayout::DEFAULT_BLOCK_SIZE as usize {
             return rpc_client_bss.put_blob(blob_id, block_number, body).await;
         }
@@ -264,17 +280,19 @@ impl BlobClient {
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<usize, RpcErrorBss> {
-        self.clients_bss
-            .get()
-            .await
-            .unwrap()
-            .get_blob(blob_id, block_number, body)
-            .await
+        let start = Instant::now();
+        let rpc_client_bss = self.clients_bss.get().await.unwrap();
+        histogram!("get_rpc_client_nanos", "type" => "bss")
+            .record(start.elapsed().as_nanos() as f64);
+        rpc_client_bss.get_blob(blob_id, block_number, body).await
     }
 
     pub async fn delete_blob(&self, blob_id: Uuid, block_number: u32) -> Result<(), RpcErrorBss> {
+        let start = Instant::now();
         let s3_key = format!("{blob_id}-{block_number}");
         let rpc_client_bss = self.clients_bss.get().await.unwrap();
+        histogram!("get_rpc_client_nanos", "type" => "bss")
+            .record(start.elapsed().as_nanos() as f64);
         let (res_s3, res_bss) = tokio::join!(
             self.client_s3
                 .delete_object()

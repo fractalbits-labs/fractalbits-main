@@ -12,22 +12,26 @@ pub fn run_cmd_deploy(
     let bucket_name = get_build_bucket_name()?;
     let bucket = format!("s3://{bucket_name}");
 
-    // Note: rust always uses release mode, to reduce binaries sizes
-    let zig_build_opt = if release_mode { "--release=safe" } else { "" };
-    let rust_build_target = if target_arm {
-        "aarch64-unknown-linux-gnu"
+    let (zig_build_opt, rust_build_opt) = if release_mode {
+        ("--release=safe", "--release")
     } else {
-        "x86_64-unknown-linux-gnu"
+        ("", "")
     };
-    let zig_build_target = if target_arm {
-        ["-Dtarget=aarch64-linux-gnu", "-Dcpu=neoverse_v1"]
+    let (rust_build_target, zig_build_target) = if target_arm {
+        (
+            "aarch64-unknown-linux-gnu",
+            ["-Dtarget=aarch64-linux-gnu", "-Dcpu=neoverse_v1"],
+        )
     } else {
-        ["-Dtarget=x86_64-linux-gnu", "-Dcpu=cascadelake"]
+        (
+            "x86_64-unknown-linux-gnu",
+            ["-Dtarget=x86_64-linux-gnu", "-Dcpu=cascadelake"],
+        )
     };
 
     run_cmd! {
         info "Building Rust projects with zigbuild";
-        cargo zigbuild --target $rust_build_target --release;
+        cargo zigbuild --target $rust_build_target $rust_build_opt;
 
         info "Building Zig projects";
         zig build -Duse_s3_backend=$use_s3_backend
@@ -46,8 +50,9 @@ pub fn run_cmd_deploy(
         "xtask",
     ];
     let prefix = if target_arm { "aarch64" } else { "x86_64" };
+    let build_dir = if release_mode { "release" } else { "debug" };
     for bin in &rust_bins {
-        run_cmd!(aws s3 cp target/$rust_build_target/release/$bin $bucket/$prefix/$bin)?;
+        run_cmd!(aws s3 cp target/$rust_build_target/$build_dir/$bin $bucket/$prefix/$bin)?;
     }
 
     info!("Uploading Zig-built binaries");

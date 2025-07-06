@@ -8,7 +8,7 @@ use aws_sdk_s3::{
 };
 use axum::extract::FromRef;
 use bb8::{Pool, PooledConnection};
-use bucket_tables::table::Versioned;
+use bucket_tables::Versioned;
 use bytes::Bytes;
 use config::{ArcConfig, S3CacheConfig};
 use futures::stream::{self, StreamExt};

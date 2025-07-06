@@ -1,12 +1,7 @@
 use std::sync::Arc;
 
 use axum::{body::Body, http::header, response::Response};
-use bucket_tables::{
-    api_key_table::{ApiKey, ApiKeyTable},
-    bucket_table::{Bucket, BucketTable},
-    permission::BucketKeyPerm,
-    table::{Table, Versioned},
-};
+use bucket_tables::{api_key_table::{ApiKey, ApiKeyTable}, bucket_table::{Bucket, BucketTable}, permission::BucketKeyPerm, table::Table, Versioned};
 use bytes::Buf;
 use rpc_client_nss::rpc::create_root_inode_response;
 use rpc_client_rss::{RpcClientRss, RpcErrorRss};

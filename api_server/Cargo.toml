@@ -8,6 +8,7 @@ rpc_client_nss.workspace = true
 rpc_client_bss.workspace = true
 rpc_client_rss.workspace = true
 bucket_tables.workspace = true
+kv_client_traits.workspace = true
 
 serde.workspace = true
 axum.workspace = true

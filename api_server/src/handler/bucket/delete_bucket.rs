@@ -1,11 +1,7 @@
 use std::sync::Arc;
 
 use axum::{body::Body, response::Response};
-use bucket_tables::{
-    api_key_table::{ApiKey, ApiKeyTable},
-    bucket_table::{Bucket, BucketTable},
-    table::{Table, Versioned},
-};
+use bucket_tables::{api_key_table::{ApiKey, ApiKeyTable}, bucket_table::{Bucket, BucketTable}, table::Table, Versioned};
 use rpc_client_nss::rpc::delete_root_inode_response;
 use rpc_client_rss::{RpcClientRss, RpcErrorRss};
 

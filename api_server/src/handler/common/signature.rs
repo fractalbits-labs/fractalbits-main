@@ -1,6 +1,5 @@
 use body::ReqBody;
-use bucket_tables::api_key_table::ApiKey;
-use bucket_tables::table::Versioned;
+use bucket_tables::{api_key_table::ApiKey, Versioned};
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;

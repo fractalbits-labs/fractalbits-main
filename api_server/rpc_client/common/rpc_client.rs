@@ -1,5 +1,3 @@
-#[cfg(feature = "rss")]
-use bucket_tables::table::{KvClient, Versioned};
 use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
 use std::io::{self};
@@ -156,53 +154,5 @@ impl RpcClient {
 
     pub fn tasks_running(&self) -> bool {
         !self.send_task.is_finished() && !self.recv_task.is_finished()
-    }
-}
-
-#[cfg(feature = "rss")]
-impl KvClient for RpcClient {
-    type Error = RpcError;
-    async fn put(&self, key: String, value: Versioned<String>) -> Result<(), Self::Error> {
-        Self::put(self, value.version, key, value.data).await
-    }
-
-    async fn get(&self, key: String) -> Result<Versioned<String>, Self::Error> {
-        Self::get(self, key).await.map(|x| x.into())
-    }
-
-    async fn delete(&self, key: String) -> Result<(), Self::Error> {
-        Self::delete(self, key).await
-    }
-
-    async fn list(&self, prefix: String) -> Result<Vec<String>, Self::Error> {
-        Self::list(self, prefix).await
-    }
-
-    async fn put_with_extra(
-        &self,
-        key: String,
-        value: Versioned<String>,
-        extra_key: String,
-        extra_value: Versioned<String>,
-    ) -> Result<(), Self::Error> {
-        Self::put_with_extra(
-            self,
-            value.version,
-            key,
-            value.data,
-            extra_value.version,
-            extra_key,
-            extra_value.data,
-        )
-        .await
-    }
-
-    async fn delete_with_extra(
-        &self,
-        key: String,
-        extra_key: String,
-        extra_value: Versioned<String>,
-    ) -> Result<(), Self::Error> {
-        Self::delete_with_extra(self, key, extra_value.version, extra_key, extra_value.data).await
     }
 }

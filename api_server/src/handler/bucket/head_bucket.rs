@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{body::Body, response::Response};
-use bucket_tables::{api_key_table::ApiKey, table::Versioned};
+use bucket_tables::{api_key_table::ApiKey, Versioned};
 
 use super::resolve_bucket;
 use crate::handler::common::s3_error::S3Error;

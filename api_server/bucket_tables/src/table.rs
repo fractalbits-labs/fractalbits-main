@@ -1,29 +1,10 @@
 #![allow(dead_code)]
 
+use crate::Versioned;
+use kv_client_traits::KvClient;
 use metrics::counter;
 use moka::future::Cache;
 use std::{marker::PhantomData, sync::Arc};
-
-#[derive(Clone)]
-pub struct Versioned<T: Sized> {
-    pub version: i64,
-    pub data: T,
-}
-
-impl<T: Sized> Versioned<T> {
-    pub fn new(version: i64, data: T) -> Self {
-        Self { version, data }
-    }
-}
-
-impl<T: Sized> From<(i64, T)> for Versioned<T> {
-    fn from(value: (i64, T)) -> Self {
-        Self {
-            version: value.0,
-            data: value.1,
-        }
-    }
-}
 
 pub trait Entry: serde::Serialize {
     fn key(&self) -> String;
@@ -33,28 +14,6 @@ pub trait TableSchema {
     const TABLE_NAME: &'static str;
 
     type E: Entry;
-}
-
-#[allow(async_fn_in_trait)]
-pub trait KvClient {
-    type Error: std::error::Error;
-    async fn put(&self, key: String, value: Versioned<String>) -> Result<(), Self::Error>;
-    async fn put_with_extra(
-        &self,
-        key: String,
-        value: Versioned<String>,
-        extra_key: String,
-        extra_value: Versioned<String>,
-    ) -> Result<(), Self::Error>;
-    async fn get(&self, key: String) -> Result<Versioned<String>, Self::Error>;
-    async fn delete(&self, key: String) -> Result<(), Self::Error>;
-    async fn delete_with_extra(
-        &self,
-        key: String,
-        extra_key: String,
-        extra_value: Versioned<String>,
-    ) -> Result<(), Self::Error>;
-    async fn list(&self, prefix: String) -> Result<Vec<String>, Self::Error>;
 }
 
 pub struct Table<'a, C: KvClient, F: TableSchema> {

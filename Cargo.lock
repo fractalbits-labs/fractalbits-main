@@ -152,6 +152,7 @@ dependencies = [
  "http-range",
  "httpdate",
  "itertools 0.13.0",
+ "kv_client_traits",
  "md-5",
  "metrics",
  "metrics-exporter-prometheus",
@@ -1005,6 +1006,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "hex",
+ "kv_client_traits",
  "metrics",
  "moka",
  "rand 0.8.5",
@@ -2524,6 +2526,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kv_client_traits"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "rpc_client_rss",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3581,7 +3594,6 @@ name = "rpc_client_rss"
 version = "0.1.0"
 dependencies = [
  "bb8",
- "bucket_tables",
  "bytemuck",
  "bytes",
  "metrics",
@@ -3607,6 +3619,7 @@ dependencies = [
  "bucket_tables",
  "bytes",
  "clap 4.5.27",
+ "kv_client_traits",
  "openssl",
  "strum",
  "thiserror 1.0.69",

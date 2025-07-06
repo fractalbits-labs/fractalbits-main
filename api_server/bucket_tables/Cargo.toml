@@ -13,3 +13,4 @@ rand.workspace = true
 moka.workspace = true
 tracing.workspace = true
 metrics.workspace = true
+kv_client_traits.workspace = true

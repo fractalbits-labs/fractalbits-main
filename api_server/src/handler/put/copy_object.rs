@@ -24,7 +24,7 @@ use axum::{
     response::Response,
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
-use bucket_tables::{api_key_table::ApiKey, bucket_table::Bucket, table::Versioned};
+use bucket_tables::{api_key_table::ApiKey, bucket_table::Bucket, Versioned};
 use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 

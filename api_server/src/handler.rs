@@ -22,7 +22,7 @@ use axum::{
 use bucket::BucketEndpoint;
 use bucket_tables::api_key_table::ApiKey;
 use bucket_tables::bucket_table::Bucket;
-use bucket_tables::table::Versioned;
+use bucket_tables::Versioned;
 use common::{
     authorization::Authorization,
     request::extract::*,

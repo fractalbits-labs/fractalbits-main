@@ -1,0 +1,11 @@
+[package]
+name = "kv_client_traits"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+bytes.workspace = true
+rpc_client_rss.workspace = true

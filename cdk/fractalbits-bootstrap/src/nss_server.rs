@@ -6,11 +6,14 @@ pub fn bootstrap(
     volume_id: &str,
     num_nvme_disks: usize,
     meta_stack_testing: bool,
-    _for_bench: bool,
+    for_bench: bool,
 ) -> CmdResult {
     assert_ne!(num_nvme_disks, 0);
 
     install_rpms(&["nvme-cli", "mdadm", "perf", "lldb"])?;
+    if meta_stack_testing || for_bench {
+        download_binaries(&["fbs", "test_art", "rewrk_rpc"])?;
+    }
     format_local_nvme_disks(num_nvme_disks)?;
     download_binaries(&["nss_server", "format-nss"])?;
     setup_configs(bucket_name, volume_id, "nss_server")?;
@@ -18,8 +21,6 @@ pub fn bootstrap(
     // Note for normal deployment, the nss_server service is not started
     // until EBS/nss formatted from root_server
     if meta_stack_testing {
-        download_binaries(&["fbs", "test_art", "rewrk_rpc"])?;
-
         let volume_dev = get_volume_dev(volume_id);
         run_cmd! {
             info "Formatting nss with ebs $volume_dev (see detailed logs with `journalctl _COMM=format-nss`)";

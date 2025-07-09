@@ -59,7 +59,6 @@ http-range.workspace = true
 aws-sdk-s3.workspace = true
 aws-config.workspace = true
 openssl.workspace = true
-bb8.workspace = true
 metrics.workspace = true
 metrics-exporter-statsd = { workspace = true, optional = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }

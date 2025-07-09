@@ -134,7 +134,6 @@ dependencies = [
  "axum-extra",
  "axum-macros",
  "base64 0.22.1",
- "bb8",
  "blake2",
  "bucket_tables",
  "bytes",
@@ -936,17 +935,6 @@ name = "base64ct"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
-
-[[package]]
-name = "bb8"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "212d8b8e1a22743d9241575c6ba822cf9c8fef34771c86ab7e477a4fbfd254e5"
-dependencies = [
- "futures-util",
- "parking_lot",
- "tokio",
-]
 
 [[package]]
 name = "bindgen"
@@ -3554,7 +3542,6 @@ dependencies = [
 name = "rpc_client_bss"
 version = "0.1.0"
 dependencies = [
- "bb8",
  "bytemuck",
  "bytes",
  "fake 3.1.0",
@@ -3575,7 +3562,6 @@ dependencies = [
 name = "rpc_client_nss"
 version = "0.1.0"
 dependencies = [
- "bb8",
  "bytemuck",
  "bytes",
  "metrics",
@@ -3596,7 +3582,6 @@ dependencies = [
 name = "rpc_client_rss"
 version = "0.1.0"
 dependencies = [
- "bb8",
  "bytemuck",
  "bytes",
  "metrics",

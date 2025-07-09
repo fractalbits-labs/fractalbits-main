@@ -20,6 +20,9 @@ use tokio_util::codec::FramedRead;
 use crate::codec::{MessageFrame, MesssageCodec};
 use crate::message::MessageHeader;
 use slotmap_conn_pool::Poolable;
+use tokio_retry::{strategy::ExponentialBackoff, Retry};
+
+const MAX_CONNECTION_RETRIES: usize = 5; // Max attempts to connect to an RPC server
 
 #[derive(Error, Debug)]
 pub enum RpcError {
@@ -164,7 +167,18 @@ impl Poolable for RpcClient {
     type Error = Box<dyn std::error::Error + Send + Sync>; // Using Box<dyn Error> for simplicity
 
     async fn new(addr_key: Self::AddrKey) -> Result<Self, Self::Error> {
-        let stream = TcpStream::connect(addr_key).await.unwrap();
+        let retry_strategy = ExponentialBackoff::from_millis(100) // Initial delay
+            .factor(2) // Doubles the delay each time
+            .take(MAX_CONNECTION_RETRIES); // Max retries for a single connection attempt
+
+        let stream = Retry::spawn(retry_strategy, move || async move {
+            TcpStream::connect(addr_key).await.map_err(|e| {
+                tracing::warn!("Failed to connect to RPC server at {}: {}", addr_key, e);
+                e
+            })
+        })
+        .await?;
+
         Ok(RpcClient::new(stream).await.unwrap().into())
     }
 

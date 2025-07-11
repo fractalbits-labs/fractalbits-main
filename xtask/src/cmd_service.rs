@@ -142,7 +142,7 @@ pub fn start_rss_service(build_mode: BuildMode) -> CmdResult {
         AWS_ACCESS_KEY_ID=fakeMyKeyId
         AWS_SECRET_ACCESS_KEY=fakeSecretAccessKey
         AWS_ENDPOINT_URL_DYNAMODB="http://localhost:8000"
-        ./target/debug/rss_admin api-key init-test;
+        ./target/debug/rss_admin --region=fakeRegion api-key init-test;
     }?;
 
     create_systemd_unit_file(ServiceName::Rss, build_mode)?;
@@ -352,7 +352,7 @@ Environment="AWS_ACCESS_KEY_ID=fakeMyKeyId"
 Environment="AWS_ENDPOINT_URL_DYNAMODB=http://localhost:8000""##
                 .to_string();
             env_settings += env_rust_log(build_mode);
-            format!("{pwd}/target/{build}/root_server")
+            format!("{pwd}/target/{build}/root_server -r fakeRegion")
         }
         ServiceName::ApiServer => {
             env_settings += env_rust_log(build_mode);

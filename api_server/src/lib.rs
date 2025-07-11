@@ -171,7 +171,10 @@ impl BlobClient {
         );
 
         let client_s3 = if config.s3_host.ends_with("amazonaws.com") {
-            let aws_config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+            let aws_config = aws_config::defaults(BehaviorVersion::latest())
+                .region(Region::new(config.s3_region.clone()))
+                .load()
+                .await;
             S3Client::new(&aws_config)
         } else {
             let credentials = Credentials::new("minioadmin", "minioadmin", None, None, "s3_cache");

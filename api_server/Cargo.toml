@@ -73,6 +73,6 @@ tempfile.workspace = true
 rstest.workspace = true
 
 [features]
-default = ["metrics_statsd"]
+default = ["metrics_prometheus"]
 metrics_statsd = ["dep:metrics-exporter-statsd"]
 metrics_prometheus = ["dep:metrics-exporter-prometheus"]

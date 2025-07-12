@@ -36,7 +36,7 @@ pub fn bootstrap(
         }?;
     }
 
-    setup_cloudwtach_agent()?;
+    // setup_cloudwtach_agent()?;
     create_systemd_unit_file("api_server", true)?;
     Ok(())
 }
@@ -50,7 +50,7 @@ rss_addr = "{rss_ip}:8088"
 region = "{aws_region}"
 port = 80
 root_domain = ".localhost"
-with_metrics = false
+with_metrics = true
 
 [s3_cache]
 s3_host = "http://s3.{aws_region}.amazonaws.com"

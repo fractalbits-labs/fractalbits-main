@@ -39,34 +39,37 @@ async fn main() {
         ))
         .init();
 
-    #[cfg(feature = "metrics_statsd")]
-    {
-        use metrics_exporter_statsd::StatsdBuilder;
-        // Initialize StatsD metrics exporter
-        let recorder = StatsdBuilder::from("127.0.0.1", 8125)
-            .with_buffer_size(1)
-            .build(None)
-            .expect("Could not build StatsD recorder");
-        metrics::set_global_recorder(Box::new(recorder))
-            .expect("Could not install StatsD exporter");
-        info!("Metrics exporter for StatsD installed");
-    }
-    #[cfg(feature = "metrics_prometheus")]
-    {
-        use metrics_exporter_prometheus::PrometheusBuilder;
-        // Initialize Prometheus metrics exporter
-        PrometheusBuilder::new()
-            .with_http_listener("0.0.0.0:8085".parse::<SocketAddr>().unwrap())
-            .install()
-            .expect("Could not build Prometheus recorder");
-        info!("Metrics exporter for Prometheus installed");
-    }
-
     let opt = Opt::parse();
     let config = match opt.config_file {
         Some(config_file) => config::read_config(config_file),
         None => config::Config::default(),
     };
+
+    if config.with_metrics {
+        #[cfg(feature = "metrics_statsd")]
+        {
+            use metrics_exporter_statsd::StatsdBuilder;
+            // Initialize StatsD metrics exporter
+            let recorder = StatsdBuilder::from("127.0.0.1", 8125)
+                .with_buffer_size(1)
+                .build(None)
+                .expect("Could not build StatsD recorder");
+            metrics::set_global_recorder(Box::new(recorder))
+                .expect("Could not install StatsD exporter");
+            info!("Metrics exporter for StatsD installed");
+        }
+        #[cfg(feature = "metrics_prometheus")]
+        {
+            use metrics_exporter_prometheus::PrometheusBuilder;
+            // Initialize Prometheus metrics exporter
+            PrometheusBuilder::new()
+                .with_http_listener("0.0.0.0:8085".parse::<SocketAddr>().unwrap())
+                .install()
+                .expect("Could not build Prometheus recorder");
+            info!("Metrics exporter for Prometheus installed");
+        }
+    }
+
     let port = config.port;
     let app_state = AppState::new(ArcConfig(Arc::new(config))).await;
 

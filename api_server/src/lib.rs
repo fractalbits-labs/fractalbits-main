@@ -259,7 +259,9 @@ impl BlobClient {
         histogram!("checkout_rpc_client_nanos", "type" => "bss")
             .record(start.elapsed().as_nanos() as f64);
         if block_number == 0 && body.len() < ObjectLayout::DEFAULT_BLOCK_SIZE as usize {
-            return rpc_client_bss.put_blob(blob_id, block_number, body).await;
+            let res = rpc_client_bss.put_blob(blob_id, block_number, body).await;
+            histogram!("bss_rpc", "op" => "put_blob").record(start.elapsed().as_nanos() as f64);
+            return res;
         }
 
         let s3_key = format!("{blob_id}-{block_number}");
@@ -272,6 +274,8 @@ impl BlobClient {
                 .send(),
             rpc_client_bss.put_blob(blob_id, block_number, body)
         );
+        histogram!("bss_rpc", "op" => "put_blob_join_with_s3")
+            .record(start.elapsed().as_nanos() as f64);
         assert!(res_s3.is_ok());
         res_bss
     }

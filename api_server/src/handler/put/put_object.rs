@@ -1,6 +1,7 @@
+use metrics::histogram;
 use std::{
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use crate::{
@@ -40,6 +41,7 @@ pub async fn put_object_handler(
     key: String,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
+    let start = Instant::now();
     let headers = extract_metadata_headers(request.headers())?;
     let expected_checksums = ExpectedChecksums {
         md5: match request.headers().get("content-md5") {
@@ -73,6 +75,9 @@ pub async fn put_object_handler(
         .await
         .map_err(|_e| S3Error::InternalError)?;
 
+    histogram!("put_object_handler", "stage" => "put_blob")
+        .record(start.elapsed().as_nanos() as f64);
+
     let checksum_from_stream = checksummer.await.map_err(|e| {
         tracing::error!("JoinHandle error: {e}");
         S3Error::InternalError
@@ -104,13 +109,21 @@ pub async fn put_object_handler(
     };
     let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new())?;
     let rpc_client_nss = app.checkout_rpc_client_nss().await;
-    let resp = rpc_client_nss
-        .put_inode(
-            bucket.root_blob_name.clone(),
-            key,
-            object_layout_bytes.into(),
-        )
-        .await?;
+    let resp = {
+        let start = Instant::now();
+        let res = rpc_client_nss
+            .put_inode(
+                bucket.root_blob_name.clone(),
+                key,
+                object_layout_bytes.into(),
+            )
+            .await;
+        histogram!("nss_rpc", "op" => "put_inode").record(start.elapsed().as_nanos() as f64);
+        res?
+    };
+
+    histogram!("put_object_handler", "stage" => "put_inode")
+        .record(start.elapsed().as_nanos() as f64);
 
     // Delete old object if it is an overwrite request
     let old_object_bytes = match resp.result.unwrap() {
@@ -130,6 +143,9 @@ pub async fn put_object_handler(
         }
     }
 
+    histogram!("put_object_handler", "stage" => "delete_old_blob")
+        .record(start.elapsed().as_nanos() as f64);
+
     let mut resp = Response::new(Body::empty());
     resp.headers_mut()
         .insert(header::ETAG, HeaderValue::from_str(&etag)?);
@@ -137,5 +153,7 @@ pub async fn put_object_handler(
         xheader::X_AMZ_OBJECT_SIZE,
         HeaderValue::from_str(&size.to_string())?,
     );
+
+    histogram!("put_object_handler", "stage" => "done").record(start.elapsed().as_nanos() as f64);
     Ok(resp)
 }

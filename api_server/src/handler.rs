@@ -77,7 +77,7 @@ pub async fn any_handler(
                     %bucket_name,
                     %key,
                     ?api_cmd,
-                    ?api_sig,
+                    %api_sig,
                     error = ?e,
                     "failed to create endpoint"
                 );

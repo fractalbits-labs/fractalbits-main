@@ -4,6 +4,7 @@ use axum::{
     RequestPartsExt,
 };
 use serde::Deserialize;
+use std::fmt;
 
 use crate::handler::common::s3_error::S3Error;
 
@@ -18,6 +19,25 @@ pub struct ApiSignature {
     pub list_type: Option<String>,
     // Note this is actually from header
     pub x_amz_copy_source: Option<String>,
+}
+
+impl fmt::Display for ApiSignature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut parts = Vec::new();
+        if let Some(upload_id) = &self.upload_id {
+            parts.push(format!("uploadId={}", upload_id));
+        }
+        if let Some(part_number) = self.part_number {
+            parts.push(format!("partNumber={}", part_number));
+        }
+        if let Some(list_type) = &self.list_type {
+            parts.push(format!("list-type={}", list_type));
+        }
+        if let Some(x_amz_copy_source) = &self.x_amz_copy_source {
+            parts.push(format!("x-amz-copy-source={}", x_amz_copy_source));
+        }
+        write!(f, "{}", parts.join("&"))
+    }
 }
 
 impl<S> FromRequestParts<S> for ApiSignature
@@ -80,5 +100,51 @@ mod tests {
             .into_body();
         let bytes = body.collect().await.unwrap().to_bytes();
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    #[test]
+    fn test_display_api_signature() {
+        let api_signature = ApiSignature {
+            upload_id: Some("abc123".to_string()),
+            part_number: Some(1),
+            list_type: None,
+            x_amz_copy_source: None,
+        };
+        assert_eq!(api_signature.to_string(), "uploadId=abc123&partNumber=1");
+
+        let api_signature = ApiSignature {
+            upload_id: None,
+            part_number: None,
+            list_type: Some("2".to_string()),
+            x_amz_copy_source: None,
+        };
+        assert_eq!(api_signature.to_string(), "list-type=2");
+
+        let api_signature = ApiSignature {
+            upload_id: None,
+            part_number: None,
+            list_type: None,
+            x_amz_copy_source: Some("bucket/key".to_string()),
+        };
+        assert_eq!(api_signature.to_string(), "x-amz-copy-source=bucket/key");
+
+        let api_signature = ApiSignature {
+            upload_id: Some("abc123".to_string()),
+            part_number: Some(1),
+            list_type: Some("2".to_string()),
+            x_amz_copy_source: Some("bucket/key".to_string()),
+        };
+        assert_eq!(
+            api_signature.to_string(),
+            "uploadId=abc123&partNumber=1&list-type=2&x-amz-copy-source=bucket/key"
+        );
+
+        let api_signature = ApiSignature {
+            upload_id: None,
+            part_number: None,
+            list_type: None,
+            x_amz_copy_source: None,
+        };
+        assert_eq!(api_signature.to_string(), "");
     }
 }

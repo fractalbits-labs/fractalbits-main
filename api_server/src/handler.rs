@@ -15,9 +15,9 @@ use std::time::Instant;
 use crate::{AppState, BlobId};
 use axum::{
     body::Body,
-    extract::{ConnectInfo, State},
+    extract::{ConnectInfo, FromRequestParts, State},
     http,
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use bucket::BucketEndpoint;
 use bucket_tables::api_key_table::ApiKey;
@@ -40,37 +40,80 @@ use tokio::sync::mpsc::Sender;
 
 pub type Request<T = ReqBody> = http::Request<T>;
 
+macro_rules! extract_or_return {
+    ($parts:expr, $app:expr, $extractor:ty) => {
+        match <$extractor>::from_request_parts($parts, $app).await {
+            Ok(value) => value,
+            Err(rejection) => {
+                tracing::warn!("failed to extract parts: {:?}", rejection);
+                return rejection.into_response();
+            }
+        }
+    };
+}
+
 pub async fn any_handler(
     State(app): State<Arc<AppState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    ApiCommandFromQuery(api_cmd): ApiCommandFromQuery,
-    auth: Authentication,
-    BucketNameAndKey { bucket_name, key }: BucketNameAndKey,
-    api_sig: ApiSignature,
     request: http::Request<Body>,
 ) -> Response {
-    tracing::debug!(%bucket_name, %key, %addr);
-
     let start = Instant::now();
 
+    let (mut parts, body) = request.into_parts();
+    let ApiCommandFromQuery(api_cmd) = extract_or_return!(&mut parts, &app, ApiCommandFromQuery);
+    let auth = extract_or_return!(&mut parts, &app, Authentication);
+    let BucketNameAndKey { bucket_name, key } =
+        extract_or_return!(&mut parts, &app, BucketNameAndKey);
+    let api_sig = extract_or_return!(&mut parts, &app, ApiSignature);
+    let request = http::Request::from_parts(parts, body);
+
+    tracing::debug!(%bucket_name, %key, %addr);
+
     let resource = format!("/{bucket_name}{key}");
-    let endpoint = match Endpoint::from_extractors(&request, &bucket_name, &key, api_cmd, api_sig) {
-        Err(e) => return e.into_response_with_resource(&resource),
-        Ok(endpoint) => endpoint,
-    };
+    let endpoint =
+        match Endpoint::from_extractors(&request, &bucket_name, &key, api_cmd, api_sig.clone()) {
+            Err(e) => {
+                tracing::error!(
+                    %bucket_name,
+                    %key,
+                    ?api_cmd,
+                    ?api_sig,
+                    error = ?e,
+                    "failed to create endpoint"
+                );
+                return e.into_response_with_resource(&resource);
+            }
+            Ok(endpoint) => endpoint,
+        };
     let endpoint_name = endpoint.as_str();
-    let result = any_handler_inner(app, bucket_name, key, auth, request, endpoint).await;
+    let result = any_handler_inner(
+        app,
+        bucket_name.clone(),
+        key.clone(),
+        auth,
+        request,
+        endpoint,
+    )
+    .await;
 
     let duration = start.elapsed();
+    let endpoint = endpoint_name;
     match result {
         Ok(response) => {
-            histogram!("request_duration_nanos", "status" => format!("{endpoint_name}_Ok"))
+            histogram!("request_duration_nanos", "status" => format!("{endpoint}_Ok"))
                 .record(duration.as_nanos() as f64);
             response
         }
         Err(e) => {
-            histogram!("request_duration_nanos", "status" => format!("{endpoint_name}_Err"))
+            histogram!("request_duration_nanos", "status" => format!("{endpoint}_Err"))
                 .record(duration.as_nanos() as f64);
+            tracing::error!(
+                %bucket_name,
+                %key,
+                %endpoint,
+                error = ?e,
+                "failed to handle request"
+            );
             e.into_response_with_resource(&resource)
         }
     }

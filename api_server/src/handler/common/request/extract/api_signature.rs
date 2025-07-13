@@ -8,7 +8,7 @@ use serde::Deserialize;
 use crate::handler::common::s3_error::S3Error;
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct ApiSignature {
     #[serde(rename = "uploadId")]

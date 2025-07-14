@@ -22,6 +22,7 @@ use crate::codec::{MessageFrame, MesssageCodec};
 use crate::message::MessageHeader;
 use slotmap_conn_pool::Poolable;
 use tokio_retry::{strategy::ExponentialBackoff, Retry};
+use tracing::{debug, error, warn};
 
 const MAX_CONNECTION_RETRIES: usize = 5; // Max attempts to connect to an RPC server
 
@@ -72,7 +73,7 @@ impl RpcClient {
             let requests_clone = requests.clone();
             tokio::spawn(async move {
                 if let Err(e) = Self::receive_message_task(receiver, requests_clone).await {
-                    tracing::error!("FATAL: receive message task error: {e}");
+                    error!("FATAL: receive message task error: {e}");
                 }
             })
         };
@@ -83,7 +84,7 @@ impl RpcClient {
         let send_task = {
             tokio::spawn(async move {
                 if let Err(e) = Self::send_message_task(sender, rx).await {
-                    tracing::error!("FATAL: receive message task error: {e}");
+                    error!("FATAL: send message task error: {e}");
                 }
             })
         };
@@ -105,15 +106,18 @@ impl RpcClient {
         let mut reader = FramedRead::new(receiver, decoder);
         while let Some(frame) = reader.next().await {
             let frame = frame?;
-            tracing::debug!("receiving response: request_id={}", frame.header.id);
+            let request_id = frame.header.id;
+            debug!(%request_id, "receiving response:");
             let tx: oneshot::Sender<MessageFrame> =
                 match requests.write().await.remove(&frame.header.id) {
                     Some(tx) => tx,
                     None => continue, // we may have received the response already
                 };
-            let _ = tx.send(frame);
+            if tx.send(frame).is_err() {
+                warn!(%request_id, "oneshot response send failed");
+            }
         }
-        tracing::warn!("connection closed, receive_message_task quit");
+        warn!("connection closed, receive_message_task quit");
         Ok(())
     }
 
@@ -140,17 +144,24 @@ impl RpcClient {
         Ok(())
     }
 
-    pub async fn send_request(&self, id: u32, msg: Message) -> Result<MessageFrame, RpcError> {
+    pub async fn send_request(
+        &self,
+        request_id: u32,
+        msg: Message,
+    ) -> Result<MessageFrame, RpcError> {
         self.sender.send(msg).await.unwrap();
-        tracing::debug!("request sent from handler: request_id={id}");
+        debug!(%request_id, "request sent from handler:");
 
         let (tx, rx) = oneshot::channel();
-        self.requests.write().await.insert(id, tx);
+        self.requests.write().await.insert(request_id, tx);
         let timeout_val = std::time::Duration::from_secs(5);
         let result = tokio::time::timeout(timeout_val, rx).await;
         let result = match result {
             Ok(result) => result,
-            Err(_) => return Err(RpcError::InternalResponseError("timeout".into())),
+            Err(_) => {
+                warn!(%request_id, "rpc request timeout");
+                return Err(RpcError::InternalResponseError("timeout".into()));
+            }
         };
         result.map_err(RpcError::OneshotRecvError)
     }
@@ -176,7 +187,7 @@ impl Poolable for RpcClient {
 
         let stream = Retry::spawn(retry_strategy, move || async move {
             TcpStream::connect(addr_key).await.map_err(|e| {
-                tracing::warn!("Failed to connect to RPC server at {}: {}", addr_key, e);
+                warn!("Failed to connect to RPC server at {}: {}", addr_key, e);
                 e
             })
         })

@@ -100,10 +100,10 @@ pub async fn any_handler(
         Ok(result) => result,
         Err(_) => {
             tracing::error!(
+                endpoint = %endpoint_name,
                 %bucket,
                 %key,
                 %client_addr,
-                endpoint = %endpoint_name,
                 "request timed out"
             );
             counter!("request_timeout", "endpoint" => endpoint_name).increment(1);

@@ -1,6 +1,6 @@
 use crate::{
     message::MessageHeader,
-    rpc_client::{Message, RpcClient, RpcError},
+    rpc_client::{InflightRpcGuard, Message, RpcClient, RpcError},
 };
 use bytes::{Bytes, BytesMut};
 use prost::Message as PbMessage;
@@ -14,6 +14,7 @@ impl RpcClient {
         mut key: String,
         value: Bytes,
     ) -> Result<PutInodeResponse, RpcError> {
+        let _guard = InflightRpcGuard::new("nss", "put_inode");
         key.push('\0');
         let body = PutInodeRequest {
             root_blob_name,
@@ -45,6 +46,7 @@ impl RpcClient {
         root_blob_name: String,
         mut key: String,
     ) -> Result<GetInodeResponse, RpcError> {
+        let _guard = InflightRpcGuard::new("nss", "get_inode");
         key.push('\0');
         let body = GetInodeRequest {
             root_blob_name,
@@ -79,6 +81,7 @@ impl RpcClient {
         mut start_after: String,
         skip_mpu_parts: bool,
     ) -> Result<ListInodesResponse, RpcError> {
+        let _guard = InflightRpcGuard::new("nss", "list_inodes");
         if !start_after.ends_with("/") {
             start_after.push('\0');
         }
@@ -115,6 +118,7 @@ impl RpcClient {
         root_blob_name: String,
         mut key: String,
     ) -> Result<DeleteInodeResponse, RpcError> {
+        let _guard = InflightRpcGuard::new("nss", "delete_inode");
         key.push('\0');
         let body = DeleteInodeRequest {
             root_blob_name,
@@ -144,6 +148,7 @@ impl RpcClient {
         &self,
         bucket: String,
     ) -> Result<CreateRootInodeResponse, RpcError> {
+        let _guard = InflightRpcGuard::new("nss", "create_root_inode");
         let body = CreateRootInodeRequest { bucket };
 
         let mut header = MessageHeader::default();
@@ -169,6 +174,7 @@ impl RpcClient {
         &self,
         root_blob_name: String,
     ) -> Result<DeleteRootInodeResponse, RpcError> {
+        let _guard = InflightRpcGuard::new("nss", "delete_root_inode");
         let body = DeleteRootInodeRequest { root_blob_name };
 
         let mut header = MessageHeader::default();

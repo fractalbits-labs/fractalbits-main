@@ -1,7 +1,7 @@
 use crate::{
     codec::MessageFrame,
     message::{Command, MessageHeader},
-    rpc_client::{Message, RpcClient, RpcError},
+    rpc_client::{InflightRpcGuard, Message, RpcClient, RpcError},
 };
 use bytes::Bytes;
 use uuid::Uuid;
@@ -13,6 +13,7 @@ impl RpcClient {
         block_number: u32,
         body: Bytes,
     ) -> Result<usize, RpcError> {
+        let _guard = InflightRpcGuard::new("bss", "put_blob");
         let mut header = MessageHeader::default();
         header.id = self.gen_request_id();
         header.blob_id = blob_id.into_bytes();
@@ -33,6 +34,7 @@ impl RpcClient {
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<usize, RpcError> {
+        let _guard = InflightRpcGuard::new("bss", "get_blob");
         let mut header = MessageHeader::default();
         header.id = self.gen_request_id();
         header.blob_id = blob_id.into_bytes();
@@ -50,6 +52,7 @@ impl RpcClient {
     }
 
     pub async fn delete_blob(&self, blob_id: Uuid, block_number: u32) -> Result<(), RpcError> {
+        let _guard = InflightRpcGuard::new("bss", "delete_blob");
         let mut header = MessageHeader::default();
         header.id = self.gen_request_id();
         header.blob_id = blob_id.into_bytes();

@@ -1,4 +1,5 @@
 use bytes::{Bytes, BytesMut};
+use metrics::{gauge, Gauge};
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::SocketAddr;
@@ -184,5 +185,23 @@ impl Poolable for RpcClient {
 
     fn is_open(&self) -> bool {
         self.tasks_running()
+    }
+}
+
+pub struct InflightRpcGuard {
+    gauge: Gauge,
+}
+
+impl InflightRpcGuard {
+    pub fn new(rpc_type: &'static str, rpc_name: &'static str) -> Self {
+        let gauge = gauge!("inflight_rpc", "type" => rpc_type, "name" => rpc_name);
+        gauge.increment(1.0);
+        Self { gauge }
+    }
+}
+
+impl Drop for InflightRpcGuard {
+    fn drop(&mut self) {
+        self.gauge.decrement(1.0);
     }
 }

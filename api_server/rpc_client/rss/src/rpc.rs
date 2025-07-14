@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::{
     message::MessageHeader,
-    rpc_client::{Message, RpcClient, RpcError},
+    rpc_client::{InflightRpcGuard, Message, RpcClient, RpcError},
 };
 use bytes::BytesMut;
 use metrics::histogram;
@@ -13,6 +13,7 @@ include!(concat!(env!("OUT_DIR"), "/rss_ops.rs"));
 
 impl RpcClient {
     pub async fn put(&self, version: i64, key: String, value: String) -> Result<(), RpcError> {
+        let _guard = InflightRpcGuard::new("rss", "put");
         let start = Instant::now();
         let body = PutRequest {
             version,
@@ -66,6 +67,7 @@ impl RpcClient {
         extra_key: String,
         extra_value: String,
     ) -> Result<(), RpcError> {
+        let _guard = InflightRpcGuard::new("rss", "put_with_extra");
         let start = Instant::now();
         let body = PutWithExtraRequest {
             version,
@@ -115,6 +117,7 @@ impl RpcClient {
     }
 
     pub async fn get(&self, key: String) -> Result<(i64, String), RpcError> {
+        let _guard = InflightRpcGuard::new("rss", "get");
         let start = Instant::now();
         let body = GetRequest { key: key.clone() };
 
@@ -156,6 +159,7 @@ impl RpcClient {
     }
 
     pub async fn delete(&self, key: String) -> Result<(), RpcError> {
+        let _guard = InflightRpcGuard::new("rss", "delete");
         let start = Instant::now();
         let body = DeleteRequest { key: key.clone() };
 
@@ -197,6 +201,7 @@ impl RpcClient {
         extra_key: String,
         extra_value: String,
     ) -> Result<(), RpcError> {
+        let _guard = InflightRpcGuard::new("rss", "delete_with_extra");
         let start = Instant::now();
         let body = DeleteWithExtraRequest {
             key: key.clone(),
@@ -244,6 +249,7 @@ impl RpcClient {
     }
 
     pub async fn list(&self, prefix: String) -> Result<Vec<String>, RpcError> {
+        let _guard = InflightRpcGuard::new("rss", "list");
         let start = Instant::now();
         let body = ListRequest {
             prefix: prefix.clone(),

@@ -11,6 +11,7 @@ import { createInstance, createUserData } from './ec2-utils';
 export interface FractalbitsVpcStackProps extends cdk.StackProps {
   numApiServers: number;
   benchType?: "service_endpoint" | "internal" | "external" | null;
+  availabilityZone?: string;
 }
 
 export class FractalbitsVpcStack extends cdk.Stack {
@@ -21,10 +22,12 @@ export class FractalbitsVpcStack extends cdk.Stack {
     super(scope, id, props);
 
     // === VPC Configuration ===
+    const az = props.availabilityZone ?? this.availabilityZones[this.availabilityZones.length - 1];
     this.vpc = new ec2.Vpc(this, 'FractalbitsVpc', {
       vpcName: 'fractalbits-vpc',
       ipAddresses: ec2.IpAddresses.cidr('10.0.0.0/16'),
-      maxAzs: 3,
+      availabilityZones: [az],
+      maxAzs: 1,
       natGateways: 0,
       subnetConfiguration: [
         { name: 'PrivateSubnet', subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 },

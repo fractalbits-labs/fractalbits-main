@@ -6,6 +6,7 @@ pub fn bootstrap(
     nss_ip: &str,
     rss_ip: &str,
     with_bench_client: bool,
+    for_bench: bool,
 ) -> CmdResult {
     install_rpms(&["amazon-cloudwatch-agent", "nmap-ncat", "perf"])?;
     download_binaries(&[
@@ -24,7 +25,10 @@ pub fn bootstrap(
     if with_bench_client {
         run_cmd!(echo "127.0.0.1   local-service-endpoint" >>/etc/hosts)?;
         bench_client::bootstrap(None)?;
-        // Also try to download tools for micro-benchmarking
+    };
+
+    if with_bench_client || for_bench {
+        // Try to download tools for micro-benchmarking
         download_binaries(&["rewrk_rpc", "fbs", "test_art"])?;
         // Testing data for bss-rpc
         xtask_tools::gen_uuids(1_000_000, "/data/uuids.data")?;

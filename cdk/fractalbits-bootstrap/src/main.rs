@@ -10,13 +10,29 @@ use clap::Parser;
 use cmd_lib::*;
 use common::*;
 
-#[allow(clippy::enum_variant_names)]
 #[derive(Parser)]
-#[command(rename_all = "snake_case")]
 #[clap(
     name = "fractalbits-bootstrap",
     about = "Bootstrap for cloud ec2 instances"
 )]
+struct Opts {
+    #[clap(flatten)]
+    common: CommonOpts,
+
+    #[command(subcommand)]
+    service: Service,
+}
+
+#[derive(Parser)]
+#[command(rename_all = "snake_case")]
+struct CommonOpts {
+    #[clap(long, default_value = "false", long_help = "For benchmarking")]
+    for_bench: bool,
+}
+
+#[allow(clippy::enum_variant_names)]
+#[derive(Parser)]
+#[command(rename_all = "snake_case")]
 enum Service {
     #[clap(about = "Run on api_server instance to bootstrap fractalbits service(s)")]
     ApiServer {
@@ -43,9 +59,6 @@ enum Service {
 
         #[clap(long, default_value = "false", long_help = "For meta stack testing")]
         meta_stack_testing: bool,
-
-        #[clap(long, default_value = "false", long_help = "For benchmarking")]
-        for_bench: bool,
     },
 
     #[clap(about = "Run on nss_server instance to bootstrap fractalbits service(s)")]
@@ -61,9 +74,6 @@ enum Service {
 
         #[clap(long, default_value = "false", long_help = "For meta stack testing")]
         meta_stack_testing: bool,
-
-        #[clap(long, default_value = "false", long_help = "For benchmarking")]
-        for_bench: bool,
     },
 
     #[clap(about = "Run on root_server instance to bootstrap fractalbits service(s)")]
@@ -76,9 +86,6 @@ enum Service {
 
         #[clap(long, long_help = "Multi-attached EBS volume ID")]
         volume_id: String,
-
-        #[clap(long, default_value = "false", long_help = "For benchmarking")]
-        for_bench: bool,
     },
 
     #[clap(about = "Run on bench_server instance to benchmark fractalbits service(s)")]
@@ -118,26 +125,32 @@ fn main() -> CmdResult {
         .format_target(false)
         .init();
 
-    let service = Service::parse();
-    match service {
+    let opts = Opts::parse();
+    let for_bench = opts.common.for_bench;
+    match opts.service {
         Service::ApiServer {
             bucket,
             bss_ip,
             nss_ip,
             rss_ip,
             with_bench_client,
-        } => api_server::bootstrap(&bucket, &bss_ip, &nss_ip, &rss_ip, with_bench_client)?,
+        } => api_server::bootstrap(
+            &bucket,
+            &bss_ip,
+            &nss_ip,
+            &rss_ip,
+            with_bench_client,
+            for_bench,
+        )?,
         Service::BssServer {
             num_nvme_disks,
             meta_stack_testing,
-            for_bench,
         } => bss_server::bootstrap(num_nvme_disks, meta_stack_testing, for_bench)?,
         Service::NssServer {
             bucket,
             volume_id,
             num_nvme_disks,
             meta_stack_testing,
-            for_bench,
         } => nss_server::bootstrap(
             &bucket,
             &volume_id,
@@ -149,7 +162,6 @@ fn main() -> CmdResult {
             primary_instance_id,
             secondary_instance_id,
             volume_id,
-            for_bench,
         } => root_server::bootstrap(
             &primary_instance_id,
             &secondary_instance_id,

@@ -24,7 +24,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
     this.vpc = new ec2.Vpc(this, 'FractalbitsVpc', {
       vpcName: 'fractalbits-vpc',
       ipAddresses: ec2.IpAddresses.cidr('10.0.0.0/16'),
-      maxAzs: 1,
+      maxAzs: 3,
       natGateways: 0,
       subnetConfiguration: [
         { name: 'PrivateSubnet', subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 },
@@ -176,7 +176,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
     // Create EBS Volume with Multi-Attach for nss_server
     const ebsVolume = new ec2.Volume(this, 'MultiAttachVolume', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
-      availabilityZone: this.vpc.availabilityZones[0],
+      availabilityZone: instances['nss_server_primary'].instanceAvailabilityZone,
       size: cdk.Size.gibibytes(20),
       volumeType: ec2.EbsDeviceVolumeType.IO2,
       iops: 10000,

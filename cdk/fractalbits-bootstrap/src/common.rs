@@ -9,6 +9,7 @@ pub const ROOT_SERVER_CONFIG: &str = "root_server_cloud_config.toml";
 pub const BENCH_SERVER_WORKLOAD_CONFIG: &str = "bench_workload.yaml";
 pub const BENCH_SERVER_BENCH_START_SCRIPT: &str = "bench_start.sh";
 pub const BOOTSTRAP_DONE_FILE: &str = "/opt/fractalbits/.bootstrap_done";
+#[allow(dead_code)]
 pub const CLOUDWATCH_AGENT_CONFIG: &str = "cloudwatch_agent_config.json";
 
 pub fn download_binaries(file_list: &[&str]) -> CmdResult {
@@ -232,6 +233,7 @@ pub fn install_rpms(rpms: &[&str]) -> CmdResult {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn create_cloudwatch_agent_config() -> CmdResult {
     let aws_region = get_current_aws_region()?;
     let content = format!(
@@ -271,6 +273,7 @@ fn create_cloudwatch_agent_config() -> CmdResult {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn setup_cloudwtach_agent() -> CmdResult {
     create_cloudwatch_agent_config()?;
 

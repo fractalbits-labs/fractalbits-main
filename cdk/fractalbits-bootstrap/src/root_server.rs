@@ -18,7 +18,7 @@ pub fn bootstrap(
     run_cmd!($BIN_PATH/rss_admin --region=$region api-key init-test)?;
 
     create_rss_config()?;
-    setup_cloudwtach_agent()?;
+    // setup_cloudwtach_agent()?;
     create_systemd_unit_file("root_server", true)?;
 
     // Format EBS with SSM

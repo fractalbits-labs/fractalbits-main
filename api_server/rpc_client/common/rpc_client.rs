@@ -1,10 +1,11 @@
 use bytes::{Bytes, BytesMut};
-use metrics::{counter, gauge, Gauge};
+use metrics::{counter, gauge, histogram, Gauge};
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
+use std::time::Instant;
 use thiserror::Error;
 use tokio::{
     self,
@@ -228,7 +229,10 @@ impl Poolable for RpcClient {
 }
 
 pub struct InflightRpcGuard {
+    start: Instant,
     gauge: Gauge,
+    rpc_type: &'static str,
+    rpc_name: &'static str,
 }
 
 impl InflightRpcGuard {
@@ -237,12 +241,19 @@ impl InflightRpcGuard {
         gauge.increment(1.0);
         counter!("rpc_request_sent", "type" => rpc_type, "name" => rpc_name).increment(1);
 
-        Self { gauge }
+        Self {
+            start: Instant::now(),
+            gauge,
+            rpc_type,
+            rpc_name,
+        }
     }
 }
 
 impl Drop for InflightRpcGuard {
     fn drop(&mut self) {
+        histogram!("rpc_duration_nanos", "type" => self.rpc_type, "name" => self.rpc_name)
+            .record(self.start.elapsed().as_nanos() as f64);
         self.gauge.decrement(1.0);
     }
 }

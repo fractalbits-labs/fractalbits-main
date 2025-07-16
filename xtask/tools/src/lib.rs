@@ -26,7 +26,11 @@ pub fn gen_uuids(num: usize, file: &str) -> CmdResult {
         uuids.lock().unwrap().push(uuids_str);
     });
 
-    run_cmd!(echo -n > $file)?;
+    let dir = run_fun!(dirname $file)?;
+    run_cmd! {
+        mkdir -p $dir;
+        echo -n > $file;
+    }?;
     for uuid in uuids.lock().unwrap().iter() {
         run_cmd!(echo -n $uuid >> $file)?;
     }

@@ -94,7 +94,7 @@ fn run_s3_api_tests() -> CmdResult {
     cmd_service::start_services(ServiceName::All, BuildMode::Debug)?;
     run_cmd! {
         info "Run cargo tests (s3 api tests)";
-        cargo test;
+        cargo test -- --test-threads 1;
     }?;
     let _ = cmd_service::stop_service(ServiceName::All);
 

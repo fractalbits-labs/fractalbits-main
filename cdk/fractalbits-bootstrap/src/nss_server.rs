@@ -18,7 +18,7 @@ pub fn bootstrap(
     if meta_stack_testing || for_bench {
         download_binaries(&["fbs", "test_art", "rewrk_rpc"])?;
     }
-    format_local_nvme_disks(num_nvme_disks)?;
+    format_local_nvme_disks(num_nvme_disks, false)?;
     download_binaries(&["nss_server"])?;
     setup_configs(bucket_name, volume_id, "nss_server")?;
 
@@ -99,19 +99,16 @@ fn create_ebs_udev_rule(volume_id: &str, service_name: &str) -> CmdResult {
 }
 
 pub fn format_nss(ebs_dev: String, testing_mode: bool) -> CmdResult {
-    let fs_type = "ext4";
-    let mkfs_opts = ["-O", "bigalloc", "-C", "16384"];
-
     run_cmd! {
         info "Disabling udev rules for EBS";
         ln -sf /dev/null /etc/udev/rules.d/99-ebs.rules;
 
-        info "Formatting $ebs_dev to $fs_type file system (${mkfs_opts:?})";
-        mkfs -t $fs_type $[mkfs_opts] $ebs_dev;
+        info "Formatting $ebs_dev to ext4 file system (${EXT4_MKFS_OPTS:?})";
+        mkfs.ext4 $[EXT4_MKFS_OPTS] $ebs_dev;
 
         info "Mounting $ebs_dev to /data/ebs";
         mkdir -p /data/ebs;
-        mount -t $fs_type $ebs_dev /data/ebs;
+        mount $ebs_dev /data/ebs;
     }?;
 
     let mut wait_secs = 0;

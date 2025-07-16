@@ -13,6 +13,7 @@ pub const BOOTSTRAP_DONE_FILE: &str = "/opt/fractalbits/.bootstrap_done";
 pub const CLOUDWATCH_AGENT_CONFIG: &str = "cloudwatch_agent_config.json";
 pub const TEST_BUCKET_ROOT_BLOB_NAME: &str = "947ef2be-44b2-4ac2-969b-2574eb85662b";
 pub const CLOUD_INIT_LOG: &str = "/var/log/cloud-init-output.log";
+pub const EXT4_MKFS_OPTS: [&'static str; 4] = ["-O", "bigalloc", "-C", "16384"];
 
 pub fn download_binaries(file_list: &[&str]) -> CmdResult {
     for file_name in file_list {
@@ -125,7 +126,8 @@ pub fn get_current_aws_region() -> FunResult {
     run_fun!(curl -sS -H "$HDR_TOKEN: $token" "$IMDS_URL/$ID_PATH" | jq -r .region)
 }
 
-pub fn format_local_nvme_disks(num_nvme_disks: usize) -> CmdResult {
+// https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/storage-twp.html
+pub fn format_local_nvme_disks(num_nvme_disks: usize, support_storage_twp: bool) -> CmdResult {
     let nvme_disks = run_fun! {
         nvme list | grep -v "Amazon Elastic Block Store"
             | awk r##"/nvme[0-9]n[0-9]/ {print $1}"##
@@ -135,12 +137,24 @@ pub fn format_local_nvme_disks(num_nvme_disks: usize) -> CmdResult {
     if num != num_nvme_disks {
         cmd_die!("Found $num local nvme disks ${nvme_disks:?}, expected: $num_nvme_disks");
     }
+    if support_storage_twp {
+        assert_eq!(1, num_nvme_disks);
+    }
 
     if num == 1 {
-        run_cmd! {
-            info "Creating XFS on local nvme disks: ${nvme_disks:?}";
-            mkfs.xfs -f -q $[nvme_disks];
+        if support_storage_twp {
+            run_cmd! {
+                info "Creating ext4 on local nvme disks: ${nvme_disks:?} to support torn write prevention";
+                mkfs.ext4 -q $[EXT4_MKFS_OPTS] $[nvme_disks];
+            }?;
+        } else {
+            run_cmd! {
+                info "Creating XFS on local nvme disks: ${nvme_disks:?}";
+                mkfs.xfs -f -q $[nvme_disks];
+            }?;
+        }
 
+        run_cmd! {
             info "Mounting to $DATA_LOCAL_MNT";
             mkdir -p $DATA_LOCAL_MNT;
             mount $[nvme_disks] $DATA_LOCAL_MNT;

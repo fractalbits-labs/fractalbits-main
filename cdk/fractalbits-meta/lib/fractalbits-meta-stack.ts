@@ -82,10 +82,11 @@ export class FractalbitsMetaStack extends cdk.Stack {
       );
       return userData;
     };
-    const instanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
     const cpuArch = "aarch64";
-    let instance = createInstance(`${props.serviceName}_bench`, ec2.SubnetType.PRIVATE_ISOLATED, instanceType);
+    let instance = undefined;
     if (props.serviceName == "nss") {
+      const nssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
+      instance = createInstance(`${props.serviceName}_bench`, ec2.SubnetType.PRIVATE_ISOLATED, nssInstanceType);
       // Create EBS Volume with Multi-Attach capabilities
       const ebsVolume = new ec2.Volume(this, 'MultiAttachVolume', {
         removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -111,6 +112,8 @@ export class FractalbitsMetaStack extends cdk.Stack {
         volumeId: ebsVolume.volumeId,
       });
     } else {
+      const bssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.IS4GEN, ec2.InstanceSize.XLARGE);
+      instance = createInstance(`${props.serviceName}_bench`, ec2.SubnetType.PRIVATE_ISOLATED, bssInstanceType);
       instance.addUserData(createUserData(cpuArch, "bss_server --num_nvme_disks=1 --meta_stack_testing").render());
     }
 

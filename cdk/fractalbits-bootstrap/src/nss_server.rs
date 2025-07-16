@@ -1,5 +1,9 @@
 use super::common::*;
 use cmd_lib::*;
+use std::io::Error;
+
+const BLOB_DRAM_MEM_PERCENT: f64 = 0.8;
+const EBS_SPACE_PERCENT: f64 = 0.9;
 
 pub fn bootstrap(
     bucket_name: &str,
@@ -32,7 +36,7 @@ pub fn bootstrap(
 
 fn setup_configs(bucket_name: &str, volume_id: &str, service_name: &str) -> CmdResult {
     let volume_dev = get_volume_dev(volume_id);
-    create_nss_config(bucket_name)?;
+    create_nss_config(bucket_name, &volume_dev)?;
     create_mount_unit(&volume_dev, "/data/ebs", "ext4")?;
     create_ebs_udev_rule(volume_id, service_name)?;
     create_coredump_config()?;
@@ -40,11 +44,30 @@ fn setup_configs(bucket_name: &str, volume_id: &str, service_name: &str) -> CmdR
     Ok(())
 }
 
-fn create_nss_config(bucket_name: &str) -> CmdResult {
+fn create_nss_config(bucket_name: &str, volume_dev: &str) -> CmdResult {
     let aws_region = get_current_aws_region()?;
-    // TODO: generate proper values based on system's resources
-    let blob_dram_kilo_bytes = 256 * 1024 * 1024;
-    let art_journal_segment_size: usize = 16 * 1024 * 1024 * 1024;
+
+    // Get total memory in kilobytes from /proc/meminfo
+    let total_mem_kb_str = run_fun!(cat /proc/meminfo | grep MemTotal | awk r"{print $2}")?;
+    let total_mem_kb = total_mem_kb_str
+        .trim()
+        .parse::<u64>()
+        .map_err(|_| Error::other(format!("invalid total_mem_kb: {total_mem_kb_str}")))?;
+
+    // Calculate total memory for blob_dram_kilo_bytes
+    let blob_dram_kilo_bytes = (total_mem_kb as f64 * BLOB_DRAM_MEM_PERCENT) as u64;
+
+    // Get total size of volume_dev in 1M blocks (which rounds down)
+    let ebs_blockdev_size_str = run_fun!(blockdev --getsize64 ${volume_dev})?;
+    let ebs_blockdev_size = ebs_blockdev_size_str.trim().parse::<u64>().map_err(|_| {
+        Error::other(format!(
+            "invalid ebs blockdev size: {ebs_blockdev_size_str}"
+        ))
+    })?;
+    let ebs_blockdev_mb = ebs_blockdev_size / 1024 / 1024;
+    let art_journal_segment_size =
+        (ebs_blockdev_mb as f64 * EBS_SPACE_PERCENT) as u64 * 1024 * 1024;
+
     let config_content = format!(
         r##"server_port = 8088
 blob_dram_kilo_bytes = {blob_dram_kilo_bytes}

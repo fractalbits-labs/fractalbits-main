@@ -1758,22 +1758,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "format-nss"
-version = "0.1.0"
-dependencies = [
- "clap 4.5.27",
- "cmd_lib",
- "log",
- "systemd-journal-logger",
-]
-
-[[package]]
 name = "fractalbits-bootstrap"
 version = "0.1.0"
 dependencies = [
  "clap 4.5.27",
  "cmd_lib",
  "env_logger 0.11.6",
+ "strum",
  "xtask_tools",
 ]
 
@@ -4174,16 +4165,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "systemd-journal-logger"
-version = "2.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7266304d24ca5a4b230545fc558c80e18bd3e1d2eb1be149b6bcd04398d3e79c"
-dependencies = [
- "log",
- "rustix 1.0.7",
 ]
 
 [[package]]

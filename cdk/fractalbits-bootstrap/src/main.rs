@@ -9,6 +9,7 @@ mod root_server;
 use clap::Parser;
 use cmd_lib::*;
 use common::*;
+use strum::AsRefStr;
 
 #[derive(Parser)]
 #[clap(
@@ -20,7 +21,7 @@ struct Opts {
     common: CommonOpts,
 
     #[command(subcommand)]
-    service: Service,
+    command: Command,
 }
 
 #[derive(Parser)]
@@ -31,9 +32,10 @@ struct CommonOpts {
 }
 
 #[allow(clippy::enum_variant_names)]
-#[derive(Parser)]
+#[derive(Parser, AsRefStr)]
 #[command(rename_all = "snake_case")]
-enum Service {
+#[strum(serialize_all = "snake_case")]
+enum Command {
     #[clap(about = "Run on api_server instance to bootstrap fractalbits service(s)")]
     ApiServer {
         #[clap(long, long_help = "S3 bucket name for fractalbits service")]
@@ -88,6 +90,21 @@ enum Service {
         volume_id: String,
     },
 
+    #[clap(
+        about = "Run on nss_server instance to format itself when receiving ssm command from root_server"
+    )]
+    FormatNss {
+        #[clap(
+            long,
+            default_value = "false",
+            long_help = "Testing mode (create testing art tree)"
+        )]
+        testing_mode: bool,
+
+        #[clap(long, long_help = "EBS device")]
+        ebs_dev: String,
+    },
+
     #[clap(about = "Run on bench_server instance to benchmark fractalbits service(s)")]
     BenchServer {
         #[clap(
@@ -127,8 +144,9 @@ fn main() -> CmdResult {
 
     let opts = Opts::parse();
     let for_bench = opts.common.for_bench;
-    match opts.service {
-        Service::ApiServer {
+    let command = opts.command.as_ref().to_owned();
+    match opts.command {
+        Command::ApiServer {
             bucket,
             bss_ip,
             nss_ip,
@@ -142,11 +160,11 @@ fn main() -> CmdResult {
             with_bench_client,
             for_bench,
         )?,
-        Service::BssServer {
+        Command::BssServer {
             num_nvme_disks,
             meta_stack_testing,
         } => bss_server::bootstrap(num_nvme_disks, meta_stack_testing, for_bench)?,
-        Service::NssServer {
+        Command::NssServer {
             bucket,
             volume_id,
             num_nvme_disks,
@@ -158,7 +176,7 @@ fn main() -> CmdResult {
             meta_stack_testing,
             for_bench,
         )?,
-        Service::RootServer {
+        Command::RootServer {
             primary_instance_id,
             secondary_instance_id,
             volume_id,
@@ -168,17 +186,21 @@ fn main() -> CmdResult {
             &volume_id,
             for_bench,
         )?,
-        Service::BenchServer {
+        Command::FormatNss {
+            testing_mode,
+            ebs_dev,
+        } => nss_server::format_nss(ebs_dev, testing_mode)?,
+        Command::BenchServer {
             service_endpoint,
             client_ips,
             api_server_ips,
         } => bench_server::bootstrap(service_endpoint, client_ips, api_server_ips)?,
-        Service::BenchClient { api_server_pair_ip } => bench_client::bootstrap(api_server_pair_ip)?,
+        Command::BenchClient { api_server_pair_ip } => bench_client::bootstrap(api_server_pair_ip)?,
     }
 
     run_cmd! {
         touch $BOOTSTRAP_DONE_FILE;
-        info "fractalbits-bootstrap is done";
+        info "fractalbits-bootstrap $command is done";
     }?;
     Ok(())
 }

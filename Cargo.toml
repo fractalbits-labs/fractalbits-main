@@ -13,7 +13,6 @@ members = [
     "root_server",
     "root_server/admin",
     "root_server/ebs-failover",
-    "tools/format-nss",
     "xtask",
     "xtask/tools",
 ]
@@ -83,7 +82,6 @@ openssl = { version = "0.10.72", features = ["vendored"]}
 aws-sdk-dynamodb = "1.78.0"
 aws-sdk-ec2 = "1.136.0"
 log = "0.4.27"
-systemd-journal-logger = "2.2.2"
 metrics = "0.24"
 metrics-exporter-statsd = "0.9.0"
 metrics-exporter-prometheus = "0.17.2"

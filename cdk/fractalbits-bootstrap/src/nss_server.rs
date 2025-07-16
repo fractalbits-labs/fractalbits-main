@@ -19,17 +19,14 @@ pub fn bootstrap(
         download_binaries(&["fbs", "test_art", "rewrk_rpc"])?;
     }
     format_local_nvme_disks(num_nvme_disks)?;
-    download_binaries(&["nss_server", "format-nss"])?;
+    download_binaries(&["nss_server"])?;
     setup_configs(bucket_name, volume_id, "nss_server")?;
 
     // Note for normal deployment, the nss_server service is not started
     // until EBS/nss formatted from root_server
     if meta_stack_testing {
         let volume_dev = get_volume_dev(volume_id);
-        run_cmd! {
-            info "Formatting nss with ebs $volume_dev (see detailed logs with `journalctl _COMM=format-nss`)";
-            /opt/fractalbits/bin/format-nss --testing_mode --ebs_dev $volume_dev;
-        }?;
+        format_nss(volume_dev, true)?;
     }
     Ok(())
 }
@@ -96,6 +93,71 @@ fn create_ebs_udev_rule(volume_id: &str, service_name: &str) -> CmdResult {
     run_cmd! {
         echo $content > $ETC_PATH/99-ebs.rules;
         ln -s $ETC_PATH/99-ebs.rules /etc/udev/rules.d/;
+    }?;
+
+    Ok(())
+}
+
+pub fn format_nss(ebs_dev: String, testing_mode: bool) -> CmdResult {
+    let fs_type = "ext4";
+    let mkfs_opts = ["-O", "bigalloc", "-C", "16384"];
+
+    run_cmd! {
+        info "Disabling udev rules for EBS";
+        ln -sf /dev/null /etc/udev/rules.d/99-ebs.rules;
+
+        info "Formatting $ebs_dev to $fs_type file system (${mkfs_opts:?})";
+        mkfs -t $fs_type $[mkfs_opts] $ebs_dev;
+
+        info "Mounting $ebs_dev to /data/ebs";
+        mkdir -p /data/ebs;
+        mount -t $fs_type $ebs_dev /data/ebs;
+    }?;
+
+    let mut wait_secs = 0;
+    while run_cmd!(mountpoint -q "/data/local").is_err() {
+        wait_secs += 1;
+        info!("Waiting for /data/local to be mounted ({wait_secs}s)");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        if wait_secs >= 120 {
+            cmd_die!("Timeout when waiting for /data/local to be mounted (120s)");
+        }
+    }
+
+    info!("Creating directories for nss_server");
+    for i in 0..256 {
+        run_cmd!(mkdir -p /data/local/meta_cache/blobs/dir$i)?;
+    }
+    run_cmd! {
+        info "Syncing file system changes";
+        sync;
+    }?;
+
+    run_cmd! {
+        info "Running format for nss_server";
+        cd /data;
+        /opt/fractalbits/bin/nss_server format -c /opt/fractalbits/etc/nss_server_cloud_config.toml;
+    }?;
+
+    if testing_mode {
+        run_cmd! {
+            cd /data;
+
+            info "Running nss fbs";
+            /opt/fractalbits/bin/fbs --new_tree $TEST_BUCKET_ROOT_BLOB_NAME;
+
+            info "Generating random 10_000_000 keys";
+            /opt/fractalbits/bin/test_art --gen --size 10000000;
+        }?;
+    }
+
+    run_cmd! {
+        info "Enabling udev rules for EBS";
+        ln -sf /opt/fractalbits/etc/99-ebs.rules /etc/udev/rules.d/99-ebs.rules;
+        udevadm control --reload-rules;
+        udevadm trigger;
+
+        info "${ebs_dev} is formatted successfully.";
     }?;
 
     Ok(())

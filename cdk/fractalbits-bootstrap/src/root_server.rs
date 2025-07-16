@@ -25,9 +25,12 @@ pub fn bootstrap(
     let ebs_dev = get_volume_dev(volume_id);
     wait_for_ssm_ready(primary_instance_id);
     let extra_opt = if for_bench { "--testing_mode" } else { "" };
+    let bootstrap_bin = "/opt/fractalbits/bin/fractalbits-bootstrap";
     run_cmd_with_ssm(
         primary_instance_id,
-        &format! {"sudo /opt/fractalbits/bin/format-nss --ebs_dev {ebs_dev} {extra_opt}"},
+        &format!(
+            r##"sudo bash -c "{bootstrap_bin} format_nss --ebs_dev {ebs_dev} {extra_opt} &>>{CLOUD_INIT_LOG}""##
+        ),
     )?;
 
     if secondary_instance_id != "null" {

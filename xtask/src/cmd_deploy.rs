@@ -73,7 +73,6 @@ pub fn run_cmd_deploy(
         "rss_admin",
         "fractalbits-bootstrap",
         "ebs-failover",
-        "format-nss",
         "rewrk_rpc",
         "xtask",
     ];

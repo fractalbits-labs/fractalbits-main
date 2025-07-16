@@ -276,7 +276,7 @@ fn create_cloudwatch_agent_config() -> CmdResult {
 }
 
 #[allow(dead_code)]
-pub fn setup_cloudwtach_agent() -> CmdResult {
+pub fn setup_cloudwatch_agent() -> CmdResult {
     create_cloudwatch_agent_config()?;
 
     run_cmd! {

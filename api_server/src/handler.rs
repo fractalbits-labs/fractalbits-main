@@ -72,7 +72,7 @@ pub async fn any_handler(
         match Endpoint::from_extractors(&request, &bucket, &key, api_cmd, api_sig.clone()) {
             Err(e) => {
                 let api_cmd = api_cmd.map_or("".into(), |cmd| cmd.to_string());
-                tracing::error!(
+                tracing::warn!(
                     %api_cmd,
                     %api_sig,
                     %bucket,

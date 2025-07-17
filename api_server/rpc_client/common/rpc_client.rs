@@ -120,7 +120,7 @@ impl RpcClient {
                 if let Err(e) =
                     Self::receive_message_task(socket_fd, receiver, &requests_clone).await
                 {
-                    error!(%socket_fd, "FATAL: receive message task error: {e}");
+                    warn!(%socket_fd, error=%e, "receive message task quit");
                 }
                 is_closed_clone.store(true, Ordering::SeqCst);
                 Self::drain_pending_requests(socket_fd, &requests_clone, DrainFrom::ReceiveTask);
@@ -135,7 +135,7 @@ impl RpcClient {
             let requests_clone = requests.clone();
             async move {
                 if let Err(e) = Self::send_message_task(socket_fd, sender, rx).await {
-                    error!(%socket_fd, "FATAL: send message task error: {e}");
+                    warn!(%socket_fd, error=%e, "send message task quit");
                 }
                 is_closed_clone.store(true, Ordering::SeqCst);
                 Self::drain_pending_requests(socket_fd, &requests_clone, DrainFrom::SendTask);
@@ -177,7 +177,7 @@ impl RpcClient {
                 warn!(%socket_fd, %request_id, "oneshot response send failed");
             }
         }
-        warn!(%socket_fd, "connection closed, receive_message_task quit");
+        warn!(%socket_fd, "connection closed, receive message task quit");
         Ok(())
     }
 
@@ -248,7 +248,7 @@ impl RpcClient {
         if pending_count > 0 {
             warn!(
                 %socket_fd,
-                "Draining {pending_count} pending requests from {} on connection close",
+                "draining {pending_count} pending requests from {} on connection close",
                 drain_from.as_ref()
             );
             gauge!("rpc_request_pending_in_resp_map", "type" => RPC_TYPE)

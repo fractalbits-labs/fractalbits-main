@@ -7,6 +7,7 @@ use crate::{
 use bytes::BytesMut;
 use metrics::histogram;
 use prost::Message as PbMessage;
+use rpc_client_common::ErrorRetryable;
 use tracing::{error, warn};
 
 include!(concat!(env!("OUT_DIR"), "/rss_ops.rs"));
@@ -36,7 +37,9 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="put", %request_id, %key, error=?e, "rss rpc failed");
+                if !e.retryable() {
+                    error!(rpc=%"put", %request_id, %key, error=?e, "rss rpc failed");
+                }
                 e
             })?
             .body;
@@ -51,13 +54,13 @@ impl RpcClient {
             put_response::Result::ErrOthers(resp) => {
                 histogram!("rss_rpc_nanos", "status" => "Put_ErrOthers")
                     .record(duration.as_nanos() as f64);
-                error!("rpc put for key {key} failed: {}", &resp);
+                error!(rpc=%"put", %key, "rss rpc failed: {resp}");
                 Err(RpcError::InternalResponseError(resp))
             }
             put_response::Result::ErrRetry(()) => {
                 histogram!("rss_rpc_nanos", "status" => "Put_ErrRetry")
                     .record(duration.as_nanos() as f64);
-                warn!("rpc put for key {key} failed, retry needed");
+                warn!(rpc=%"put", %key, "rss rpc failed, retry needed");
                 Err(RpcError::Retry)
             }
         }
@@ -98,7 +101,9 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="put", %request_id, %key, %extra_key, error=?e, "rss rpc failed");
+                if !e.retryable() {
+                    error!(rpc=%"put_with_extra", %request_id, %key, %extra_key, error=?e, "rss rpc failed");
+                }
                 e
             })?
             .body;
@@ -114,13 +119,13 @@ impl RpcClient {
             put_with_extra_response::Result::ErrOthers(resp) => {
                 histogram!("rss_rpc_nanos", "status" => "PutWithExtra_ErrOthers")
                     .record(duration.as_nanos() as f64);
-                error!("rpc put for key {key} and {extra_key} failed: {}", &resp);
+                error!("rpc put for key {key} and {extra_key} failed: {resp}");
                 Err(RpcError::InternalResponseError(resp))
             }
             put_with_extra_response::Result::ErrRetry(()) => {
                 histogram!("rss_rpc_nanos", "status" => "PutWithExtra_ErrRetry")
                     .record(duration.as_nanos() as f64);
-                warn!("rpc put for key {key} and {extra_key} failed, retry needed");
+                warn!(rpc=%"put_with_extra", %key, %extra_key, "rss rpc failed, retry needed");
                 Err(RpcError::Retry)
             }
         }
@@ -129,7 +134,9 @@ impl RpcClient {
     pub async fn get(&self, key: &str) -> Result<(i64, String), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get");
         let start = Instant::now();
-        let body = GetRequest { key: key.to_string() };
+        let body = GetRequest {
+            key: key.to_string(),
+        };
 
         let mut header = MessageHeader::default();
         let request_id = self.gen_request_id();
@@ -146,7 +153,9 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="get", %request_id, %key, error=?e, "rss rpc failed");
+                if !e.retryable() {
+                    error!(rpc=%"get", %request_id, %key, error=?e, "rss rpc failed");
+                }
                 e
             })?
             .body;
@@ -161,13 +170,13 @@ impl RpcClient {
             get_response::Result::ErrNotFound(_resp) => {
                 histogram!("rss_rpc_nanos", "status" => "Get_ErrNotFound")
                     .record(duration.as_nanos() as f64);
-                error!("could not find entry for key: {key}");
+                warn!(rpc=%"get", %key, "could not find entry");
                 Err(RpcError::NotFound)
             }
             get_response::Result::ErrOthers(resp) => {
                 histogram!("rss_rpc_nanos", "status" => "Get_ErrOthers")
                     .record(duration.as_nanos() as f64);
-                error!("rpc get for key {key} failed: {}", &resp);
+                error!(rpc=%"get", %key, "rss rpc failed: {resp}");
                 Err(RpcError::InternalResponseError(resp))
             }
         }
@@ -176,7 +185,9 @@ impl RpcClient {
     pub async fn delete(&self, key: &str) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "delete");
         let start = Instant::now();
-        let body = DeleteRequest { key: key.to_string() };
+        let body = DeleteRequest {
+            key: key.to_string(),
+        };
 
         let mut header = MessageHeader::default();
         let request_id = self.gen_request_id();
@@ -193,7 +204,7 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="delete", %request_id, %key, error=?e, "rss rpc failed");
+                error!(rpc=%"delete", %request_id, %key, error=?e, "rss rpc failed");
                 e
             })?
             .body;
@@ -208,7 +219,7 @@ impl RpcClient {
             delete_response::Result::Err(resp) => {
                 histogram!("rss_rpc_nanos", "status" => "Delete_Err")
                     .record(duration.as_nanos() as f64);
-                error!("rpc delete for key {key} failed: {}", &resp);
+                error!(rpc=%"delete", %key, "rss rpc failed: {resp}");
                 Err(RpcError::InternalResponseError(resp))
             }
         }
@@ -245,7 +256,9 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="delete_with_extra", %request_id, %key, %extra_key, error=?e, "rss rpc failed");
+                if !e.retryable() {
+                    error!(rpc=%"delete_with_extra", %request_id, %key, %extra_key, error=?e, "rss rpc failed");
+                }
                 e
             })?
             .body;
@@ -261,13 +274,13 @@ impl RpcClient {
             delete_with_extra_response::Result::ErrOthers(resp) => {
                 histogram!("rss_rpc_nanos", "status" => "DeleteWithExtra_ErrOthers")
                     .record(duration.as_nanos() as f64);
-                error!("rpc delete for key {key} and {extra_key} failed: {}", &resp);
+                error!(rpc=%"delete_with_extra", %key, %extra_key, "rss rpc failed: {resp}");
                 Err(RpcError::InternalResponseError(resp))
             }
             delete_with_extra_response::Result::ErrRetry(()) => {
                 histogram!("rss_rpc_nanos", "status" => "DeleteWithExtra_ErrRetry")
                     .record(duration.as_nanos() as f64);
-                warn!("rpc delete key {key} and {extra_key} failed, retry needed");
+                warn!(rpc=%"delete_with_extra", %key, %extra_key, "rss rpc failed, retry needed");
                 Err(RpcError::Retry)
             }
         }
@@ -295,7 +308,9 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="list", %request_id, %prefix, error=?e, "rss rpc failed");
+                if !e.retryable() {
+                    error!(rpc=%"list", %request_id, %prefix, error=?e, "rss rpc failed");
+                }
                 e
             })?
             .body;
@@ -310,7 +325,7 @@ impl RpcClient {
             list_response::Result::Err(resp) => {
                 histogram!("rss_rpc_nanos", "status" => "List_Err")
                     .record(duration.as_nanos() as f64);
-                error!("rpc list for prefix {prefix} failed: {}", &resp);
+                error!(rpc=%"list", %prefix, "rss rpc failed: {resp}");
                 Err(RpcError::InternalResponseError(resp))
             }
         }

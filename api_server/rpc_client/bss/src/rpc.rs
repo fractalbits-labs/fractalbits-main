@@ -30,7 +30,7 @@ impl RpcClient {
             .await
             .map_err(|e| {
                 if !e.retryable() {
-                    error!(rpc="put_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
+                    error!(rpc=%"put_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
                 }
                 e
             })?;
@@ -58,7 +58,7 @@ impl RpcClient {
             .await
             .map_err(|e| {
                 if !e.retryable() {
-                    error!(rpc="get_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
+                    error!(rpc=%"get_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
                 }
                 e
             })?;
@@ -83,7 +83,7 @@ impl RpcClient {
             .await
             .map_err(|e| {
                 if !e.retryable() {
-                    error!(rpc="delete_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
+                    error!(rpc=%"delete_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
                 }
                 e
             })?;

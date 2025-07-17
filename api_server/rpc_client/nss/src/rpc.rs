@@ -4,6 +4,7 @@ use crate::{
 };
 use bytes::{Bytes, BytesMut};
 use prost::Message as PbMessage;
+use rpc_client_common::ErrorRetryable;
 use tracing::error;
 
 include!(concat!(env!("OUT_DIR"), "/nss_ops.rs"));
@@ -39,7 +40,9 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="put_inode", %request_id, %root_blob_name, %key, error=?e, "nss rpc failed");
+                if !e.retryable() {
+                    error!(rpc=%"put_inode", %request_id, %root_blob_name, %key, error=?e, "nss rpc failed");
+                }
                 e
             })?
             .body;
@@ -76,7 +79,9 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="get_inode", %request_id, %root_blob_name, %key, error=?e, "nss rpc failed");
+                if !e.retryable() {
+                    error!(rpc=%"get_inode", %request_id, %root_blob_name, %key, error=?e, "nss rpc failed");
+                }
                 e
             })?
             .body;
@@ -123,7 +128,9 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="list_inodes", %request_id, %root_blob_name, %prefix, error=?e, "nss rpc failed");
+                if !e.retryable() {
+                    error!(rpc=%"list_inodes", %request_id, %root_blob_name, %prefix, error=?e, "nss rpc failed");
+                }
                 e
             })?
             .body;
@@ -160,7 +167,9 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="delete_inode", %request_id, %root_blob_name, %key, error=?e, "nss rpc failed");
+                if !e.retryable() {
+                    error!(rpc=%"delete_inode", %request_id, %root_blob_name, %key, error=?e, "nss rpc failed");
+                }
                 e
             })?
             .body;
@@ -193,7 +202,9 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="create_root_inode", %request_id, %bucket, error=?e, "nss rpc failed");
+                if !e.retryable() {
+                    error!(rpc=%"create_root_inode", %request_id, %bucket, error=?e, "nss rpc failed");
+                }
                 e
             })?
             .body;
@@ -226,7 +237,9 @@ impl RpcClient {
             .send_request(header.id, Message::Bytes(request_bytes.freeze()))
             .await
             .map_err(|e| {
-                error!(rpc="delete_root_inode", %request_id, %root_blob_name, error=?e, "nss rpc failed");
+                if !e.retryable() {
+                    error!(rpc=%"delete_root_inode", %request_id, %root_blob_name, error=?e, "nss rpc failed");
+                }
                 e
             })?
             .body;

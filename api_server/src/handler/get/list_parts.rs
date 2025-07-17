@@ -96,7 +96,7 @@ pub async fn list_parts_handler(
 ) -> Result<Response, S3Error> {
     let Query(query_opts): Query<QueryOpts> = request.into_parts().0.extract().await?;
     let max_parts = query_opts.max_parts.unwrap_or(1000);
-    let object = get_raw_object(&app, bucket.root_blob_name.clone(), key.clone()).await?;
+    let object = get_raw_object(&app, &bucket.root_blob_name, &key).await?;
     if object.version_id.simple().to_string() != query_opts.upload_id {
         return Err(S3Error::NoSuchUpload);
     }
@@ -135,11 +135,11 @@ async fn fetch_mpu_parts(
     let mpu_prefix = mpu_get_part_prefix(key.clone(), 0);
     let mpus = list_raw_objects(
         &app,
-        bucket.root_blob_name.clone(),
+        &bucket.root_blob_name,
         10000, // TODO: use max_parts and retry if there are not enough valid results
-        mpu_prefix,
-        "".into(),
-        "".into(),
+        &mpu_prefix,
+        "",
+        "",
         false,
     )
     .await?;

@@ -27,65 +27,65 @@ impl<T: Sized> From<(i64, T)> for Versioned<T> {
 #[async_trait]
 pub trait KvClient {
     type Error: std::error::Error;
-    async fn put(&self, key: String, value: Versioned<String>) -> Result<(), Self::Error>;
+    async fn put(&self, key: &str, value: &Versioned<String>) -> Result<(), Self::Error>;
     async fn put_with_extra(
         &self,
-        key: String,
-        value: Versioned<String>,
-        extra_key: String,
-        extra_value: Versioned<String>,
+        key: &str,
+        value: &Versioned<String>,
+        extra_key: &str,
+        extra_value: &Versioned<String>,
     ) -> Result<(), Self::Error>;
-    async fn get(&self, key: String) -> Result<Versioned<String>, Self::Error>;
-    async fn delete(&self, key: String) -> Result<(), Self::Error>;
+    async fn get(&self, key: &str) -> Result<Versioned<String>, Self::Error>;
+    async fn delete(&self, key: &str) -> Result<(), Self::Error>;
     async fn delete_with_extra(
         &self,
-        key: String,
-        extra_key: String,
-        extra_value: Versioned<String>,
+        key: &str,
+        extra_key: &str,
+        extra_value: &Versioned<String>,
     ) -> Result<(), Self::Error>;
-    async fn list(&self, prefix: String) -> Result<Vec<String>, Self::Error>;
+    async fn list(&self, prefix: &str) -> Result<Vec<String>, Self::Error>;
 }
 
 #[async_trait]
 impl<T: KvClient + Sync + Send> KvClient for Arc<T> {
     type Error = T::Error;
 
-    async fn put(&self, key: String, value: Versioned<String>) -> Result<(), Self::Error> {
+    async fn put(&self, key: &str, value: &Versioned<String>) -> Result<(), Self::Error> {
         self.deref().put(key, value).await
     }
 
     async fn put_with_extra(
         &self,
-        key: String,
-        value: Versioned<String>,
-        extra_key: String,
-        extra_value: Versioned<String>,
+        key: &str,
+        value: &Versioned<String>,
+        extra_key: &str,
+        extra_value: &Versioned<String>,
     ) -> Result<(), Self::Error> {
         self.deref()
             .put_with_extra(key, value, extra_key, extra_value)
             .await
     }
 
-    async fn get(&self, key: String) -> Result<Versioned<String>, Self::Error> {
+    async fn get(&self, key: &str) -> Result<Versioned<String>, Self::Error> {
         self.deref().get(key).await
     }
 
-    async fn delete(&self, key: String) -> Result<(), Self::Error> {
+    async fn delete(&self, key: &str) -> Result<(), Self::Error> {
         self.deref().delete(key).await
     }
 
     async fn delete_with_extra(
         &self,
-        key: String,
-        extra_key: String,
-        extra_value: Versioned<String>,
+        key: &str,
+        extra_key: &str,
+        extra_value: &Versioned<String>,
     ) -> Result<(), Self::Error> {
         self.deref()
             .delete_with_extra(key, extra_key, extra_value)
             .await
     }
 
-    async fn list(&self, prefix: String) -> Result<Vec<String>, Self::Error> {
+    async fn list(&self, prefix: &str) -> Result<Vec<String>, Self::Error> {
         self.deref().list(prefix).await
     }
 }
@@ -93,47 +93,47 @@ impl<T: KvClient + Sync + Send> KvClient for Arc<T> {
 #[async_trait]
 impl KvClient for RpcClientRss {
     type Error = RpcErrorRss;
-    async fn put(&self, key: String, value: Versioned<String>) -> Result<(), Self::Error> {
-        Self::put(self, value.version, key, value.data).await
+    async fn put(&self, key: &str, value: &Versioned<String>) -> Result<(), Self::Error> {
+        Self::put(self, value.version, key, &value.data).await
     }
 
-    async fn get(&self, key: String) -> Result<Versioned<String>, Self::Error> {
+    async fn get(&self, key: &str) -> Result<Versioned<String>, Self::Error> {
         Self::get(self, key).await.map(|x| x.into())
     }
 
-    async fn delete(&self, key: String) -> Result<(), Self::Error> {
+    async fn delete(&self, key: &str) -> Result<(), Self::Error> {
         Self::delete(self, key).await
     }
 
-    async fn list(&self, prefix: String) -> Result<Vec<String>, Self::Error> {
+    async fn list(&self, prefix: &str) -> Result<Vec<String>, Self::Error> {
         Self::list(self, prefix).await
     }
 
     async fn put_with_extra(
         &self,
-        key: String,
-        value: Versioned<String>,
-        extra_key: String,
-        extra_value: Versioned<String>,
+        key: &str,
+        value: &Versioned<String>,
+        extra_key: &str,
+        extra_value: &Versioned<String>,
     ) -> Result<(), Self::Error> {
         Self::put_with_extra(
             self,
             value.version,
             key,
-            value.data,
+            &value.data,
             extra_value.version,
             extra_key,
-            extra_value.data,
+            &extra_value.data,
         )
         .await
     }
 
     async fn delete_with_extra(
         &self,
-        key: String,
-        extra_key: String,
-        extra_value: Versioned<String>,
+        key: &str,
+        extra_key: &str,
+        extra_value: &Versioned<String>,
     ) -> Result<(), Self::Error> {
-        Self::delete_with_extra(self, key, extra_value.version, extra_key, extra_value.data).await
+        Self::delete_with_extra(self, key, extra_value.version, extra_key, &extra_value.data).await
     }
 }

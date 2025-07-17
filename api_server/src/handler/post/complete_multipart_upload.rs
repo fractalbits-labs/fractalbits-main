@@ -23,7 +23,7 @@ use crate::{
 use axum::{http::HeaderValue, response::Response};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use bucket_tables::bucket_table::Bucket;
-use bytes::Buf;
+use bytes::{Buf, Bytes};
 use crc32c::Crc32cHasher as Crc32c;
 use crc32fast::Hasher as Crc32;
 use md5::Digest;
@@ -229,7 +229,7 @@ pub async fn complete_multipart_upload_handler(
     let mut valid_part_numbers: HashSet<u32> =
         req_body.part.iter().map(|part| part.part_number).collect();
 
-    let mut object = get_raw_object(&app, bucket.root_blob_name.clone(), key.clone()).await?;
+    let mut object = get_raw_object(&app, &bucket.root_blob_name, &key).await?;
     if object.version_id.simple().to_string() != upload_id {
         return Err(S3Error::NoSuchVersion);
     }
@@ -241,11 +241,11 @@ pub async fn complete_multipart_upload_handler(
     let mpu_prefix = mpu_get_part_prefix(key.clone(), 0);
     let mpu_objs = list_raw_objects(
         &app,
-        bucket.root_blob_name.clone(),
+        &bucket.root_blob_name,
         max_parts,
-        mpu_prefix.clone(),
-        "".into(),
-        "".into(),
+        &mpu_prefix,
+        "",
+        "",
         false,
     )
     .await?;
@@ -283,14 +283,10 @@ pub async fn complete_multipart_upload_handler(
         headers,
         checksum: expected_checksum,
     }));
-    let new_object_bytes = to_bytes_in::<_, Error>(&object, Vec::new())?;
+    let new_object_bytes: Bytes = to_bytes_in::<_, Error>(&object, Vec::new())?.into();
     let resp = nss_rpc_retry!(
         app,
-        put_inode(
-            bucket.root_blob_name.clone(),
-            key.clone(),
-            new_object_bytes.clone().into()
-        )
+        put_inode(&bucket.root_blob_name, &key, new_object_bytes.clone())
     )
     .await?;
     match resp.result.unwrap() {

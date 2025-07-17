@@ -186,7 +186,7 @@ pub async fn get_object_attributes_handler(
     let mut parts = request.into_parts().0;
     let Query(_query_opts): Query<QueryOpts> = parts.extract().await?;
     let header_opts = HeaderOpts::from_headers(&parts.headers)?;
-    let obj = get_raw_object(&app, bucket.root_blob_name.clone(), key.clone()).await?;
+    let obj = get_raw_object(&app, &bucket.root_blob_name, &key).await?;
     let last_modified = time::format_http_date(obj.timestamp);
 
     let mut resp = GetObjectAttributesOutput::default();

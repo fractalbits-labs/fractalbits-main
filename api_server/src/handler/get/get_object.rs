@@ -93,7 +93,7 @@ pub async fn get_object_handler(
     let mut parts = request.into_parts().0;
     let Query(query_opts): Query<QueryOpts> = parts.extract().await?;
     let header_opts = HeaderOpts::from_headers(&parts.headers)?;
-    let object = get_raw_object(&app, bucket.root_blob_name.clone(), key.clone()).await?;
+    let object = get_raw_object(&app, &bucket.root_blob_name, &key).await?;
     let total_size = object.size()?;
     let range = parse_range_header(header_opts.range, total_size)?;
     let checksum_mode_enabled = header_opts.x_amz_checksum_mode_enabled;
@@ -194,14 +194,14 @@ pub async fn get_object_content(
                 Err(S3Error::InvalidObjectState)
             }
             MpuState::Completed(core_meta_data) => {
-                let mpu_prefix = mpu_get_part_prefix(key.clone(), 0);
+                let mpu_prefix = mpu_get_part_prefix(key, 0);
                 let mut mpus = list_raw_objects(
                     &app,
-                    bucket.root_blob_name.clone(),
+                    &bucket.root_blob_name,
                     10000,
-                    mpu_prefix,
-                    "".into(),
-                    "".into(),
+                    &mpu_prefix,
+                    "",
+                    "",
                     false,
                 )
                 .await?;
@@ -260,14 +260,14 @@ async fn get_object_range_content(
                 Err(S3Error::InvalidObjectState)
             }
             MpuState::Completed { .. } => {
-                let mpu_prefix = mpu_get_part_prefix(key.clone(), 0);
+                let mpu_prefix = mpu_get_part_prefix(key, 0);
                 let mpus = list_raw_objects(
                     &app,
-                    bucket.root_blob_name.clone(),
+                    &bucket.root_blob_name,
                     10000,
-                    mpu_prefix,
-                    "".into(),
-                    "".into(),
+                    &mpu_prefix,
+                    "",
+                    "",
                     false,
                 )
                 .await?;

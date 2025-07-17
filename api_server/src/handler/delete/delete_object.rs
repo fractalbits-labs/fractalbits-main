@@ -23,7 +23,7 @@ pub async fn delete_object_handler(
     key: String,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
-    let resp = nss_rpc_retry!(app, delete_inode(bucket.root_blob_name.clone(), key.clone())).await?;
+    let resp = nss_rpc_retry!(app, delete_inode(&bucket.root_blob_name, &key)).await?;
 
     let object_bytes = match resp.result.unwrap() {
         // S3 allow delete non-existing object
@@ -60,20 +60,16 @@ pub async fn delete_object_handler(
                 let mpu_prefix = mpu_get_part_prefix(key, 0);
                 let mpus = list_raw_objects(
                     &app,
-                    bucket.root_blob_name.clone(),
+                    &bucket.root_blob_name,
                     10000,
-                    mpu_prefix,
-                    "".into(),
-                    "".into(),
+                    &mpu_prefix,
+                    "",
+                    "",
                     false,
                 )
                 .await?;
                 for (mpu_key, mpu_obj) in mpus.iter() {
-                    nss_rpc_retry!(
-                        app,
-                        delete_inode(bucket.root_blob_name.clone(), mpu_key.clone())
-                    )
-                    .await?;
+                    nss_rpc_retry!(app, delete_inode(&bucket.root_blob_name, &mpu_key)).await?;
                     delete_blob(mpu_obj, blob_deletion.clone()).await?;
                 }
             }

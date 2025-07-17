@@ -33,7 +33,7 @@ pub async fn delete_bucket_handler(
         api_key.data.key_id.clone()
     };
 
-    let resp = nss_rpc_retry!(app, delete_root_inode(bucket.root_blob_name.clone())).await?;
+    let resp = nss_rpc_retry!(app, delete_root_inode(&bucket.root_blob_name)).await?;
     match resp.result.unwrap() {
         delete_root_inode_response::Result::Ok(res) => res,
         delete_root_inode_response::Result::ErrNotEmpty(_e) => {

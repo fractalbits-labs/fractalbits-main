@@ -136,7 +136,7 @@ async fn benchmark_nss_read(
             let future = async move {
                 let request_start = Instant::now();
                 let result = rpc_client
-                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME.into(), key.clone())
+                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key)
                     .await
                     .map(|_| ())
                     .map_err(|e| anyhow::anyhow!(e));
@@ -172,7 +172,7 @@ async fn benchmark_nss_read(
             let future = async move {
                 let request_start = Instant::now();
                 let result = rpc_client
-                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME.into(), key.clone())
+                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key)
                     .await
                     .map(|_| ())
                     .map_err(|e| anyhow::anyhow!(e));
@@ -367,12 +367,11 @@ async fn benchmark_nss_write(
     for _ in 0..io_depth {
         if let Some(key) = keys.pop_front() {
             let rpc_client = rpc_client.clone();
-            let key_for_rpc = key.clone();
             let value = Bytes::from(vec![b'i'; INODE_SIZE]);
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
                 let result = rpc_client
-                    .put_inode(TEST_BUCKET_ROOT_BLOB_NAME.into(), key_for_rpc, value)
+                    .put_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, value)
                     .await
                     .map(|_| ()) // Map Ok(PutInodeResponse) to Ok(())
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorNss to anyhow::Error
@@ -404,12 +403,11 @@ async fn benchmark_nss_write(
         // If there are more keys, add a new request to maintain io_depth
         if let Some(key) = keys.pop_front() {
             let rpc_client = rpc_client.clone();
-            let key_for_rpc = key.clone();
-            let value = Bytes::from(key_for_rpc.clone());
+            let value = Bytes::from(vec![b'i'; INODE_SIZE]);
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
                 let result = rpc_client
-                    .put_inode(TEST_BUCKET_ROOT_BLOB_NAME.into(), key_for_rpc, value)
+                    .put_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, value)
                     .await
                     .map(|_| ()) // Map Ok(PutInodeResponse) to Ok(())
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorNss to anyhow::Error

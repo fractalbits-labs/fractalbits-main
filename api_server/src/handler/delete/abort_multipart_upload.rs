@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use rpc_client_common::{nss_rpc_retry, rpc_retry};
 use std::sync::Arc;
 
@@ -19,7 +20,7 @@ pub async fn abort_multipart_upload_handler(
     key: String,
     _upload_id: String,
 ) -> Result<Response, S3Error> {
-    let resp = nss_rpc_retry!(app, get_inode(bucket.root_blob_name.clone(), key.clone())).await?;
+    let resp = nss_rpc_retry!(app, get_inode(&bucket.root_blob_name, &key)).await?;
 
     let object_bytes = match resp.result.unwrap() {
         get_inode_response::Result::Ok(res) => res,
@@ -35,15 +36,11 @@ pub async fn abort_multipart_upload_handler(
     // TODO: check upload_id and also do more clean ups and checks
     let mut object = rkyv::from_bytes::<ObjectLayout, Error>(&object_bytes)?;
     object.state = ObjectState::Mpu(MpuState::Aborted);
-    let new_object_bytes = to_bytes_in::<_, Error>(&object, Vec::new())?;
+    let new_object_bytes: Bytes = to_bytes_in::<_, Error>(&object, Vec::new())?.into();
 
     let resp = nss_rpc_retry!(
         app,
-        put_inode(
-            bucket.root_blob_name.clone(),
-            key.clone(),
-            new_object_bytes.clone().into()
-        )
+        put_inode(&bucket.root_blob_name, &key, new_object_bytes.clone())
     )
     .await?;
     match resp.result.unwrap() {

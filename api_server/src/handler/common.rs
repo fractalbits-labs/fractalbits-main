@@ -27,10 +27,10 @@ use signature::checksum::add_checksum_response_headers;
 
 pub async fn get_raw_object(
     app: &AppState,
-    root_blob_name: String,
-    key: String,
+    root_blob_name: &str,
+    key: &str,
 ) -> Result<ObjectLayout, S3Error> {
-    let resp = nss_rpc_retry!(app, get_inode(root_blob_name.clone(), key.clone())).await?;
+    let resp = nss_rpc_retry!(app, get_inode(root_blob_name, key)).await?;
 
     let object_bytes = match resp.result.unwrap() {
         get_inode_response::Result::Ok(res) => res,
@@ -49,21 +49,21 @@ pub async fn get_raw_object(
 
 pub async fn list_raw_objects(
     app: &AppState,
-    root_blob_name: String,
+    root_blob_name: &str,
     max_parts: u32,
-    prefix: String,
-    delimiter: String,
-    start_after: String,
+    prefix: &str,
+    delimiter: &str,
+    start_after: &str,
     skip_mpu_parts: bool,
 ) -> Result<Vec<(String, ObjectLayout)>, S3Error> {
     let resp = nss_rpc_retry!(
         app,
         list_inodes(
-            root_blob_name.clone(),
+            &root_blob_name,
             max_parts,
-            prefix.clone(),
-            delimiter.clone(),
-            start_after.clone(),
+            &prefix,
+            &delimiter,
+            &start_after,
             skip_mpu_parts
         )
     )

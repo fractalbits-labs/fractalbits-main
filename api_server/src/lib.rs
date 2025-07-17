@@ -274,7 +274,7 @@ impl BlobClient {
             self.client_s3
                 .put_object()
                 .bucket(&self.s3_cache_bucket)
-                .key(s3_key)
+                .key(&s3_key)
                 .body(body.clone().into())
                 .send(),
             bss_rpc_retry!(self, put_blob(blob_id, block_number, body.clone()))

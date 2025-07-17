@@ -78,7 +78,7 @@ pub async fn create_bucket_handler(
         }
     }
 
-    let resp = nss_rpc_retry!(app, create_root_inode(bucket_name.clone())).await?;
+    let resp = nss_rpc_retry!(app, create_root_inode(&bucket_name)).await?;
     let root_blob_name = match resp.result.unwrap() {
         create_root_inode_response::Result::Ok(res) => res,
         create_root_inode_response::Result::Err(e) => {

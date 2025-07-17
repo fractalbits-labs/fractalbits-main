@@ -264,11 +264,11 @@ pub async fn list_objects(
     let resp = nss_rpc_retry!(
         app,
         list_inodes(
-            bucket.root_blob_name.clone(),
+            &bucket.root_blob_name,
             max_keys,
-            prefix.clone(),
-            delimiter.clone(),
-            start_after.clone(),
+            &prefix,
+            &delimiter,
+            &start_after,
             true
         )
     )

@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use rpc_client_common::{nss_rpc_retry, rpc_retry};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -57,14 +58,10 @@ pub async fn create_multipart_upload_handler(
         timestamp,
         state: ObjectState::Mpu(MpuState::Uploading),
     };
-    let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new())?;
+    let object_layout_bytes: Bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new())?.into();
     let _resp = nss_rpc_retry!(
         app,
-        put_inode(
-            bucket.root_blob_name.clone(),
-            key.clone(),
-            object_layout_bytes.clone().into()
-        )
+        put_inode(&bucket.root_blob_name, &key, object_layout_bytes.clone())
     )
     .await?;
     let init_mpu_res = InitiateMultipartUploadResult {

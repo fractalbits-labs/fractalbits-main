@@ -12,13 +12,13 @@ use tracing::{error, warn};
 include!(concat!(env!("OUT_DIR"), "/rss_ops.rs"));
 
 impl RpcClient {
-    pub async fn put(&self, version: i64, key: String, value: String) -> Result<(), RpcError> {
+    pub async fn put(&self, version: i64, key: &str, value: &str) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "put");
         let start = Instant::now();
         let body = PutRequest {
             version,
-            key: key.clone(),
-            value,
+            key: key.to_string(),
+            value: value.to_string(),
         };
 
         let mut header = MessageHeader::default();
@@ -66,21 +66,21 @@ impl RpcClient {
     pub async fn put_with_extra(
         &self,
         version: i64,
-        key: String,
-        value: String,
+        key: &str,
+        value: &str,
         extra_version: i64,
-        extra_key: String,
-        extra_value: String,
+        extra_key: &str,
+        extra_value: &str,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "put_with_extra");
         let start = Instant::now();
         let body = PutWithExtraRequest {
             version,
-            key: key.clone(),
-            value,
+            key: key.to_string(),
+            value: value.to_string(),
             extra_version,
-            extra_key: extra_key.clone(),
-            extra_value,
+            extra_key: extra_key.to_string(),
+            extra_value: extra_value.to_string(),
         };
 
         let mut header = MessageHeader::default();
@@ -126,10 +126,10 @@ impl RpcClient {
         }
     }
 
-    pub async fn get(&self, key: String) -> Result<(i64, String), RpcError> {
+    pub async fn get(&self, key: &str) -> Result<(i64, String), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get");
         let start = Instant::now();
-        let body = GetRequest { key: key.clone() };
+        let body = GetRequest { key: key.to_string() };
 
         let mut header = MessageHeader::default();
         let request_id = self.gen_request_id();
@@ -173,10 +173,10 @@ impl RpcClient {
         }
     }
 
-    pub async fn delete(&self, key: String) -> Result<(), RpcError> {
+    pub async fn delete(&self, key: &str) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "delete");
         let start = Instant::now();
-        let body = DeleteRequest { key: key.clone() };
+        let body = DeleteRequest { key: key.to_string() };
 
         let mut header = MessageHeader::default();
         let request_id = self.gen_request_id();
@@ -216,18 +216,18 @@ impl RpcClient {
 
     pub async fn delete_with_extra(
         &self,
-        key: String,
+        key: &str,
         extra_version: i64,
-        extra_key: String,
-        extra_value: String,
+        extra_key: &str,
+        extra_value: &str,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "delete_with_extra");
         let start = Instant::now();
         let body = DeleteWithExtraRequest {
-            key: key.clone(),
+            key: key.to_string(),
             extra_version,
-            extra_key: extra_key.clone(),
-            extra_value,
+            extra_key: extra_key.to_string(),
+            extra_value: extra_value.to_string(),
         };
 
         let mut header = MessageHeader::default();
@@ -273,11 +273,11 @@ impl RpcClient {
         }
     }
 
-    pub async fn list(&self, prefix: String) -> Result<Vec<String>, RpcError> {
+    pub async fn list(&self, prefix: &str) -> Result<Vec<String>, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "list");
         let start = Instant::now();
         let body = ListRequest {
-            prefix: prefix.clone(),
+            prefix: prefix.to_string(),
         };
 
         let mut header = MessageHeader::default();

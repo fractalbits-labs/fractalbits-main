@@ -34,6 +34,37 @@ use uuid::Uuid;
 
 pub type BlobId = uuid::Uuid;
 
+#[macro_export]
+macro_rules! rpc_retry {
+    ($pool:expr, $addr:expr, $client_ident:ident, $call:expr) => {
+        async {
+            let mut retries = 3;
+            let mut backoff = std::time::Duration::from_millis(5);
+            loop {
+                let $client_ident = $pool.checkout($addr).await.unwrap();
+                match $call.await {
+                    Ok(val) => return Ok(val),
+                    Err(e) => {
+                        if e.is_retryable() && retries > 0 {
+                            retries -= 1;
+                            tokio::time::sleep(backoff).await;
+                            backoff = backoff.saturating_mul(2);
+                        } else {
+                            if e.is_retryable() {
+                                tracing::error!(
+                                    "RPC call failed after multiple retries. Error: {}",
+                                    e
+                                );
+                            }
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+        }
+    };
+}
+
 pub struct AppState {
     pub config: ArcConfig,
     pub cache: Arc<Cache<String, Versioned<String>>>,
@@ -224,10 +255,13 @@ impl BlobClient {
                 .map(|block_number| {
                     let clients_bss = clients_bss.clone();
                     async move {
-                        let rpc_client_bss = clients_bss.checkout(bss_addr).await.unwrap();
-                        let res = rpc_client_bss
-                            .delete_blob(blob_id, block_number as u32)
-                            .await;
+                        let res = rpc_retry!(
+                            clients_bss,
+                            bss_addr,
+                            rpc_client_bss,
+                            rpc_client_bss.delete_blob(blob_id, block_number as u32)
+                        )
+                        .await;
                         match res {
                             Ok(()) => 1,
                             Err(e) => {
@@ -255,11 +289,14 @@ impl BlobClient {
         body: Bytes,
     ) -> Result<usize, RpcErrorBss> {
         let start = Instant::now();
-        let rpc_client_bss = self.clients_bss.checkout(self.bss_addr).await.unwrap();
-        histogram!("checkout_rpc_client_nanos", "type" => "bss")
-            .record(start.elapsed().as_nanos() as f64);
         if block_number == 0 && body.len() < ObjectLayout::DEFAULT_BLOCK_SIZE as usize {
-            let res = rpc_client_bss.put_blob(blob_id, block_number, body).await;
+            let res = rpc_retry!(
+                self.clients_bss,
+                self.bss_addr,
+                rpc_client_bss,
+                rpc_client_bss.put_blob(blob_id, block_number, body.clone())
+            )
+            .await;
             return res;
         }
 
@@ -271,7 +308,12 @@ impl BlobClient {
                 .key(s3_key)
                 .body(body.clone().into())
                 .send(),
-            rpc_client_bss.put_blob(blob_id, block_number, body)
+            rpc_retry!(
+                self.clients_bss,
+                self.bss_addr,
+                rpc_client_bss,
+                rpc_client_bss.put_blob(blob_id, block_number, body.clone())
+            )
         );
         histogram!("rpc_duration_nanos", "type"  => "bss_s3_join",  "name" => "put_blob_join_with_s3")
             .record(start.elapsed().as_nanos() as f64);
@@ -285,26 +327,29 @@ impl BlobClient {
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<usize, RpcErrorBss> {
-        let start = Instant::now();
-        let rpc_client_bss = self.clients_bss.checkout(self.bss_addr).await.unwrap();
-        histogram!("checkout_rpc_client_nanos", "type" => "bss")
-            .record(start.elapsed().as_nanos() as f64);
-        rpc_client_bss.get_blob(blob_id, block_number, body).await
+        rpc_retry!(
+            self.clients_bss,
+            self.bss_addr,
+            rpc_client_bss,
+            rpc_client_bss.get_blob(blob_id, block_number, body)
+        )
+        .await
     }
 
     pub async fn delete_blob(&self, blob_id: Uuid, block_number: u32) -> Result<(), RpcErrorBss> {
-        let start = Instant::now();
         let s3_key = format!("{blob_id}-{block_number}");
-        let rpc_client_bss = self.clients_bss.checkout(self.bss_addr).await.unwrap();
-        histogram!("checkout_rpc_client_nanos", "type" => "bss")
-            .record(start.elapsed().as_nanos() as f64);
         let (res_s3, res_bss) = tokio::join!(
             self.client_s3
                 .delete_object()
                 .bucket(&self.s3_cache_bucket)
                 .key(&s3_key)
                 .send(),
-            rpc_client_bss.delete_blob(blob_id, block_number)
+            rpc_retry!(
+                self.clients_bss,
+                self.bss_addr,
+                rpc_client_bss,
+                rpc_client_bss.delete_blob(blob_id, block_number)
+            )
         );
         if let Err(e) = res_s3 {
             // note this blob may not be uploaded to s3 yet

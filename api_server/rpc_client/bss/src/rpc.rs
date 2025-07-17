@@ -28,7 +28,9 @@ impl RpcClient {
             .send_request(header.id, Message::Frame(msg_frame))
             .await
             .map_err(|e| {
-                error!(rpc="put_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
+                if !e.is_retryable() {
+                    error!(rpc="put_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
+                }
                 e
             })?;
         Ok(resp.header.result as usize)
@@ -54,7 +56,9 @@ impl RpcClient {
             .send_request(header.id, Message::Frame(msg_frame))
             .await
             .map_err(|e| {
-                error!(rpc="get_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
+                if !e.is_retryable() {
+                    error!(rpc="get_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
+                }
                 e
             })?;
         let size = resp.header.result;
@@ -77,7 +81,9 @@ impl RpcClient {
             .send_request(header.id, Message::Frame(msg_frame))
             .await
             .map_err(|e| {
-                error!(rpc="delete_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
+                if !e.is_retryable() {
+                    error!(rpc="delete_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
+                }
                 e
             })?;
         Ok(())

@@ -71,6 +71,12 @@ impl<T> From<mpsc::error::SendError<T>> for RpcError {
     }
 }
 
+impl RpcError {
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, RpcError::OneshotRecvError(_))
+    }
+}
+
 pub enum Message {
     Frame(MessageFrame),
     Bytes(Bytes),
@@ -90,7 +96,6 @@ impl Drop for RpcClient {
     fn drop(&mut self) {
         // Just try to make metrics (`rpc_request_pending_in_resp_map`) accurate
         Self::drain_pending_requests(self.socket_fd, &self.requests, DrainFrom::RpcClient);
-        warn!(socket_fd=%self.socket_fd, "rpc client is closed and dropped");
     }
 }
 

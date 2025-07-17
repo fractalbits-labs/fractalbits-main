@@ -1,3 +1,4 @@
+use rpc_client_common::{nss_rpc_retry, rpc_retry};
 use std::hash::Hasher;
 use std::{collections::HashSet, sync::Arc};
 
@@ -283,15 +284,15 @@ pub async fn complete_multipart_upload_handler(
         checksum: expected_checksum,
     }));
     let new_object_bytes = to_bytes_in::<_, Error>(&object, Vec::new())?;
-    let rpc_client_nss = app.checkout_rpc_client_nss().await;
-    let resp = rpc_client_nss
-        .put_inode(
+    let resp = nss_rpc_retry!(
+        app,
+        put_inode(
             bucket.root_blob_name.clone(),
             key.clone(),
-            new_object_bytes.into(),
+            new_object_bytes.clone().into()
         )
-        .await?;
-    drop(rpc_client_nss);
+    )
+    .await?;
     match resp.result.unwrap() {
         put_inode_response::Result::Ok(_) => {}
         put_inode_response::Result::Err(e) => {

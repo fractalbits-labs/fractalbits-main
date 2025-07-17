@@ -17,8 +17,10 @@ use moka::future::Cache;
 use object_layout::ObjectLayout;
 use rpc_client_bss::{RpcClientBss, RpcErrorBss};
 use rpc_client_nss::RpcClientNss;
+use rpc_client_rss::{RpcClientRss, RpcErrorRss};
 
-use slotmap_conn_pool::ConnPool;
+use rpc_client_common::{bss_rpc_retry, rpc_retry};
+use slotmap_conn_pool::{ConnPool, Poolable};
 use std::{
     net::SocketAddr,
     sync::Arc,
@@ -34,43 +36,12 @@ use uuid::Uuid;
 
 pub type BlobId = uuid::Uuid;
 
-#[macro_export]
-macro_rules! rpc_retry {
-    ($pool:expr, $addr:expr, $client_ident:ident, $call:expr) => {
-        async {
-            let mut retries = 3;
-            let mut backoff = std::time::Duration::from_millis(5);
-            loop {
-                let $client_ident = $pool.checkout($addr).await.unwrap();
-                match $call.await {
-                    Ok(val) => return Ok(val),
-                    Err(e) => {
-                        if e.is_retryable() && retries > 0 {
-                            retries -= 1;
-                            tokio::time::sleep(backoff).await;
-                            backoff = backoff.saturating_mul(2);
-                        } else {
-                            if e.is_retryable() {
-                                tracing::error!(
-                                    "RPC call failed after multiple retries. Error: {}",
-                                    e
-                                );
-                            }
-                            return Err(e);
-                        }
-                    }
-                }
-            }
-        }
-    };
-}
-
 pub struct AppState {
     pub config: ArcConfig,
     pub cache: Arc<Cache<String, Versioned<String>>>,
 
     rpc_clients_nss: ConnPool<Arc<RpcClientNss>, SocketAddr>,
-    rpc_clients_rss: ConnPool<Arc<rpc_client_rss::RpcClientRss>, SocketAddr>,
+    rpc_clients_rss: ConnPool<Arc<RpcClientRss>, SocketAddr>,
 
     blob_client: Arc<BlobClient>,
     blob_deletion: Sender<(BlobId, usize)>,
@@ -83,10 +54,19 @@ impl FromRef<Arc<AppState>> for ArcConfig {
 }
 
 impl KvClientProvider for AppState {
-    type Error = rpc_client_rss::RpcErrorRss;
+    type Error = RpcErrorRss;
 
-    async fn get_client(&self) -> impl kv_client_traits::KvClient<Error = Self::Error> {
-        self.checkout_rpc_client_rss().await
+    async fn checkout_rpc_client_rss(
+        &self,
+    ) -> Result<
+        impl kv_client_traits::KvClient<Error = Self::Error>,
+        <RpcClientRss as Poolable>::Error,
+    > {
+        let start = Instant::now();
+        let res = self.rpc_clients_rss.checkout(self.config.rss_addr).await?;
+        histogram!("checkout_rpc_client_nanos", "type" => "rss")
+            .record(start.elapsed().as_nanos() as f64);
+        Ok(res)
     }
 }
 
@@ -136,11 +116,11 @@ impl AppState {
 
     async fn new_rpc_clients_pool_rss(
         rss_addr: SocketAddr,
-    ) -> ConnPool<Arc<rpc_client_rss::RpcClientRss>, SocketAddr> {
+    ) -> ConnPool<Arc<RpcClientRss>, SocketAddr> {
         let rpc_clients_rss = ConnPool::new();
         for _ in 0..Self::RSS_CONNECTION_POOL_SIZE {
             let stream = TcpStream::connect(rss_addr).await.unwrap();
-            let client = Arc::new(rpc_client_rss::RpcClientRss::new(stream).await.unwrap());
+            let client = Arc::new(RpcClientRss::new(stream).await.unwrap());
             rpc_clients_rss.pooled(rss_addr, client);
         }
 
@@ -151,37 +131,23 @@ impl AppState {
         rpc_clients_rss
     }
 
-    pub async fn checkout_rpc_client_nss(&self) -> Arc<RpcClientNss> {
+    pub async fn checkout_rpc_client_nss(
+        &self,
+    ) -> Result<Arc<RpcClientNss>, <RpcClientNss as Poolable>::Error> {
         let start = Instant::now();
-        let res = self
-            .rpc_clients_nss
-            .checkout(self.config.nss_addr)
-            .await
-            .unwrap();
+        let res = self.rpc_clients_nss.checkout(self.config.nss_addr).await?;
         histogram!("checkout_rpc_client_nanos", "type" => "nss")
             .record(start.elapsed().as_nanos() as f64);
-        res
+        Ok(res)
     }
 
     pub fn get_blob_client(&self) -> Arc<BlobClient> {
         self.blob_client.clone()
     }
-
-    pub async fn checkout_rpc_client_rss(&self) -> Arc<rpc_client_rss::RpcClientRss> {
-        let start = Instant::now();
-        let res = self
-            .rpc_clients_rss
-            .checkout(self.config.rss_addr)
-            .await
-            .unwrap();
-        histogram!("checkout_rpc_client_nanos", "type" => "rss")
-            .record(start.elapsed().as_nanos() as f64);
-        res
-    }
 }
 
 pub struct BlobClient {
-    clients_bss: ConnPool<Arc<RpcClientBss>, SocketAddr>,
+    rpc_clients_bss: ConnPool<Arc<RpcClientBss>, SocketAddr>,
     client_s3: S3Client,
     s3_cache_bucket: String,
     #[allow(dead_code)]
@@ -237,12 +203,22 @@ impl BlobClient {
         });
 
         Self {
-            clients_bss,
+            rpc_clients_bss: clients_bss,
             client_s3,
             s3_cache_bucket: config.s3_bucket.clone(),
             blob_deletion_task_handle,
             bss_addr,
         }
+    }
+
+    pub async fn checkout_rpc_client_bss(
+        &self,
+    ) -> Result<Arc<RpcClientBss>, <RpcClientBss as Poolable>::Error> {
+        let start = Instant::now();
+        let res = self.rpc_clients_bss.checkout(self.bss_addr).await?;
+        histogram!("checkout_rpc_client_nanos", "type" => "bss")
+            .record(start.elapsed().as_nanos() as f64);
+        Ok(res)
     }
 
     async fn blob_deletion_task(
@@ -257,9 +233,8 @@ impl BlobClient {
                     async move {
                         let res = rpc_retry!(
                             clients_bss,
-                            bss_addr,
-                            rpc_client_bss,
-                            rpc_client_bss.delete_blob(blob_id, block_number as u32)
+                            checkout(bss_addr),
+                            delete_blob(blob_id, block_number as u32)
                         )
                         .await;
                         match res {
@@ -290,13 +265,7 @@ impl BlobClient {
     ) -> Result<usize, RpcErrorBss> {
         let start = Instant::now();
         if block_number == 0 && body.len() < ObjectLayout::DEFAULT_BLOCK_SIZE as usize {
-            let res = rpc_retry!(
-                self.clients_bss,
-                self.bss_addr,
-                rpc_client_bss,
-                rpc_client_bss.put_blob(blob_id, block_number, body.clone())
-            )
-            .await;
+            let res = bss_rpc_retry!(self, put_blob(blob_id, block_number, body.clone())).await;
             return res;
         }
 
@@ -308,12 +277,7 @@ impl BlobClient {
                 .key(s3_key)
                 .body(body.clone().into())
                 .send(),
-            rpc_retry!(
-                self.clients_bss,
-                self.bss_addr,
-                rpc_client_bss,
-                rpc_client_bss.put_blob(blob_id, block_number, body.clone())
-            )
+            bss_rpc_retry!(self, put_blob(blob_id, block_number, body.clone()))
         );
         histogram!("rpc_duration_nanos", "type"  => "bss_s3_join",  "name" => "put_blob_join_with_s3")
             .record(start.elapsed().as_nanos() as f64);
@@ -327,13 +291,7 @@ impl BlobClient {
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<usize, RpcErrorBss> {
-        rpc_retry!(
-            self.clients_bss,
-            self.bss_addr,
-            rpc_client_bss,
-            rpc_client_bss.get_blob(blob_id, block_number, body)
-        )
-        .await
+        bss_rpc_retry!(self, get_blob(blob_id, block_number, body)).await
     }
 
     pub async fn delete_blob(&self, blob_id: Uuid, block_number: u32) -> Result<(), RpcErrorBss> {
@@ -344,12 +302,7 @@ impl BlobClient {
                 .bucket(&self.s3_cache_bucket)
                 .key(&s3_key)
                 .send(),
-            rpc_retry!(
-                self.clients_bss,
-                self.bss_addr,
-                rpc_client_bss,
-                rpc_client_bss.delete_blob(blob_id, block_number)
-            )
+            bss_rpc_retry!(self, delete_blob(blob_id, block_number))
         );
         if let Err(e) = res_s3 {
             // note this blob may not be uploaded to s3 yet

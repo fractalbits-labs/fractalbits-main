@@ -1,0 +1,10 @@
+[package]
+name = "rpc_client_common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+slotmap_conn_pool.workspace = true

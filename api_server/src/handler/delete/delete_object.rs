@@ -1,3 +1,4 @@
+use rpc_client_common::{nss_rpc_retry, rpc_retry};
 use std::sync::Arc;
 
 use axum::{
@@ -22,10 +23,7 @@ pub async fn delete_object_handler(
     key: String,
     blob_deletion: Sender<(BlobId, usize)>,
 ) -> Result<Response, S3Error> {
-    let rpc_client_nss = app.checkout_rpc_client_nss().await;
-    let resp = rpc_client_nss
-        .delete_inode(bucket.root_blob_name.clone(), key.clone())
-        .await?;
+    let resp = nss_rpc_retry!(app, delete_inode(bucket.root_blob_name.clone(), key.clone())).await?;
 
     let object_bytes = match resp.result.unwrap() {
         // S3 allow delete non-existing object
@@ -71,9 +69,11 @@ pub async fn delete_object_handler(
                 )
                 .await?;
                 for (mpu_key, mpu_obj) in mpus.iter() {
-                    rpc_client_nss
-                        .delete_inode(bucket.root_blob_name.clone(), mpu_key.clone())
-                        .await?;
+                    nss_rpc_retry!(
+                        app,
+                        delete_inode(bucket.root_blob_name.clone(), mpu_key.clone())
+                    )
+                    .await?;
                     delete_blob(mpu_obj, blob_deletion.clone()).await?;
                 }
             }

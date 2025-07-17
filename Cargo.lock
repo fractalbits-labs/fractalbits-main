@@ -167,6 +167,7 @@ dependencies = [
  "rand 0.8.5",
  "rkyv",
  "rpc_client_bss",
+ "rpc_client_common",
  "rpc_client_nss",
  "rpc_client_rss",
  "rstest",
@@ -1000,6 +1001,7 @@ dependencies = [
  "metrics",
  "moka",
  "rand 0.8.5",
+ "rpc_client_common",
  "serde",
  "serde_json",
  "tokio",
@@ -3560,6 +3562,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-statsd",
  "parking_lot",
+ "rpc_client_common",
  "slotmap_conn_pool",
  "strum",
  "thiserror 1.0.69",
@@ -3573,6 +3576,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpc_client_common"
+version = "0.1.0"
+dependencies = [
+ "slotmap_conn_pool",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "rpc_client_nss"
 version = "0.1.0"
 dependencies = [
@@ -3583,6 +3596,7 @@ dependencies = [
  "parking_lot",
  "prost",
  "prost-build",
+ "rpc_client_common",
  "serde",
  "slotmap_conn_pool",
  "strum",
@@ -3605,6 +3619,7 @@ dependencies = [
  "parking_lot",
  "prost",
  "prost-build",
+ "rpc_client_common",
  "serde",
  "slotmap_conn_pool",
  "strum",
@@ -3629,6 +3644,7 @@ dependencies = [
  "clap 4.5.27",
  "kv_client_traits",
  "openssl",
+ "rpc_client_common",
  "strum",
  "thiserror 1.0.69",
  "tokio",

@@ -4,6 +4,7 @@ use crate::{
     rpc_client::{InflightRpcGuard, Message, RpcClient, RpcError},
 };
 use bytes::Bytes;
+use rpc_client_common::ErrorRetryable;
 use tracing::error;
 use uuid::Uuid;
 
@@ -28,7 +29,7 @@ impl RpcClient {
             .send_request(header.id, Message::Frame(msg_frame))
             .await
             .map_err(|e| {
-                if !e.is_retryable() {
+                if !e.retryable() {
                     error!(rpc="put_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
                 }
                 e
@@ -56,7 +57,7 @@ impl RpcClient {
             .send_request(header.id, Message::Frame(msg_frame))
             .await
             .map_err(|e| {
-                if !e.is_retryable() {
+                if !e.retryable() {
                     error!(rpc="get_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
                 }
                 e
@@ -81,7 +82,7 @@ impl RpcClient {
             .send_request(header.id, Message::Frame(msg_frame))
             .await
             .map_err(|e| {
-                if !e.is_retryable() {
+                if !e.retryable() {
                     error!(rpc="delete_blob", %request_id, %blob_id, %block_number, error=?e, "bss rpc failed");
                 }
                 e

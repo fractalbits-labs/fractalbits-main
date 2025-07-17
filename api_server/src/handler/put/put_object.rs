@@ -1,3 +1,4 @@
+use rpc_client_common::{nss_rpc_retry, rpc_retry};
 use metrics::histogram;
 use std::{
     sync::Arc,
@@ -108,16 +109,17 @@ pub async fn put_object_handler(
         }),
     };
     let object_layout_bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new())?;
-    let rpc_client_nss = app.checkout_rpc_client_nss().await;
     let resp = {
         let start = Instant::now();
-        let res = rpc_client_nss
-            .put_inode(
+        let res = nss_rpc_retry!(
+            app,
+            put_inode(
                 bucket.root_blob_name.clone(),
-                key,
-                object_layout_bytes.into(),
+                key.clone(),
+                object_layout_bytes.clone().into()
             )
-            .await;
+        )
+        .await;
         histogram!("nss_rpc", "op" => "put_inode").record(start.elapsed().as_nanos() as f64);
         res?
     };

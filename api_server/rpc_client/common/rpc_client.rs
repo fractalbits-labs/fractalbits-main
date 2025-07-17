@@ -26,9 +26,10 @@ use tokio_util::codec::FramedRead;
 
 use crate::codec::{MessageFrame, MesssageCodec};
 use crate::message::MessageHeader;
+use rpc_client_common::ErrorRetryable;
 use slotmap_conn_pool::Poolable;
 use strum::AsRefStr;
-use tokio_retry::{strategy::ExponentialBackoff, Retry};
+use tokio_retry::{strategy::FixedInterval, Retry};
 use tracing::{debug, error, warn};
 
 #[cfg(feature = "nss")]
@@ -37,8 +38,6 @@ const RPC_TYPE: &str = "nss";
 const RPC_TYPE: &str = "bss";
 #[cfg(feature = "rss")]
 const RPC_TYPE: &str = "rss";
-
-const MAX_CONNECTION_RETRIES: usize = 5; // Max attempts to connect to an RPC server
 
 #[derive(Error, Debug)]
 pub enum RpcError {
@@ -71,8 +70,8 @@ impl<T> From<mpsc::error::SendError<T>> for RpcError {
     }
 }
 
-impl RpcError {
-    pub fn is_retryable(&self) -> bool {
+impl ErrorRetryable for RpcError {
+    fn retryable(&self) -> bool {
         matches!(self, RpcError::OneshotRecvError(_))
     }
 }
@@ -100,6 +99,8 @@ impl Drop for RpcClient {
 }
 
 impl RpcClient {
+    const MAX_CONNECTION_RETRIES: usize = 100 * 3600; // Max attempts to connect to an RPC server
+
     pub async fn new(stream: TcpStream) -> Result<Self, RpcError> {
         stream.set_nodelay(true)?;
         let socket_fd = stream.as_raw_fd();
@@ -269,18 +270,16 @@ impl Poolable for RpcClient {
     type Error = Box<dyn std::error::Error + Send + Sync>; // Using Box<dyn Error> for simplicity
 
     async fn new(addr_key: Self::AddrKey) -> Result<Self, Self::Error> {
-        let retry_strategy = ExponentialBackoff::from_millis(100) // Initial delay
-            .factor(2) // Doubles the delay each time
-            .take(MAX_CONNECTION_RETRIES); // Max retries for a single connection attempt
+        let retry_strategy = FixedInterval::from_millis(10).take(Self::MAX_CONNECTION_RETRIES);
 
-        let stream = Retry::spawn(retry_strategy, move || async move {
-            TcpStream::connect(addr_key).await.map_err(|e| {
-                warn!(rpc_type=RPC_TYPE, %addr_key, error=%e, "failed to connect RPC server");
-                e
-            })
+        let stream = Retry::spawn(retry_strategy, || async {
+            TcpStream::connect(addr_key).await
         })
         .await
-        .map_err(|e| Box::new(e) as Self::Error)?;
+        .map_err(|e| {
+            warn!(rpc_type=RPC_TYPE, %addr_key, error=%e, "failed to connect RPC server");
+            Box::new(e) as Self::Error
+        })?;
 
         RpcClient::new(stream)
             .await

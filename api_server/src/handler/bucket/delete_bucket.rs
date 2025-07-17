@@ -1,3 +1,4 @@
+use rpc_client_common::{nss_rpc_retry, rpc_retry};
 use std::sync::Arc;
 
 use axum::{body::Body, response::Response};
@@ -32,10 +33,7 @@ pub async fn delete_bucket_handler(
         api_key.data.key_id.clone()
     };
 
-    let rpc_client_nss = app.checkout_rpc_client_nss().await;
-    let resp = rpc_client_nss
-        .delete_root_inode(bucket.root_blob_name.clone())
-        .await?;
+    let resp = nss_rpc_retry!(app, delete_root_inode(bucket.root_blob_name.clone())).await?;
     match resp.result.unwrap() {
         delete_root_inode_response::Result::Ok(res) => res,
         delete_root_inode_response::Result::ErrNotEmpty(_e) => {

@@ -14,3 +14,4 @@ moka.workspace = true
 tracing.workspace = true
 metrics.workspace = true
 kv_client_traits.workspace = true
+rpc_client_common.workspace = true

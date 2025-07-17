@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use rpc_client_common::{nss_rpc_retry, rpc_retry};
 use axum::{body::Body, http::header, response::Response};
 use bucket_tables::{
     api_key_table::{ApiKey, ApiKeyTable},
@@ -77,10 +78,7 @@ pub async fn create_bucket_handler(
         }
     }
 
-    let rpc_client_nss = app.checkout_rpc_client_nss().await;
-    let resp = rpc_client_nss
-        .create_root_inode(bucket_name.clone())
-        .await?;
+    let resp = nss_rpc_retry!(app, create_root_inode(bucket_name.clone())).await?;
     let root_blob_name = match resp.result.unwrap() {
         create_root_inode_response::Result::Ok(res) => res,
         create_root_inode_response::Result::Err(e) => {

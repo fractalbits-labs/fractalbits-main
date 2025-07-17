@@ -19,6 +19,7 @@ tokio-retry.workspace = true
 slotmap_conn_pool.workspace = true
 parking_lot.workspace = true
 strum.workspace = true
+rpc_client_common.workspace = true
 
 [features]
 default = ["bss"]

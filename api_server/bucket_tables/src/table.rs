@@ -4,6 +4,7 @@ use crate::Versioned;
 use kv_client_traits::KvClient;
 use metrics::counter;
 use moka::future::Cache;
+use rpc_client_common::{rpc_retry, rss_rpc_retry, ErrorRetryable};
 use std::{marker::PhantomData, ops::Deref, sync::Arc};
 
 pub trait Entry: serde::Serialize {
@@ -18,15 +19,19 @@ pub trait TableSchema {
 
 #[allow(async_fn_in_trait)]
 pub trait KvClientProvider {
-    type Error: std::error::Error;
-    async fn get_client(&self) -> impl KvClient<Error = Self::Error>;
+    type Error: std::error::Error + ErrorRetryable;
+    async fn checkout_rpc_client_rss(
+        &self,
+    ) -> Result<impl KvClient<Error = Self::Error>, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 impl<T: KvClientProvider + Sync> KvClientProvider for Arc<T> {
     type Error = T::Error;
 
-    async fn get_client(&self) -> impl KvClient<Error = Self::Error> {
-        self.deref().get_client().await
+    async fn checkout_rpc_client_rss(
+        &self,
+    ) -> Result<impl KvClient<Error = Self::Error>, Box<dyn std::error::Error + Send + Sync>> {
+        self.deref().checkout_rpc_client_rss().await
     }
 }
 
@@ -52,12 +57,11 @@ impl<C: KvClientProvider, F: TableSchema> Table<C, F> {
         let full_key = Self::get_full_key(F::TABLE_NAME, &e.data.key());
         let data: String = serde_json::to_string(&e.data).unwrap();
         let versioned_data: Versioned<String> = (e.version, data).into();
-        match self
-            .kv_client_provider
-            .get_client()
-            .await
-            .put(full_key.clone(), versioned_data.clone())
-            .await
+        match rss_rpc_retry!(
+            self.kv_client_provider,
+            put(full_key.clone(), versioned_data.clone())
+        )
+        .await
         {
             Ok(()) => {
                 if let Some(ref cache) = self.cache {
@@ -84,17 +88,16 @@ impl<C: KvClientProvider, F: TableSchema> Table<C, F> {
         let extra_full_key = Self::get_full_key(F2::TABLE_NAME, &extra.data.key());
         let extra_data: String = serde_json::to_string(&extra.data).unwrap();
         let extra_versioned_data: Versioned<String> = (extra.version, extra_data.clone()).into();
-        match self
-            .kv_client_provider
-            .get_client()
-            .await
-            .put_with_extra(
+        match rss_rpc_retry!(
+            self.kv_client_provider,
+            put_with_extra(
                 full_key.clone(),
                 versioned_data.clone(),
                 extra_full_key.clone(),
-                extra_versioned_data.clone(),
+                extra_versioned_data.clone()
             )
-            .await
+        )
+        .await
         {
             Ok(_) => {
                 if let Some(ref cache) = self.cache {
@@ -128,13 +131,7 @@ impl<C: KvClientProvider, F: TableSchema> Table<C, F> {
             }
         }
 
-        let json = self
-            .kv_client_provider
-            .get_client()
-            .await
-            .get(full_key.clone())
-            .await?;
-
+        let json = rss_rpc_retry!(self.kv_client_provider, get(full_key.clone())).await?;
         if let Some(ref cache) = self.cache {
             if try_cache {
                 cache.insert(full_key, json.clone()).await;
@@ -152,12 +149,7 @@ impl<C: KvClientProvider, F: TableSchema> Table<C, F> {
         <F as TableSchema>::E: for<'s> serde::Deserialize<'s>,
     {
         let prefix = Self::get_prefix(F::TABLE_NAME);
-        let kvs = self
-            .kv_client_provider
-            .get_client()
-            .await
-            .list(prefix)
-            .await?;
+        let kvs = rss_rpc_retry!(self.kv_client_provider, list(prefix.clone())).await?;
         Ok(kvs
             .iter()
             .map(|x| serde_json::from_slice(x.as_bytes()).unwrap())
@@ -166,13 +158,7 @@ impl<C: KvClientProvider, F: TableSchema> Table<C, F> {
 
     pub async fn delete(&self, e: &F::E) -> Result<(), C::Error> {
         let full_key = Self::get_full_key(F::TABLE_NAME, &e.key());
-        match self
-            .kv_client_provider
-            .get_client()
-            .await
-            .delete(full_key.clone())
-            .await
-        {
+        match rss_rpc_retry!(self.kv_client_provider, delete(full_key.clone())).await {
             Ok(()) => {
                 if let Some(ref cache) = self.cache {
                     cache.invalidate(&full_key).await;
@@ -195,16 +181,15 @@ impl<C: KvClientProvider, F: TableSchema> Table<C, F> {
         let extra_full_key = Self::get_full_key(F2::TABLE_NAME, &extra.data.key());
         let extra_data: String = serde_json::to_string(&extra.data).unwrap();
         let extra_versioned_data: Versioned<String> = (extra.version, extra_data.clone()).into();
-        match self
-            .kv_client_provider
-            .get_client()
-            .await
-            .delete_with_extra(
+        match rss_rpc_retry!(
+            self.kv_client_provider,
+            delete_with_extra(
                 full_key.clone(),
                 extra_full_key.clone(),
-                extra_versioned_data.clone(),
+                extra_versioned_data.clone()
             )
-            .await
+        )
+        .await
         {
             Ok(()) => {
                 if let Some(ref cache) = self.cache {

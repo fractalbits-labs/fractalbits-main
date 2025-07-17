@@ -8,6 +8,7 @@ pub mod signature;
 pub mod time;
 pub mod xheader;
 
+use rpc_client_common::{nss_rpc_retry, rpc_retry};
 use std::collections::BTreeMap;
 
 use crate::{
@@ -29,8 +30,7 @@ pub async fn get_raw_object(
     root_blob_name: String,
     key: String,
 ) -> Result<ObjectLayout, S3Error> {
-    let rpc_client_nss = app.checkout_rpc_client_nss().await;
-    let resp = rpc_client_nss.get_inode(root_blob_name, key).await?;
+    let resp = nss_rpc_retry!(app, get_inode(root_blob_name.clone(), key.clone())).await?;
 
     let object_bytes = match resp.result.unwrap() {
         get_inode_response::Result::Ok(res) => res,
@@ -56,17 +56,18 @@ pub async fn list_raw_objects(
     start_after: String,
     skip_mpu_parts: bool,
 ) -> Result<Vec<(String, ObjectLayout)>, S3Error> {
-    let rpc_client_nss = app.checkout_rpc_client_nss().await;
-    let resp = rpc_client_nss
-        .list_inodes(
-            root_blob_name,
+    let resp = nss_rpc_retry!(
+        app,
+        list_inodes(
+            root_blob_name.clone(),
             max_parts,
-            prefix,
-            delimiter,
-            start_after,
-            skip_mpu_parts,
+            prefix.clone(),
+            delimiter.clone(),
+            start_after.clone(),
+            skip_mpu_parts
         )
-        .await?;
+    )
+    .await?;
 
     // Process results
     let inodes = match resp.result.unwrap() {

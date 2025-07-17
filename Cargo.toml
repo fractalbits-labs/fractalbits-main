@@ -6,6 +6,7 @@ members = [
     "api_server/bucket_tables",
     "api_server/kv_client_traits",
     "api_server/rpc_client/bss",
+    "api_server/rpc_client/common",
     "api_server/rpc_client/nss",
     "api_server/rpc_client/rss",
     "api_server/slotmap_conn_pool",
@@ -20,6 +21,7 @@ resolver = "2"
 
 [workspace.dependencies]
 kv_client_traits = { path = "api_server/kv_client_traits" }
+rpc_client_common = { path = "api_server/rpc_client/common" }
 rpc_client_bss = { path = "api_server/rpc_client/bss" }
 rpc_client_nss = { path = "api_server/rpc_client/nss" }
 rpc_client_rss = { path = "api_server/rpc_client/rss" }

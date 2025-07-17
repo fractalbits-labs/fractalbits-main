@@ -1,3 +1,4 @@
+use rpc_client_common::{nss_rpc_retry, rpc_retry};
 use std::sync::Arc;
 
 use crate::{
@@ -260,18 +261,18 @@ pub async fn list_objects(
     delimiter: String,
     start_after: String,
 ) -> Result<(Vec<Object>, Vec<Prefix>, Option<String>), S3Error> {
-    let rpc_client_nss = app.checkout_rpc_client_nss().await;
-    let resp = rpc_client_nss
-        .list_inodes(
+    let resp = nss_rpc_retry!(
+        app,
+        list_inodes(
             bucket.root_blob_name.clone(),
             max_keys,
-            prefix,
+            prefix.clone(),
             delimiter.clone(),
-            start_after,
-            true,
+            start_after.clone(),
+            true
         )
-        .await?;
-    drop(rpc_client_nss);
+    )
+    .await?;
 
     // Process results
     let inodes = match resp.result.unwrap() {

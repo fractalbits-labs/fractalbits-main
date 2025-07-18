@@ -71,9 +71,9 @@ pub fn run_cmd_deploy(
 
     if bss_use_i3 {
         run_cmd! {
-            info "Building bss fractalbits-bootstrap for x86_64";
-            cargo zigbuild
-                -p fractalbits-bootstrap --target x86_64-unknown-linux-gnu $rust_build_opt;
+            info "Building bss fractalbits-bootstrap & rewrk_rpc for x86_64";
+            cargo zigbuild -p fractalbits-bootstrap --target x86_64-unknown-linux-gnu $rust_build_opt;
+            cargo zigbuild -p rewrk_rpc --target x86_64-unknown-linux-gnu $rust_build_opt;
         }?;
 
         let zig_build_target = ["-Dtarget=x86_64-linux-gnu", "-Dcpu=cascadelake", ""];
@@ -115,6 +115,7 @@ pub fn run_cmd_deploy(
     if bss_use_i3 {
         run_cmd!(aws s3 cp zig-out/bin/bss_server $bucket/x86_64/bss_server)?;
         run_cmd!(aws s3 cp target/x86_64-unknown-linux-gnu/$build_dir/fractalbits-bootstrap $bucket/x86_64/fractalbits-bootstrap)?;
+        run_cmd!(aws s3 cp target/x86_64-unknown-linux-gnu/$build_dir/rewrk_rpc $bucket/x86_64/rewrk_rpc)?;
     } else {
         run_cmd!(aws s3 cp zig-out/bin/bss_server $bucket/$arch/bss_server)?;
     };

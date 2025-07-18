@@ -4,7 +4,8 @@ use cmd_lib::*;
 pub fn bootstrap(num_nvme_disks: usize, meta_stack_testing: bool, _for_bench: bool) -> CmdResult {
     assert_ne!(num_nvme_disks, 0);
     install_rpms(&["nvme-cli", "mdadm", "perf", "lldb"])?;
-    format_local_nvme_disks(num_nvme_disks, meta_stack_testing)?;
+    // no twp support since experiment done
+    format_local_nvme_disks(num_nvme_disks, false)?;
     download_binaries(&["bss_server"])?;
 
     create_coredump_config()?;

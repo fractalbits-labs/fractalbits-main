@@ -6,6 +6,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 
 interface FractalbitsMetaStackProps extends cdk.StackProps {
   serviceName: string;
+  bssUseI3?: boolean;
 }
 
 export class FractalbitsMetaStack extends cdk.Stack {
@@ -59,13 +60,14 @@ export class FractalbitsMetaStack extends cdk.Stack {
       id: string,
       subnetType: ec2.SubnetType,
       instanceType: ec2.InstanceType,
-      cpuType: ec2.AmazonLinuxCpuType,
     ): ec2.Instance => {
       const instance = new ec2.Instance(this, id, {
         vpc,
         instanceType: instanceType,
         machineImage: ec2.MachineImage.latestAmazonLinux2023({
-          cpuType: cpuType,
+          cpuType: instanceType.architecture === ec2.InstanceArchitecture.ARM_64
+            ? ec2.AmazonLinuxCpuType.ARM_64
+            : ec2.AmazonLinuxCpuType.X86_64
         }),
         vpcSubnets: { subnetType },
         securityGroup: sg,
@@ -88,7 +90,7 @@ export class FractalbitsMetaStack extends cdk.Stack {
     let instance = undefined;
     if (props.serviceName == "nss") {
       const nssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
-      instance = createInstance(`${props.serviceName}_bench`, ec2.SubnetType.PRIVATE_ISOLATED, nssInstanceType, ec2.AmazonLinuxCpuType.ARM_64);
+      instance = createInstance(`${props.serviceName}_bench`, ec2.SubnetType.PRIVATE_ISOLATED, nssInstanceType);
       // Create EBS Volume with Multi-Attach capabilities
       const ebsVolume = new ec2.Volume(this, 'MultiAttachVolume', {
         removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -114,9 +116,12 @@ export class FractalbitsMetaStack extends cdk.Stack {
         volumeId: ebsVolume.volumeId,
       });
     } else {
-      const bssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.I3, ec2.InstanceSize.METAL);
-      instance = createInstance(`${props.serviceName}_bench`, ec2.SubnetType.PRIVATE_ISOLATED, bssInstanceType, ec2.AmazonLinuxCpuType.X86_64);
-      instance.addUserData(createUserData("bss_server --num_nvme_disks=1 --meta_stack_testing").render());
+      const bssInstanceType = props.bssUseI3
+          ? ec2.InstanceType.of(ec2.InstanceClass.I3, ec2.InstanceSize.METAL)
+          : ec2.InstanceType.of(ec2.InstanceClass.IS4GEN, ec2.InstanceSize.XLARGE);
+      const bssNumNvmeDisks = props.bssUseI3 ? 8 : 1;
+      instance = createInstance(`${props.serviceName}_bench`, ec2.SubnetType.PRIVATE_ISOLATED, bssInstanceType);
+      instance.addUserData(createUserData(`bss_server --num_nvme_disks=${bssNumNvmeDisks} --meta_stack_testing`).render());
     }
 
     new cdk.CfnOutput(this, 'instanceId', {

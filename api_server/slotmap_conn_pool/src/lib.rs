@@ -6,9 +6,7 @@ use std::fmt::{self, Debug};
 use std::future::Future;
 use std::hash::Hash;
 use std::ops::Deref;
-use std::pin::Pin;
 use std::sync::{Arc, RwLock, RwLockReadGuard};
-use std::task::{self, Poll};
 
 new_key_type! { struct ConnectionKey; }
 
@@ -46,15 +44,6 @@ pub struct ConnPool<T, K: Key> {
     inner: Arc<RwLock<ConnPoolInner<T, K>>>,
 }
 
-type RecreatingFuture<T> = Pin<Box<dyn Future<Output = Result<T, <T as Poolable>::Error>> + Send>>;
-
-pub struct Checkout<T: Poolable, K: Key> {
-    pool: ConnPool<T, K>,
-    addr_key: K,
-    conn_key: ConnectionKey,
-    recreating: Option<RecreatingFuture<T>>,
-}
-
 impl<T, K: Key> Clone for ConnPool<T, K> {
     fn clone(&self) -> Self {
         ConnPool {
@@ -83,14 +72,66 @@ impl<T: Poolable, K: Key> ConnPool<T, K> {
         keys.push(conn_key);
     }
 
-    pub fn checkout(&self, addr_key: K) -> Checkout<T, K> {
-        let inner = self.inner.read().unwrap();
-        let conn_key = Self::get_conn_key(&inner, &addr_key).unwrap();
-        Checkout {
-            pool: self.clone(),
-            addr_key,
-            conn_key,
-            recreating: None,
+    pub async fn checkout(&self, addr_key: K) -> Result<T, Error>
+    where
+        T: Poolable + Clone,
+        T::AddrKey: From<K>,
+    {
+        let mut conn_key = {
+            let inner = self.inner.read().unwrap();
+            Self::get_conn_key(&inner, &addr_key)?
+        };
+
+        loop {
+            let (is_closed, conn_clone) = {
+                let inner = self.inner.read().unwrap();
+                if let Some(conn) = inner.connections.get(conn_key) {
+                    (conn.is_closed(), Some(conn.clone()))
+                } else {
+                    (true, None)
+                }
+            };
+
+            if let Some(conn) = conn_clone {
+                if !is_closed {
+                    return Ok(conn);
+                } else {
+                    // Connection is broken, replace it with newly created one
+                    {
+                        let mut inner = self.inner.write().unwrap();
+                        // Check if the connection is still broken, it might have been replaced by another thread
+                        if let Some(c) = inner.connections.get(conn_key) {
+                            if c.is_closed() {
+                                inner.connections.remove(conn_key);
+                            }
+                        }
+                    }
+
+                    let new_conn = match T::new(addr_key.clone().into()).await {
+                        Ok(c) => c,
+                        Err(e) => panic!("Failed to create new connection: {:?}", e),
+                    };
+
+                    let mut inner = self.inner.write().unwrap();
+                    let new_conn_key = inner.connections.insert(new_conn.clone());
+                    if let Some(keys) = inner.host_to_conn_keys.get_mut(&addr_key) {
+                        if let Some(key_ref) = keys.iter_mut().find(|k| **k == conn_key) {
+                            *key_ref = new_conn_key;
+                        }
+                    }
+                    return Ok(new_conn);
+                }
+            }
+
+            // Connection key not valid anymore. Get a new one.
+            let inner = self.inner.read().unwrap();
+            match Self::get_conn_key(&inner, &addr_key) {
+                Ok(key) => {
+                    conn_key = key;
+                    // loop to try again with the new key.
+                }
+                Err(e) => return Err(e),
+            }
         }
     }
 
@@ -128,85 +169,6 @@ impl fmt::Display for Error {
 }
 
 impl StdError for Error {}
-
-impl<T: Poolable + Clone, K: Key> Future for Checkout<T, K>
-where
-    T::AddrKey: From<K>,
-{
-    type Output = Result<T, Error>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-        let this = &mut *self;
-
-        if let Some(mut fut) = this.recreating.take() {
-            match fut.as_mut().poll(cx) {
-                Poll::Ready(Ok(new_conn)) => {
-                    let mut inner = this.pool.inner.write().unwrap();
-                    let new_conn_key = inner.connections.insert(new_conn.clone());
-                    if let Some(keys) = inner.host_to_conn_keys.get_mut(&this.addr_key) {
-                        if let Some(key_ref) = keys.iter_mut().find(|k| **k == this.conn_key) {
-                            *key_ref = new_conn_key;
-                        }
-                    }
-                    this.conn_key = new_conn_key;
-                    return Poll::Ready(Ok(new_conn));
-                }
-                Poll::Ready(Err(e)) => {
-                    panic!("Failed to create new connection: {:?}", e);
-                }
-                Poll::Pending => {
-                    this.recreating = Some(fut);
-                    return Poll::Pending;
-                }
-            }
-        }
-
-        loop {
-            let (is_closed, conn_clone) = {
-                let inner = this.pool.inner.read().unwrap();
-                if let Some(conn) = inner.connections.get(this.conn_key) {
-                    (conn.is_closed(), Some(conn.clone()))
-                } else {
-                    (true, None)
-                }
-            };
-
-            if let Some(conn) = conn_clone {
-                if !is_closed {
-                    return Poll::Ready(Ok(conn));
-                } else {
-                    // Connection is broken, replace it with newly created one
-                    {
-                        let mut inner = this.pool.inner.write().unwrap();
-                        // Check if the connection is still broken, it might have been replaced by another thread
-                        if let Some(c) = inner.connections.get(this.conn_key) {
-                            if c.is_closed() {
-                                inner.connections.remove(this.conn_key);
-                            }
-                        }
-                    }
-
-                    let fut = <T as Poolable>::new(this.addr_key.clone().into());
-                    this.recreating = Some(Box::pin(fut));
-                    // Now we need to poll the new future.
-                    // A simple way is to wake and return pending.
-                    cx.waker().wake_by_ref();
-                    return Poll::Pending;
-                }
-            }
-
-            // Connection key not valid anymore. Get a new one.
-            let inner = this.pool.inner.read().unwrap();
-            match ConnPool::get_conn_key(&inner, &this.addr_key) {
-                Ok(key) => {
-                    this.conn_key = key;
-                    // loop to try again with the new key.
-                }
-                Err(e) => return Poll::Ready(Err(e)),
-            }
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

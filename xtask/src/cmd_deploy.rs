@@ -76,7 +76,7 @@ pub fn run_cmd_deploy(
             cargo zigbuild -p rewrk_rpc --target x86_64-unknown-linux-gnu $rust_build_opt;
         }?;
 
-        let zig_build_target = ["-Dtarget=x86_64-linux-gnu", "-Dcpu=cascadelake", ""];
+        let zig_build_target = ["-Dtarget=x86_64-linux-gnu", "-Dcpu=broadwell", ""];
         run_cmd! {
             info "Building bss_server for x86_64";
             zig build -Duse_s3_backend=$use_s3_backend
@@ -92,7 +92,6 @@ pub fn run_cmd_deploy(
         "fractalbits-bootstrap",
         "ebs-failover",
         "rewrk_rpc",
-        "xtask",
     ];
     let arch = if target_arm { "aarch64" } else { "x86_64" };
     let build_dir = if release_mode { "release" } else { "debug" };

@@ -55,7 +55,7 @@ region = "{aws_region}"
 port = 80
 root_domain = ".localhost"
 with_metrics = true
-request_timeout_seconds = 5
+request_timeout_seconds = 115
 
 [s3_cache]
 s3_host = "http://s3.{aws_region}.amazonaws.com"

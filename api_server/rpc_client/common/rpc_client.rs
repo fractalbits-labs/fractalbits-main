@@ -221,7 +221,7 @@ impl RpcClient {
         gauge!("rpc_request_pending_in_send_queue", "type" => RPC_TYPE).increment(1.0);
         debug!(%request_id, "request sent from handler:");
 
-        let timeout_val = std::time::Duration::from_secs(4); // TODO: align with s3 handler setting
+        let timeout_val = std::time::Duration::from_secs(110); // TODO: align with s3 handler setting
         let result = tokio::time::timeout(timeout_val, rx).await;
         let result = match result {
             Ok(result) => result,

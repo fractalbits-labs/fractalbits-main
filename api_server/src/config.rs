@@ -53,7 +53,7 @@ impl Default for Config {
             root_domain: ".localhost".into(),
             s3_cache: S3CacheConfig::default(),
             with_metrics: true,
-            request_timeout_seconds: 5,
+            request_timeout_seconds: 115,
         }
     }
 }

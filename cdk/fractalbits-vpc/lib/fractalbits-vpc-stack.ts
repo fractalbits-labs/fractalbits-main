@@ -122,8 +122,6 @@ export class FractalbitsVpcStack extends cdk.Stack {
         : ec2.InstanceType.of(ec2.InstanceClass.IS4GEN, ec2.InstanceSize.XLARGE);
     const rssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.C7G, ec2.InstanceSize.MEDIUM);
     const apiInstanceType = ec2.InstanceType.of(ec2.InstanceClass.C7G, ec2.InstanceSize.LARGE);
-    const nssNumNvmeDisks = 1;
-    const bssNumNvmeDisks = props.bssUseI3 ? 8 : 1;
     const bucketName = bucket.bucketName;
 
     const instanceConfigs = [
@@ -210,14 +208,14 @@ export class FractalbitsVpcStack extends cdk.Stack {
       },
       {
         id: 'bss_server',
-        bootstrapOptions: `${forBenchFlag} bss_server --num_nvme_disks=${bssNumNvmeDisks}` },
+        bootstrapOptions: `${forBenchFlag} bss_server` },
       {
         id: 'nss_server_primary',
-        bootstrapOptions: `${forBenchFlag} nss_server --bucket=${bucketName} --volume_id=${ebsVolumeId} --num_nvme_disks=${nssNumNvmeDisks}`
+        bootstrapOptions: `${forBenchFlag} nss_server --bucket=${bucketName} --volume_id=${ebsVolumeId}`
       },
       {
         id: 'nss_server_secondary',
-        bootstrapOptions: `${forBenchFlag} nss_server --bucket=${bucketName} --volume_id=${ebsVolumeId} --num_nvme_disks=${nssNumNvmeDisks}`
+        bootstrapOptions: `${forBenchFlag} nss_server --bucket=${bucketName} --volume_id=${ebsVolumeId}`
       },
     ];
 

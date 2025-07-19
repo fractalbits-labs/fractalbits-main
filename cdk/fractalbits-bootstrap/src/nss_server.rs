@@ -8,17 +8,14 @@ const EBS_SPACE_PERCENT: f64 = 0.9;
 pub fn bootstrap(
     bucket_name: &str,
     volume_id: &str,
-    num_nvme_disks: usize,
     meta_stack_testing: bool,
     for_bench: bool,
 ) -> CmdResult {
-    assert_ne!(num_nvme_disks, 0);
-
     install_rpms(&["nvme-cli", "mdadm", "perf", "lldb"])?;
     if meta_stack_testing || for_bench {
         download_binaries(&["fbs", "test_art", "rewrk_rpc"])?;
     }
-    format_local_nvme_disks(num_nvme_disks, false)?;
+    format_local_nvme_disks(false)?;
     download_binaries(&["nss_server"])?;
     setup_configs(bucket_name, volume_id, "nss_server")?;
 

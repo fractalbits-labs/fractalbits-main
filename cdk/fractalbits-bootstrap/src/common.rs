@@ -127,21 +127,18 @@ pub fn get_current_aws_region() -> FunResult {
 }
 
 // https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/storage-twp.html
-pub fn format_local_nvme_disks(num_nvme_disks: usize, support_storage_twp: bool) -> CmdResult {
+pub fn format_local_nvme_disks(support_storage_twp: bool) -> CmdResult {
     let nvme_disks = run_fun! {
         nvme list | grep -v "Amazon Elastic Block Store"
             | awk r##"/nvme[0-9]n[0-9]/ {print $1}"##
     }?;
     let nvme_disks: &Vec<&str> = &nvme_disks.split("\n").collect();
-    let num = nvme_disks.len();
-    if num != num_nvme_disks {
-        cmd_die!("Found $num local nvme disks ${nvme_disks:?}, expected: $num_nvme_disks");
-    }
+    let num_nvme_disks = nvme_disks.len();
     if support_storage_twp {
         assert_eq!(1, num_nvme_disks);
     }
 
-    if num == 1 {
+    if num_nvme_disks == 1 {
         if support_storage_twp {
             run_cmd! {
                 info "Creating ext4 on local nvme disks: ${nvme_disks:?} to support torn write prevention";

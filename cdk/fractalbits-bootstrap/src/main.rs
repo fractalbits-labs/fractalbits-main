@@ -56,9 +56,6 @@ enum Command {
 
     #[clap(about = "Run on bss_server instance to bootstrap fractalbits service(s)")]
     BssServer {
-        #[clap(long, long_help = "Number of NVME disks")]
-        num_nvme_disks: usize,
-
         #[clap(long, default_value = "false", long_help = "For meta stack testing")]
         meta_stack_testing: bool,
     },
@@ -70,9 +67,6 @@ enum Command {
 
         #[clap(long, long_help = "Multi-attached EBS volume ID")]
         volume_id: String,
-
-        #[clap(long, long_help = "Number of NVME disks")]
-        num_nvme_disks: usize,
 
         #[clap(long, default_value = "false", long_help = "For meta stack testing")]
         meta_stack_testing: bool,
@@ -160,22 +154,14 @@ fn main() -> CmdResult {
             with_bench_client,
             for_bench,
         )?,
-        Command::BssServer {
-            num_nvme_disks,
-            meta_stack_testing,
-        } => bss_server::bootstrap(num_nvme_disks, meta_stack_testing, for_bench)?,
+        Command::BssServer { meta_stack_testing } => {
+            bss_server::bootstrap(meta_stack_testing, for_bench)?
+        }
         Command::NssServer {
             bucket,
             volume_id,
-            num_nvme_disks,
             meta_stack_testing,
-        } => nss_server::bootstrap(
-            &bucket,
-            &volume_id,
-            num_nvme_disks,
-            meta_stack_testing,
-            for_bench,
-        )?,
+        } => nss_server::bootstrap(&bucket, &volume_id, meta_stack_testing, for_bench)?,
         Command::RootServer {
             primary_instance_id,
             secondary_instance_id,

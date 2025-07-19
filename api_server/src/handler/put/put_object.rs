@@ -66,10 +66,15 @@ pub async fn put_object_handler(
         .map(|(i, block_data)| {
             let blob_client = blob_client.clone();
             async move {
-                blob_client
-                    .put_blob(blob_id, i as u32, block_data)
-                    .await
-                    .map(|x| (x - MessageHeader::SIZE) as u64)
+                let data = block_data.map_err(|_e| S3Error::InternalError)?;
+                let put_result = blob_client
+                    .put_blob(blob_id, i as u32, data)
+                    .await;
+
+                match put_result {
+                    Ok(x) => Ok((x - MessageHeader::SIZE) as u64),
+                    Err(_e) => Err(S3Error::InternalError),
+                }
             }
         })
         .buffer_unordered(5)

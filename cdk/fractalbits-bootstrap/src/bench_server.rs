@@ -96,7 +96,7 @@ fn create_workload_config(service_endpoint: &str, client_ips: &Vec<String>) -> C
     duration: 10m
 
     # Concurrent operations to run per warp instance.
-    concurrent: 32
+    concurrent: 48
 
     # Use POST Object operations for upload.
     post: false

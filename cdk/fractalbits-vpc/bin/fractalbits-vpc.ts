@@ -36,8 +36,8 @@ if (benchType === "service_endpoint") {
 }
 
 // === meta stack ===
-const nssInstanceType = app.node.tryGetContext('nssInstanceType') ?? "m7gd.4xlarge";
-const bssInstanceType = app.node.tryGetContext('bssInstanceType') ?? "i3.2xlarge";
+const nssInstanceType = app.node.tryGetContext('nssInstanceType') ?? null;
+const bssInstanceType = app.node.tryGetContext('bssInstanceType') ?? null;
 new FractalbitsMetaStack(app, 'FractalbitsMetaStack-Nss', {
   serviceName: 'nss',
   nssInstanceType: nssInstanceType,

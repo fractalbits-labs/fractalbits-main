@@ -77,7 +77,8 @@ export class FractalbitsMetaStack extends cdk.Stack {
       });
 
     } else {
-      const bssInstanceTypes = props.bssInstanceType ? [props.bssInstanceType] : ['i3.2xlarge', 'i3en.xlarge', 'i8g.xlarge2', 'is4gn.xlarge'];
+      // const bssInstanceTypes = props.bssInstanceType ? [props.bssInstanceType] : ['i3.2xlarge', 'i3en.xlarge', 'i8g.xlarge2', 'is4gn.xlarge'];
+      const bssInstanceTypes = props.bssInstanceType ? [props.bssInstanceType] : ['i8g.xlarge', 'i8g.2xlarge', 'i8g.4xlarge', 'i8g.8xlarge'];
       const bssBootstrapOptions = `--for_bench bss_server --meta_stack_testing`;
       const asg = createEc2Asg(
         this,

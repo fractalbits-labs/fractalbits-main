@@ -175,7 +175,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
         [az],
         privateSg,
         ec2Role,
-        ['i8g.xlarge', 'i8g.2xlarge', 'i8g.4xlarge', 'i8g.8xlarge'],
+        ['i8g.4xlarge', 'i8g.8xlarge', 'i8g.12xlarge', 'i8g.16xlarge', 'i8g.24xlarge', 'i8g.metal-24xl'],
         // ['i3.2xlarge', 'i3en.xlarge', 'i8g.xlarge2', 'is4gn.xlarge'],
         bssBootstrapOptions,
     );

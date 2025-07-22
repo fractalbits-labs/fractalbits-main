@@ -54,17 +54,3 @@ use_direct_io = true
 
     Ok(())
 }
-
-fn register_service(bss_service_id: &str) -> CmdResult {
-    let instance_id = run_fun!(ec2-metadata -i | awk r"{print $2}")?;
-    let private_ip = run_fun!(ec2-metadata -o | awk r"{print $2}")?;
-    run_cmd! {
-        info "registering bss_server service";
-        aws servicediscovery register-instance
-            --service-id ${bss_service_id}
-            --instance-id $instance_id
-            --attributes AWS_INSTANCE_IPV4=$private_ip
-    }?;
-
-    Ok(())
-}

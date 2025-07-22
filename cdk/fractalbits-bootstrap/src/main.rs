@@ -39,6 +39,12 @@ struct CommonOpts {
 enum Command {
     #[clap(about = "Run on api_server instance to bootstrap fractalbits service(s)")]
     ApiServer {
+        #[clap(
+            long,
+            long_help = "Api server service id, used for service registering"
+        )]
+        api_server_service_id: String,
+
         #[clap(long, long_help = "S3 bucket name for fractalbits service")]
         bucket: String,
 
@@ -50,9 +56,6 @@ enum Command {
 
         #[clap(long, long_help = "root_server IP address")]
         rss_ip: String,
-
-        #[clap(long, default_value = "false", long_help = "With bunch client running")]
-        with_bench_client: bool,
     },
 
     #[clap(about = "Run on bss_server instance to bootstrap fractalbits service(s)")]
@@ -110,7 +113,7 @@ enum Command {
     BenchServer {
         #[clap(
             long,
-            default_value = "local-service-endpoint",
+            default_value = "api-server.fractalbits.local",
             long_help = "Service endpoint for benchmark"
         )]
         service_endpoint: String,
@@ -121,20 +124,10 @@ enum Command {
             long_help = "Comma separated list of client IPs"
         )]
         client_ips: Vec<String>,
-
-        #[clap(
-            long,
-            value_delimiter = ',',
-            long_help = "Comma separated list of api_server IPs"
-        )]
-        api_server_ips: Vec<String>,
     },
 
     #[clap(about = "Run on bench_client instance to benchmark fractalbits service(s)")]
-    BenchClient {
-        #[clap(long, long_help = "Api server pair ip address")]
-        api_server_pair_ip: Option<String>,
-    },
+    BenchClient,
 }
 
 #[cmd_lib::main]
@@ -173,17 +166,17 @@ fn main() -> CmdResult {
     let command = opts.command.as_ref().to_owned();
     match opts.command {
         Command::ApiServer {
+            api_server_service_id,
             bucket,
             bss_ip,
             nss_ip,
             rss_ip,
-            with_bench_client,
         } => api_server::bootstrap(
+            &api_server_service_id,
             &bucket,
             &bss_ip,
             &nss_ip,
             &rss_ip,
-            with_bench_client,
             for_bench,
         )?,
         Command::BssServer {
@@ -219,9 +212,8 @@ fn main() -> CmdResult {
         Command::BenchServer {
             service_endpoint,
             client_ips,
-            api_server_ips,
-        } => bench_server::bootstrap(service_endpoint, client_ips, api_server_ips)?,
-        Command::BenchClient { api_server_pair_ip } => bench_client::bootstrap(api_server_pair_ip)?,
+        } => bench_server::bootstrap(service_endpoint, client_ips)?,
+        Command::BenchClient => bench_client::bootstrap()?,
     }
 
     run_cmd! {

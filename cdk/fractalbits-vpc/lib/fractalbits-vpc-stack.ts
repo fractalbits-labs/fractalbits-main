@@ -5,15 +5,15 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
-import * as elbv2_targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
+// import * as elbv2_targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
 import * as servicediscovery from 'aws-cdk-lib/aws-servicediscovery';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as cr from 'aws-cdk-lib/custom-resources';
-import { createInstance, createUserData, createEc2Asg, createEbsVolume } from './ec2-utils';
+
+import { createInstance, createUserData, createEc2Asg, createEbsVolume, createDeregisterLambda, createDeregisterProvider, createDeregisterInstanceCustomResource } from './ec2-utils';
 
 export interface FractalbitsVpcStackProps extends cdk.StackProps {
   numApiServers: number;
-  benchType?: "service_endpoint" | "internal" | "external" | null;
+  numBenchClients: number;
+  benchType?: "service_endpoint" | "external" | null;
   availabilityZone?: string;
   bssInstanceTypes: string;
 }
@@ -24,6 +24,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
   constructor(scope: Construct, id: string, props: FractalbitsVpcStackProps) {
     super(scope, id, props);
+    const forBenchFlag = props.benchType ? ' --for_bench' : '';
 
     // === VPC Configuration ===
     const az = props.availabilityZone ?? this.availabilityZones[this.availabilityZones.length - 1];
@@ -52,13 +53,27 @@ export class FractalbitsVpcStack extends cdk.Stack {
       ],
     });
 
+    // IAM Role for Lambda Deregistration Function
+    const deregisterLambdaRole = new iam.Role(this, 'DeregisterLambdaRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AWSCloudMapFullAccess'),
+      ],
+    });
+
     const privateDnsNamespace = new servicediscovery.PrivateDnsNamespace(this, 'FractalbitsNamespace', {
         name: 'fractalbits.local',
         vpc: this.vpc,
     });
-
     const bssService = privateDnsNamespace.createService('BssService', {
         name: 'bss-server',
+        dnsRecordType: servicediscovery.DnsRecordType.A,
+        dnsTtl: cdk.Duration.seconds(60),
+        routingPolicy: servicediscovery.RoutingPolicy.MULTIVALUE,
+    });
+    const apiServerService = privateDnsNamespace.createService('ApiServerService', {
+        name: 'api-server',
         dnsRecordType: servicediscovery.DnsRecordType.A,
         dnsTtl: cdk.Duration.seconds(60),
         routingPolicy: servicediscovery.RoutingPolicy.MULTIVALUE,
@@ -90,10 +105,6 @@ export class FractalbitsVpcStack extends cdk.Stack {
       allowAllOutbound: true,
     });
     publicSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow HTTP access from anywhere');
-    if (props.benchType === "internal") {
-      // Allow incoming traffic on port 7761 for bench clients
-      publicSg.addIngressRule(ec2.Peer.ipv4(this.vpc.vpcCidrBlock), ec2.Port.tcp(7761), 'Allow access to port 7761 from within VPC');
-    }
 
     const privateSg = new ec2.SecurityGroup(this, 'PrivateInstanceSG', {
       vpc: this.vpc,
@@ -136,7 +147,6 @@ export class FractalbitsVpcStack extends cdk.Stack {
     // Define instance metadata
     const nssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.M7GD, ec2.InstanceSize.XLARGE4);
     const rssInstanceType = ec2.InstanceType.of(ec2.InstanceClass.C7G, ec2.InstanceSize.MEDIUM);
-    const apiInstanceType = ec2.InstanceType.of(ec2.InstanceClass.C8G, ec2.InstanceSize.LARGE);
     const bucketName = bucket.bucketName;
 
     const instanceConfigs = [
@@ -145,22 +155,14 @@ export class FractalbitsVpcStack extends cdk.Stack {
       // { id: 'nss_server_secondary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nss_instance_type, sg: privateSg },
     ];
 
-    if (props.benchType === "internal" || props.benchType === "external") {
-      // Create bench_server instance
+    if (props.benchType === "external") {
       const benchInstanceType = ec2.InstanceType.of(ec2.InstanceClass.C7G, ec2.InstanceSize.LARGE);
+      // Create bench_server instance
       instanceConfigs.push({ id: 'bench_server', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: benchInstanceType, sg: privateSg });
-
-      if (props.benchType === "external") {
-        // Create bench_client instance(s)
-        const benchInstanceType = ec2.InstanceType.of(ec2.InstanceClass.C7G, ec2.InstanceSize.LARGE);
-        for (let i = 1; i <= props.numApiServers; i++) {
-          instanceConfigs.push({ id: `bench_client_${i}`, subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: benchInstanceType, sg: privateSg });
-        }
+      // Create bench_client instance(s)
+      for (let i = 1; i <= props.numApiServers; i++) {
+        instanceConfigs.push({ id: `bench_client_${i}`, subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: benchInstanceType, sg: privateSg });
       }
-    }
-
-    for (let i = 1; i <= props.numApiServers; i++) {
-      instanceConfigs.push({ id: `api_server_${i}`, subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: apiInstanceType, sg: publicSg });
     }
 
     const instances: Record<string, ec2.Instance> = {};
@@ -168,23 +170,36 @@ export class FractalbitsVpcStack extends cdk.Stack {
       instances[id] = createInstance(this, this.vpc, id, subnet, instanceType, sg, ec2Role);
     });
 
-    // Create bss_server separately in a ASG group
-    const forBenchFlag = props.benchType ? ' --for_bench' : '';
+    // Create bss_server in a ASG group
     const bssBootstrapOptions = `${forBenchFlag} bss_server --bss_service_id=${bssService.serviceId}`;
-    const bssInstanceTypes = props.bssInstanceTypes.split(',');
     const bssAsg = createEc2Asg(
         this,
         'BssAsg',
         this.vpc,
-        [az],
         privateSg,
         ec2Role,
-        bssInstanceTypes,
+        props.bssInstanceTypes.split(','),
         bssBootstrapOptions,
+        1,
+        1
+    );
+
+    // Create api_server(s) in a ASG group
+    const apiServerBootstrapOptions = `${forBenchFlag} api_server --bucket=${bucket.bucketName} --bss_ip=${bssService.serviceName}.${privateDnsNamespace.namespaceName} --nss_ip=${instances["nss_server_primary"].instancePrivateIp} --rss_ip=${instances["root_server"].instancePrivateIp} --api_server_service_id=${apiServerService.serviceId}`;
+    const apiServerAsg = createEc2Asg(
+        this,
+        'ApiServerAsg',
+        this.vpc,
+        publicSg,
+        ec2Role,
+        ['c8g.large'],
+        apiServerBootstrapOptions,
+        props.numApiServers,
+        props.numApiServers
     );
 
     let nlb: elbv2.NetworkLoadBalancer | undefined;
-    if (props.benchType !== "internal" && props.benchType !== "external") {
+    if (props.benchType !== "external") {
       // NLB for API servers
       nlb = new elbv2.NetworkLoadBalancer(this, 'ApiNLB', {
         vpc: this.vpc,
@@ -194,14 +209,9 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
       const listener = nlb.addListener('ApiListener', { port: 80 });
 
-      const apiServerTargets = [];
-      for (let i = 1; i <= props.numApiServers; i++) {
-        apiServerTargets.push(new elbv2_targets.InstanceTarget(instances[`api_server_${i}`]));
-      }
-
       listener.addTargets('ApiTargets', {
         port: 80,
-        targets: apiServerTargets,
+        targets: [apiServerAsg],
       });
     }
 
@@ -212,10 +222,6 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const primaryNss = instances['nss_server_primary'].instanceId;
     const secondaryNss = instances['nss_server_secondary']?.instanceId ?? null;
     const ebsVolumeId = ebsVolume.volumeId;
-    const bssIp = bssService.serviceName + '.' + privateDnsNamespace.namespaceName;
-    const nssIp = instances["nss_server_primary"].instancePrivateIp;
-    const rssIp = instances["root_server"].instancePrivateIp;
-
     const instanceBootstrapOptions = [
       {
         id: 'root_server',
@@ -231,53 +237,30 @@ export class FractalbitsVpcStack extends cdk.Stack {
       },
     ];
 
-    for (let i = 1; i <= props.numApiServers; i++) {
-      let apiBootstrapOptions = `${forBenchFlag} api_server --bucket=${bucketName} --bss_ip=${bssIp} --nss_ip=${nssIp} --rss_ip=${rssIp}`;
-      if (props.benchType === "internal") {
-        apiBootstrapOptions += ` --with_bench_client`;
+    if (props.benchType === "external") {
+      const benchClientPrivateIps: string[] = [];
+      for (let i = 1; i <= props.numBenchClients; i++) {
+        benchClientPrivateIps.push(instances[`bench_client_${i}`].instancePrivateIp);
+        instanceBootstrapOptions.push({
+          id: `bench_client_${i}`,
+          bootstrapOptions: `bench_client`,
+        });
       }
-      instanceBootstrapOptions.push({
-        id: `api_server_${i}`,
-        bootstrapOptions: apiBootstrapOptions
-      });
-    }
-
-    if (props.benchType === "internal" || props.benchType === "external") {
-      const apiServerPrivateIps: string[] = [];
-      for (let i = 1; i <= props.numApiServers; i++) {
-        apiServerPrivateIps.push(instances[`api_server_${i}`].instancePrivateIp);
-      }
-
-      let benchServerBootstrapOptions: string;
-      if (props.benchType === "external") {
-        const benchClientPrivateIps: string[] = [];
-        for (let i = 1; i <= props.numApiServers; i++) {
-          benchClientPrivateIps.push(instances[`bench_client_${i}`].instancePrivateIp);
-        }
-        benchServerBootstrapOptions = `bench_server --client_ips=${benchClientPrivateIps.join(',')} --api_server_ips=${apiServerPrivateIps.join(',')}`;
-
-        for (let i = 1; i <= props.numApiServers; i++) {
-          const apiServerPrivateIp = apiServerPrivateIps[i - 1];
-          const benchClientBootstrapOptions = `bench_client --api_server_pair_ip=${apiServerPrivateIp}`;
-          instanceBootstrapOptions.push({
-            id: `bench_client_${i}`,
-            bootstrapOptions: benchClientBootstrapOptions
-          });
-        }
-      } else { // internal
-        let ips = apiServerPrivateIps.join(',');
-        benchServerBootstrapOptions = `bench_server --client_ips=${ips} --api_server_ips=${ips}`;
-      }
-
       instanceBootstrapOptions.push({
         id: 'bench_server',
-        bootstrapOptions: benchServerBootstrapOptions
+        bootstrapOptions: `bench_server --client_ips=${benchClientPrivateIps.join(',')}`,
       });
     }
 
     instanceBootstrapOptions.forEach(({id, bootstrapOptions}) => {
       instances[id]?.addUserData(createUserData(this, bootstrapOptions).render())
     })
+
+    const deregisterLambda = createDeregisterLambda(this, deregisterLambdaRole);
+    const deregisterProvider = createDeregisterProvider(this, deregisterLambda);
+
+    createDeregisterInstanceCustomResource(this, 'DeregisterBssAsgInstances', deregisterProvider, bssService, privateDnsNamespace, bssAsg);
+    createDeregisterInstanceCustomResource(this, 'DeregisterApiServerAsgInstances', deregisterProvider, apiServerService, privateDnsNamespace, apiServerAsg);
 
     // Outputs
     new cdk.CfnOutput(this, 'FractalbitsBucketName', {
@@ -291,12 +274,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       });
     }
 
-    if (props.benchType === "internal") {
-      new cdk.CfnOutput(this, 'BenchServerId', {
-        value: instances['bench_server'].instanceId,
-        description: 'EC2 instance bench_server ID',
-      });
-    } else if (props.benchType === "external") {
+    if (props.benchType === "external") {
       for (let i = 1; i <= props.numApiServers; i++) {
         new cdk.CfnOutput(this, `BenchClient_${i}_Id`, {
           value: instances[`bench_client_${i}`].instanceId,
@@ -304,50 +282,6 @@ export class FractalbitsVpcStack extends cdk.Stack {
         });
       }
     }
-
-    const deregisterLambda = new lambda.Function(this, 'DeregisterLambda', {
-      runtime: lambda.Runtime.NODEJS_18_X,
-      handler: 'index.handler',
-      code: lambda.Code.fromInline(`
-        const aws = require('aws-sdk');
-        const servicediscovery = new aws.ServiceDiscovery();
-
-        exports.handler = async (event, context) => {
-          const serviceId = event.ResourceProperties.ServiceId;
-          const asgName = event.ResourceProperties.AsgName;
-
-          if (event.RequestType === 'Delete') {
-            try {
-              const instances = await servicediscovery.discoverInstances({ NamespaceName: 'fractalbits.local', ServiceName: 'bss-server' }).promise();
-              for (const instance of instances.Instances) {
-                await servicediscovery.deregisterInstance({ ServiceId: serviceId, InstanceId: instance.InstanceId }).promise();
-              }
-            } catch (error) {
-              console.error('Error deregistering instances:', error);
-              // Don't fail the custom resource on error, as the service might already be gone
-            }
-          }
-
-          return { Status: 'SUCCESS' };
-        };
-      `),
-      role: ec2Role, // Reuse the existing role
-    });
-
-    const deregisterProvider = new cr.Provider(this, 'DeregisterProvider', {
-      onEventHandler: deregisterLambda,
-    });
-
-    const deregisterResource = new cdk.CustomResource(this, 'DeregisterResource', {
-      serviceToken: deregisterProvider.serviceToken,
-      properties: {
-        ServiceId: bssService.serviceId,
-        AsgName: bssAsg.autoScalingGroupName,
-      },
-    });
-
-    deregisterResource.node.addDependency(bssAsg);
-    bssService.node.addDependency(deregisterResource);
 
     new cdk.CfnOutput(this, 'ApiNLBDnsName', {
       value: nlb ? nlb.loadBalancerDnsName : 'NLB not created',
@@ -361,9 +295,14 @@ export class FractalbitsVpcStack extends cdk.Stack {
       description: 'EBS volume ID',
     });
 
-    new cdk.CfnOutput(this, 'AsgName', {
+    new cdk.CfnOutput(this, 'bssAsgName', {
       value: bssAsg.autoScalingGroupName,
       description: `Bss Auto Scaling Group Name`,
+    });
+
+    new cdk.CfnOutput(this, 'apiServerAsgName', {
+      value: apiServerAsg.autoScalingGroupName,
+      description: `Api Server Auto Scaling Group Name`,
     });
   }
 }

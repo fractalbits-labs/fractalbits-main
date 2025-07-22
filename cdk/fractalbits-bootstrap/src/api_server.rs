@@ -1,11 +1,11 @@
 use crate::*;
 
 pub fn bootstrap(
+    api_server_service_id: &str,
     bucket_name: &str,
     bss_ip: &str,
     nss_ip: &str,
     rss_ip: &str,
-    with_bench_client: bool,
     for_bench: bool,
 ) -> CmdResult {
     install_rpms(&["amazon-cloudwatch-agent", "nmap-ncat", "perf"])?;
@@ -25,12 +25,7 @@ pub fn bootstrap(
     let bss_ip = run_fun!(dig +short $bss_ip)?;
     create_config(bucket_name, &bss_ip, nss_ip, rss_ip)?;
 
-    if with_bench_client {
-        run_cmd!(echo "127.0.0.1   local-service-endpoint" >>/etc/hosts)?;
-        bench_client::bootstrap(None)?;
-    };
-
-    if with_bench_client || for_bench {
+    if for_bench {
         // Try to download tools for micro-benchmarking
         download_binaries(&["rewrk_rpc", "fbs", "test_art"])?;
         // Testing data for bss-rpc
@@ -45,6 +40,8 @@ pub fn bootstrap(
 
     // setup_cloudwatch_agent()?;
     create_systemd_unit_file("api_server", true)?;
+    register_service(api_server_service_id)?;
+
     Ok(())
 }
 

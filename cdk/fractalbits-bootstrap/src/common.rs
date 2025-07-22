@@ -303,3 +303,17 @@ pub fn setup_cloudwatch_agent() -> CmdResult {
 
     Ok(())
 }
+
+pub fn register_service(service_id: &str) -> CmdResult {
+    let instance_id = run_fun!(ec2-metadata -i | awk r"{print $2}")?;
+    let private_ip = run_fun!(ec2-metadata -o | awk r"{print $2}")?;
+    run_cmd! {
+        info "registering itself to cloudmap";
+        aws servicediscovery register-instance
+            --service-id ${service_id}
+            --instance-id $instance_id
+            --attributes AWS_INSTANCE_IPV4=$private_ip
+    }?;
+
+    Ok(())
+}

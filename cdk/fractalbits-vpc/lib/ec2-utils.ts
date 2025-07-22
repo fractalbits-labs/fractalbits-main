@@ -3,7 +3,9 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as autoscaling from 'aws-cdk-lib/aws-autoscaling';
 import * as servicediscovery from 'aws-cdk-lib/aws-servicediscovery';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
+import * as cr from 'aws-cdk-lib/custom-resources';
 
 export const createInstance = (
   scope: Construct,
@@ -44,11 +46,12 @@ export const createEc2Asg = (
     scope: Construct,
     id: string,
     vpc: ec2.Vpc,
-    availabilityZones: string[],
     sg: ec2.SecurityGroup,
     role: iam.Role,
     instanceTypeNames: string[],
     bootstrapOptions: string,
+    minCapacity: number,
+    maxCapacity: number,
 ): autoscaling.AutoScalingGroup => {
     const x86InstanceTypes: string[] = [];
     const armInstanceTypes: string[] = [];
@@ -60,6 +63,10 @@ export const createEc2Asg = (
             x86InstanceTypes.push(typeName);
         }
     });
+    if (x86InstanceTypes.length > 0 && armInstanceTypes.length > 0) {
+        console.error("Error: both x86 and arm instance types are found, which is not supported for now.");
+        process.exit(1);
+    }
 
     const launchTemplateOverrides: autoscaling.LaunchTemplateOverrides[] = [];
 
@@ -103,11 +110,10 @@ export const createEc2Asg = (
 
     return new autoscaling.AutoScalingGroup(scope, id, {
         vpc: vpc,
-        minCapacity: 1,
-        maxCapacity: 1,
+        minCapacity: minCapacity,
+        maxCapacity: maxCapacity,
         vpcSubnets: {
           subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-          availabilityZones: availabilityZones
         },
         mixedInstancesPolicy: {
             instancesDistribution: {
@@ -142,3 +148,64 @@ export const createEbsVolume = (
 
     return ebsVolume;
 };
+
+export const createDeregisterLambda = (scope: Construct, deregisterLambdaRole: iam.Role): lambda.Function => {
+  return new lambda.Function(scope, 'DeregisterLambda', {
+    runtime: lambda.Runtime.NODEJS_18_X,
+    handler: 'index.handler',
+    code: lambda.Code.fromInline(`
+      const { ServiceDiscoveryClient, DeregisterInstanceCommand, DiscoverInstancesCommand } = require('@aws-sdk/client-servicediscovery');
+      const servicediscovery = new ServiceDiscoveryClient({});
+
+      exports.handler = async (event, context) => {
+        const serviceId = event.ResourceProperties.ServiceId;
+        const namespaceName = event.ResourceProperties.NamespaceName;
+        const serviceName = event.ResourceProperties.ServiceName;
+
+        if (event.RequestType === 'Delete') {
+          try {
+            const discoverInstancesCommand = new DiscoverInstancesCommand({ NamespaceName: namespaceName, ServiceName: serviceName });
+            const instances = await servicediscovery.send(discoverInstancesCommand);
+
+            for (const instance of instances.Instances) {
+              const deregisterInstanceCommand = new DeregisterInstanceCommand({ ServiceId: serviceId, InstanceId: instance.InstanceId });
+              await servicediscovery.send(deregisterInstanceCommand);
+            }
+          } catch (error) {
+            console.error('Error deregistering instances:', error);
+            // Don't fail the custom resource on error, as the service might already be gone
+          }
+        }
+
+        return { Status: 'SUCCESS' };
+      };
+    `),
+    role: deregisterLambdaRole,
+  });
+};
+
+export const createDeregisterProvider = (scope: Construct, deregisterLambda: lambda.Function): cr.Provider => {
+  return new cr.Provider(scope, 'DeregisterProvider', {
+    onEventHandler: deregisterLambda,
+  });
+};
+
+export const createDeregisterInstanceCustomResource = (
+    scope: Construct,
+    id: string,
+    deregisterProvider: cr.Provider,
+    service: servicediscovery.Service,
+    namespace: servicediscovery.PrivateDnsNamespace,
+    asg: autoscaling.AutoScalingGroup
+  ): cdk.CustomResource => {
+    const resource = new cdk.CustomResource(scope, id, {
+      serviceToken: deregisterProvider.serviceToken,
+      properties: {
+        ServiceId: service.serviceId,
+        NamespaceName: namespace.namespaceName,
+        ServiceName: service.serviceName,
+      },
+    });
+    resource.node.addDependency(asg);
+    return resource;
+  };

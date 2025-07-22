@@ -1,18 +1,9 @@
 use super::common::*;
 use cmd_lib::*;
 
-pub fn bootstrap(
-    service_endpoint: String,
-    client_ips: Vec<String>,
-    api_server_ips: Vec<String>,
-) -> CmdResult {
+pub fn bootstrap(service_endpoint: String, client_ips: Vec<String>) -> CmdResult {
     download_binaries(&["warp"])?;
     create_workload_config(&service_endpoint, &client_ips)?;
-    if service_endpoint == "local-service-endpoint" {
-        for api_server_ip in api_server_ips {
-            run_cmd!(echo "$api_server_ip $service_endpoint" >>/etc/hosts)?;
-        }
-    }
     create_bench_start_script()?;
     Ok(())
 }

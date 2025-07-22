@@ -8,6 +8,7 @@ import { FractalbitsMetaStack } from '../lib/fractalbits-meta-stack';
 const app = new cdk.App();
 
 const numApiServers = app.node.tryGetContext('numApiServers') ?? 1;
+const numBenchClients = app.node.tryGetContext('numBenchClients') ?? 1;
 const benchType = app.node.tryGetContext('benchType') ?? null;
 const availabilityZone = app.node.tryGetContext('availabilityZone') ?? app.node.tryGetContext('az') ?? undefined;
 const bssInstanceTypes = app.node.tryGetContext('bssInstanceTypes') ?? "i8g.xlarge,i8g.2xlarge,i8g.4xlarge";
@@ -15,6 +16,7 @@ const bssInstanceTypes = app.node.tryGetContext('bssInstanceTypes') ?? "i8g.xlar
 const vpcStack = new FractalbitsVpcStack(app, 'FractalbitsVpcStack', {
   env: {},
   numApiServers: numApiServers,
+  numBenchClients: numBenchClients,
   benchType: benchType,
   availabilityZone: availabilityZone,
   bssInstanceTypes: bssInstanceTypes,

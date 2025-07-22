@@ -7,6 +7,8 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as elbv2_targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
 import * as servicediscovery from 'aws-cdk-lib/aws-servicediscovery';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as cr from 'aws-cdk-lib/custom-resources';
 import { createInstance, createUserData, createEc2Asg, createEbsVolume } from './ec2-utils';
 
 export interface FractalbitsVpcStackProps extends cdk.StackProps {
@@ -33,6 +35,19 @@ export class FractalbitsVpcStack extends cdk.Stack {
       enableDnsSupport: true,
       subnetConfiguration: [
         { name: 'PrivateSubnet', subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 },
+      ],
+    });
+
+    // IAM Role for EC2
+    const ec2Role = new iam.Role(this, 'InstanceRole', {
+      assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMFullAccess'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FullAccess'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonDynamoDBFullAccess_v2'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEC2FullAccess'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('CloudWatchAgentServerPolicy'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AWSCloudMapFullAccess'),
       ],
     });
 
@@ -65,19 +80,6 @@ export class FractalbitsVpcStack extends cdk.Stack {
         subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
         privateDnsEnabled: true,
       });
-    });
-
-    // IAM Role for EC2
-    const ec2Role = new iam.Role(this, 'InstanceRole', {
-      assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMFullAccess'),
-        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FullAccess'),
-        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonDynamoDBFullAccess_v2'),
-        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEC2FullAccess'),
-        iam.ManagedPolicy.fromAwsManagedPolicyName('CloudWatchAgentServerPolicy'),
-        iam.ManagedPolicy.fromAwsManagedPolicyName('AWSCloudMapFullAccess'),
-      ],
     });
 
     const publicSg = new ec2.SecurityGroup(this, 'PublicInstanceSG', {
@@ -301,6 +303,50 @@ export class FractalbitsVpcStack extends cdk.Stack {
         });
       }
     }
+
+    const deregisterLambda = new lambda.Function(this, 'DeregisterLambda', {
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromInline(`
+        const aws = require('aws-sdk');
+        const servicediscovery = new aws.ServiceDiscovery();
+
+        exports.handler = async (event, context) => {
+          const serviceId = event.ResourceProperties.ServiceId;
+          const asgName = event.ResourceProperties.AsgName;
+
+          if (event.RequestType === 'Delete') {
+            try {
+              const instances = await servicediscovery.discoverInstances({ NamespaceName: 'fractalbits.local', ServiceName: 'bss-server' }).promise();
+              for (const instance of instances.Instances) {
+                await servicediscovery.deregisterInstance({ ServiceId: serviceId, InstanceId: instance.InstanceId }).promise();
+              }
+            } catch (error) {
+              console.error('Error deregistering instances:', error);
+              // Don't fail the custom resource on error, as the service might already be gone
+            }
+          }
+
+          return { Status: 'SUCCESS' };
+        };
+      `),
+      role: ec2Role, // Reuse the existing role
+    });
+
+    const deregisterProvider = new cr.Provider(this, 'DeregisterProvider', {
+      onEventHandler: deregisterLambda,
+    });
+
+    const deregisterResource = new cdk.CustomResource(this, 'DeregisterResource', {
+      serviceToken: deregisterProvider.serviceToken,
+      properties: {
+        ServiceId: bssService.serviceId,
+        AsgName: bssAsg.autoScalingGroupName,
+      },
+    });
+
+    deregisterResource.node.addDependency(bssAsg);
+    bssService.node.addDependency(deregisterResource);
 
     new cdk.CfnOutput(this, 'ApiNLBDnsName', {
       value: nlb ? nlb.loadBalancerDnsName : 'NLB not created',

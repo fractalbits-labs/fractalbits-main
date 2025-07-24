@@ -8,7 +8,7 @@ import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as autoscaling from 'aws-cdk-lib/aws-autoscaling';
 import * as servicediscovery from 'aws-cdk-lib/aws-servicediscovery';
 
-import {createInstance, createUserData, createEc2Asg, createEbsVolume} from './ec2-utils';
+import {createInstance, createUserData, createEc2Asg, createEbsVolume, setupAsgCloudMapDeregistration} from './ec2-utils';
 
 export interface FractalbitsVpcStackProps extends cdk.StackProps {
   numApiServers: number;
@@ -251,6 +251,12 @@ export class FractalbitsVpcStack extends cdk.Stack {
     instanceBootstrapOptions.forEach(({id, bootstrapOptions}) => {
       instances[id]?.addUserData(createUserData(this, bootstrapOptions).render())
     })
+
+    setupAsgCloudMapDeregistration(this, 'DeregisterBssAsgInstances', bssService, privateDnsNamespace, bssAsg);
+    setupAsgCloudMapDeregistration(this, 'DeregisterApiServerAsgInstances', apiServerService, privateDnsNamespace, apiServerAsg);
+    if (benchClientAsg && benchClientService) {
+      setupAsgCloudMapDeregistration(this, 'DeregisterBenchClientAsgInstances', benchClientService, privateDnsNamespace, benchClientAsg);
+    }
 
     // Outputs
     new cdk.CfnOutput(this, 'FractalbitsBucketName', {

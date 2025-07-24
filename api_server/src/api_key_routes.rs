@@ -45,7 +45,7 @@ pub async fn create_api_key(
     Json(payload): Json<CreateApiKeyRequest>,
 ) -> Result<Json<ApiKeyResponse>, (StatusCode, Json<ErrorResponse>)> {
     info!("Creating API key with name: {}", payload.name);
-    let api_key = Versioned::new(1, ApiKey::new(&payload.name));
+    let api_key = Versioned::new(0, ApiKey::new(&payload.name));
     let _key_id = api_key.data.key_id.clone();
     let _serialized_api_key = serde_json::to_string(&api_key.data).map_err(|e| {
         error!("Failed to serialize API key: {:?}", e);
@@ -77,9 +77,10 @@ pub async fn delete_api_key(
     State(app): State<Arc<AppState>>,
     Path(key_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    let key_id = key_id.trim_start_matches("/api_keys/").to_string();
     info!("Deleting API key with key_id: {}", key_id);
     let table: Table<_, ApiKeyTable> = Table::new(app.clone(), None);
-    let mut api_key = table.get(key_id.clone(), true).await.map_err(|e| {
+    let mut api_key = table.get(key_id, true).await.map_err(|e| {
         error!("Failed to get API key from RSS: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,

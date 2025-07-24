@@ -58,6 +58,8 @@ pub enum RpcError {
     InternalResponseError(String),
     #[error("Entry not found")]
     NotFound,
+    #[error("Entry already exists")]
+    AlreadyExists,
     #[error("Send error: {0}")]
     SendError(String),
     #[cfg(feature = "rss")] // for rss txn api

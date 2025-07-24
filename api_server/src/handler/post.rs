@@ -1,10 +1,12 @@
 mod complete_multipart_upload;
 mod create_multipart_upload;
 mod delete_objects;
+mod rename_dir;
 
 pub use complete_multipart_upload::complete_multipart_upload_handler;
 pub use create_multipart_upload::create_multipart_upload_handler;
 pub use delete_objects::delete_objects_handler;
+pub use rename_dir::rename_dir_handler;
 
 use super::common::authorization::Authorization;
 
@@ -12,6 +14,7 @@ pub enum PostEndpoint {
     CompleteMultipartUpload(String),
     CreateMultipartUpload,
     DeleteObjects,
+    RenameDir,
 }
 
 impl PostEndpoint {
@@ -20,6 +23,7 @@ impl PostEndpoint {
             PostEndpoint::CompleteMultipartUpload(_) => Authorization::Write,
             PostEndpoint::CreateMultipartUpload => Authorization::Write,
             PostEndpoint::DeleteObjects => Authorization::Write,
+            PostEndpoint::RenameDir => Authorization::Write,
         }
     }
 
@@ -28,6 +32,7 @@ impl PostEndpoint {
             PostEndpoint::CompleteMultipartUpload(_) => "CompleteMultipartUpload",
             PostEndpoint::CreateMultipartUpload => "CreateMultipartUpload",
             PostEndpoint::DeleteObjects => "DeleteObjects",
+            PostEndpoint::RenameDir => "RenameDir",
         }
     }
 }

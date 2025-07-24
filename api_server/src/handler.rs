@@ -161,10 +161,9 @@ async fn any_handler_inner(
         if auth.is_none() {
             tracing::warn!("allowing anonymous access, falling back to 'test_api_key'");
             let access_key = "test_api_key";
-            let api_key =
-                common::signature::payload::get_api_key(app.clone(), access_key)
-                    .await
-                    .map_err(|_| S3Error::InvalidAccessKeyId)?;
+            let api_key = common::signature::payload::get_api_key(app.clone(), access_key)
+                .await
+                .map_err(|_| S3Error::InvalidAccessKeyId)?;
             VerifiedRequest {
                 request: request.map(ReqBody::from),
                 api_key,
@@ -193,7 +192,8 @@ async fn any_handler_inner(
                             VerifiedRequest {
                                 request: request.map(ReqBody::from),
                                 api_key,
-                                content_sha256_header: signature::ContentSha256Header::UnsignedPayload,
+                                content_sha256_header:
+                                    signature::ContentSha256Header::UnsignedPayload,
                             }
                         }
                     }
@@ -208,16 +208,14 @@ async fn any_handler_inner(
         let auth_unwrapped = auth.ok_or(S3Error::InvalidSignature)?;
         match verify_request(app.clone(), request, &auth_unwrapped).await {
             Ok(res) => res,
-            Err(signature::error::Error::SignatureError(e, _)) => {
-                match *e {
-                    signature::error::Error::RpcErrorRss(RpcErrorRss::NotFound) => {
-                        return Err(S3Error::InvalidAccessKeyId);
-                    }
-                    _ => {
-                        return Err(S3Error::InvalidSignature);
-                    }
+            Err(signature::error::Error::SignatureError(e, _)) => match *e {
+                signature::error::Error::RpcErrorRss(RpcErrorRss::NotFound) => {
+                    return Err(S3Error::InvalidAccessKeyId);
                 }
-            }
+                _ => {
+                    return Err(S3Error::InvalidSignature);
+                }
+            },
             Err(e) => {
                 tracing::error!("unexpected error during signature verification: {:?}", e);
                 return Err(S3Error::InternalError);
@@ -384,6 +382,7 @@ async fn post_handler(
         PostEndpoint::DeleteObjects => {
             post::delete_objects_handler(app, request, bucket, blob_deletion).await
         }
+        PostEndpoint::RenameDir => post::rename_dir_handler(app, request, bucket).await,
     }
 }
 

@@ -44,8 +44,12 @@ impl Endpoint {
                         return Ok(Endpoint::Bucket(BucketEndpoint::ListBuckets));
                     }
                 }
-                Method::POST if api_cmd == Some(ApiCommand::Delete) => {
-                    // Handled in later endpoint (PostEndpoint::DeleteObjects)
+                Method::POST
+                    if api_cmd == Some(ApiCommand::Delete)
+                        || api_cmd == Some(ApiCommand::Rename) =>
+                {
+                    // Handled in later endpoint
+                    // (PostEndpoint::DeleteObjects, PostEndpoint::Rename)
                 }
                 _ => return Err(S3Error::NotImplemented),
             }
@@ -117,6 +121,7 @@ impl Endpoint {
     ) -> Result<Endpoint, S3Error> {
         match (api_cmd, api_sig.upload_id) {
             (Some(ApiCommand::Delete), None) => Ok(Endpoint::Post(PostEndpoint::DeleteObjects)),
+            (Some(ApiCommand::Rename), None) => Ok(Endpoint::Post(PostEndpoint::RenameDir)),
             (Some(ApiCommand::Uploads), None) => {
                 Ok(Endpoint::Post(PostEndpoint::CreateMultipartUpload))
             }

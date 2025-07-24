@@ -247,4 +247,48 @@ impl RpcClient {
             PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
         Ok(resp)
     }
+
+    pub async fn rename_dir(
+        &self,
+        root_blob_name: &str,
+        src_path: &str,
+        dst_path: &str,
+    ) -> Result<(), RpcError> {
+        let _guard = InflightRpcGuard::new("nss", "rename_dir");
+        let body = RenameDirRequest {
+            root_blob_name: root_blob_name.to_string(),
+            src_path: src_path.to_string(),
+            dst_path: dst_path.to_string(),
+        };
+
+        let mut header = MessageHeader::default();
+        let request_id = self.gen_request_id();
+        header.id = request_id;
+        header.command = Command::RenameDir;
+        header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+
+        let mut request_bytes = BytesMut::with_capacity(header.size as usize);
+        header.encode(&mut request_bytes);
+        body.encode(&mut request_bytes)
+            .map_err(RpcError::EncodeError)?;
+
+        let resp_bytes = self
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .await
+            .map_err(|e| {
+                if !e.retryable() {
+                    error!(rpc=%"rename_dir", %request_id, %root_blob_name, %src_path, %dst_path, error=?e, "nss rpc failed");
+                }
+                e
+            })?
+            .body;
+        let resp: RenameDirResponse =
+            PbMessage::decode(resp_bytes).map_err(RpcError::DecodeError)?;
+        match resp.result.unwrap() {
+            rename_dir_response::Result::Ok(_) => Ok(()),
+            rename_dir_response::Result::ErrSrcNonexisted(_) => Err(RpcError::NotFound),
+            rename_dir_response::Result::ErrDstExisted(_) => Err(RpcError::AlreadyExists),
+            rename_dir_response::Result::ErrOthers(e) => Err(RpcError::InternalResponseError(e)),
+        }
+    }
 }

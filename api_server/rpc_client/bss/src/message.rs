@@ -25,9 +25,6 @@ pub struct MessageHeader {
     /// The bss block number
     pub block_number: u32,
 
-    /// Response result
-    pub result: u64,
-
     /// Errno which can be converted into `std::io::Error`(`from_raw_os_error()`)
     pub errno: i32,
 
@@ -38,14 +35,14 @@ pub struct MessageHeader {
     /// u32 size, defined as enum type
     pub command: Command,
 
+    /// 4k aligned size (header included), to use for direct-io
+    pub align_size: u32,
+
     /// Bucket Id
     pub bucket_id: [u8; 16],
 
     /// Blob Id
     pub blob_id: [u8; 16],
-
-    /// 4k aligned size (header included), to use for direct-io
-    pub align_size: u32,
 
     /// The version of the protocol implementation that originated this message.
     pub protocol: u16,
@@ -56,7 +53,7 @@ pub struct MessageHeader {
     // Note rust arrays of sizes from 0 to 32 (inclusive) implement the Default trait if the element
     // type allows it. As a stopgap, trait implementations are statically generated up to size 32.
     // See [doc](https://doc.rust-lang.org/std/primitive.array.html) for more details.
-    reserved0: [u8; 13],
+    reserved0: [u8; 21],
     reserved1: [u8; 32],
     reserved2: [u8; 32],
     reserved3: [u8; 32],

@@ -36,7 +36,12 @@ pub fn run_cmd_bench(
             *service_name = ServiceName::All;
             build_rss_api_server(build_mode)?;
             build_rewrk()?;
-            run_cmd_service(*service_name, ServiceAction::Restart, BuildMode::Release)?;
+            run_cmd_service(
+                *service_name,
+                ServiceAction::Restart,
+                BuildMode::Release,
+                false,
+            )?;
             uri = "http://mybucket.localhost:8080";
             bench_exe = "./target/release/rewrk";
             bench_opts.extend_from_slice(&[
@@ -119,7 +124,12 @@ pub fn run_cmd_bench(
     }
 
     // stop service after benchmark to save cpu power
-    run_cmd_service(*service_name, ServiceAction::Stop, BuildMode::Release)?;
+    run_cmd_service(
+        *service_name,
+        ServiceAction::Stop,
+        BuildMode::Release,
+        false,
+    )?;
 
     Ok(())
 }

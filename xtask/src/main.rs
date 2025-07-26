@@ -14,6 +14,7 @@ use strum::{AsRefStr, EnumString};
 pub const TEST_BUCKET_ROOT_BLOB_NAME: &str = "947ef2be-44b2-4ac2-969b-2574eb85662b";
 pub const TS_FMT: &str = "%b %d %H:%M:%.S";
 pub const NSS_SERVER_BENCH_CONFIG: &str = "nss_server_bench_config.toml";
+pub const API_SERVER_GUI_CONFIG: &str = "api_server_gui_config.toml";
 
 #[derive(Parser)]
 #[command(rename_all = "snake_case")]
@@ -73,6 +74,9 @@ enum Cmd {
 
         #[clap(long, long_help = "release build or not")]
         release: bool,
+
+        #[clap(long, long_help = "start service for gui")]
+        for_gui: bool,
     },
 
     #[clap(about = "Run tool related commands (gen_uuids only for now)")]
@@ -163,6 +167,7 @@ fn main() -> CmdResult {
             cmd_build::build_rss_api_server(build_mode)?;
             cmd_build::build_bss_nss_server(build_mode)?;
             cmd_build::build_rewrk_rpc()?;
+            cmd_build::build_ui()?;
         }
         Cmd::Precheckin { api_only } => cmd_precheckin::run_cmd_precheckin(api_only)?,
         Cmd::Nightly => cmd_nightly::run_cmd_nightly()?,
@@ -184,15 +189,21 @@ fn main() -> CmdResult {
                 &mut service_name,
             )
             .inspect_err(|_| {
-                cmd_service::run_cmd_service(service_name, ServiceAction::Stop, BuildMode::Release)
-                    .unwrap();
+                cmd_service::run_cmd_service(
+                    service_name,
+                    ServiceAction::Stop,
+                    BuildMode::Release,
+                    false,
+                )
+                .unwrap();
             })?;
         }
         Cmd::Service {
             action,
             service,
             release,
-        } => cmd_service::run_cmd_service(service, action, build_mode(release))?,
+            for_gui,
+        } => cmd_service::run_cmd_service(service, action, build_mode(release), for_gui)?,
         Cmd::Tool(tool_kind) => cmd_tool::run_cmd_tool(tool_kind)?,
         Cmd::Deploy {
             use_s3_backend,

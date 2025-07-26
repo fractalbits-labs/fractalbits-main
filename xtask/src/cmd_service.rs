@@ -4,14 +4,15 @@ pub fn run_cmd_service(
     service: ServiceName,
     action: ServiceAction,
     build_mode: BuildMode,
+    for_gui: bool,
 ) -> CmdResult {
     match action {
         ServiceAction::Init => init_service(service, build_mode),
         ServiceAction::Stop => stop_service(service),
-        ServiceAction::Start => start_services(service, build_mode),
+        ServiceAction::Start => start_services(service, build_mode, for_gui),
         ServiceAction::Restart => {
             stop_service(service)?;
-            start_services(service, build_mode)
+            start_services(service, build_mode, for_gui)
         }
     }
 }
@@ -136,17 +137,17 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
     Ok(())
 }
 
-pub fn start_services(service: ServiceName, build_mode: BuildMode) -> CmdResult {
+pub fn start_services(service: ServiceName, build_mode: BuildMode, for_gui: bool) -> CmdResult {
     match service {
         ServiceName::Bss => start_bss_service(build_mode)?,
         ServiceName::Nss => start_nss_service(build_mode, false)?,
         ServiceName::Rss => start_rss_service(build_mode)?,
-        ServiceName::ApiServer => start_api_server(build_mode)?,
+        ServiceName::ApiServer => start_api_server(build_mode, for_gui)?,
         ServiceName::All => {
             start_rss_service(build_mode)?;
             start_bss_service(build_mode)?;
             start_nss_service(build_mode, false)?;
-            start_api_server(build_mode)?;
+            start_api_server(build_mode, for_gui)?;
         }
         ServiceName::Minio => start_minio_service()?,
         ServiceName::DdbLocal => start_ddb_local_service()?,
@@ -155,7 +156,7 @@ pub fn start_services(service: ServiceName, build_mode: BuildMode) -> CmdResult 
 }
 
 pub fn start_bss_service(build_mode: BuildMode) -> CmdResult {
-    create_systemd_unit_file(ServiceName::Bss, build_mode)?;
+    create_systemd_unit_file(ServiceName::Bss, build_mode, None)?;
 
     let bss_wait_secs = 10;
     run_cmd! {
@@ -178,7 +179,12 @@ pub fn start_nss_service(build_mode: BuildMode, data_on_local: bool) -> CmdResul
         }
     }
 
-    create_systemd_unit_file(ServiceName::Nss, build_mode)?;
+    let pwd = run_fun!(pwd)?;
+    let config_file = match build_mode {
+        BuildMode::Debug => None,
+        BuildMode::Release => Some(format!("{pwd}/etc/{NSS_SERVER_BENCH_CONFIG}")),
+    };
+    create_systemd_unit_file(ServiceName::Nss, build_mode, config_file)?;
 
     let nss_wait_secs = 10;
     run_cmd! {
@@ -208,7 +214,7 @@ pub fn start_rss_service(build_mode: BuildMode) -> CmdResult {
         ./target/${build}/rss_admin --region=fakeRegion api-key init-test;
     }?;
 
-    create_systemd_unit_file(ServiceName::Rss, build_mode)?;
+    create_systemd_unit_file(ServiceName::Rss, build_mode, None)?;
     let rss_wait_secs = 10;
     run_cmd! {
         systemctl --user start rss.service;
@@ -352,8 +358,13 @@ WorkingDirectory={pwd}/data
     Ok(())
 }
 
-pub fn start_api_server(build_mode: BuildMode) -> CmdResult {
-    create_systemd_unit_file(ServiceName::ApiServer, build_mode)?;
+pub fn start_api_server(build_mode: BuildMode, for_gui: bool) -> CmdResult {
+    let pwd = run_fun!(pwd)?;
+    let config_file = match for_gui {
+        false => None,
+        true => Some(format!("{pwd}/etc/{API_SERVER_GUI_CONFIG}")),
+    };
+    create_systemd_unit_file(ServiceName::ApiServer, build_mode, config_file)?;
 
     let api_server_wait_secs = 5;
     run_cmd! {
@@ -367,7 +378,11 @@ pub fn start_api_server(build_mode: BuildMode) -> CmdResult {
     Ok(())
 }
 
-fn create_systemd_unit_file(service: ServiceName, build_mode: BuildMode) -> CmdResult {
+fn create_systemd_unit_file(
+    service: ServiceName,
+    build_mode: BuildMode,
+    config_file: Option<String>,
+) -> CmdResult {
     let pwd = run_fun!(pwd)?;
     let build = build_mode.as_ref();
     let service_name = service.as_ref();
@@ -384,7 +399,7 @@ Environment="RUST_LOG=info""##
             }
         }
     };
-    let exec_start = match service {
+    let mut exec_start = match service {
         ServiceName::Bss => format!("{pwd}/zig-out/bin/bss_server"),
         ServiceName::Nss => match build_mode {
             BuildMode::Debug => format!("{pwd}/zig-out/bin/nss_server serve"),
@@ -408,6 +423,9 @@ Environment="AWS_ENDPOINT_URL_DYNAMODB=http://localhost:8000""##
         }
         _ => unreachable!(),
     };
+    if let Some(config) = config_file {
+        exec_start += &format!(" -c {config}");
+    }
     let working_dir = run_fun!(realpath $pwd/data)?;
     let systemd_unit_content = format!(
         r##"[Unit]

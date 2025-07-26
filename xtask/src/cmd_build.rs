@@ -72,3 +72,12 @@ pub fn build_rss_api_server(mode: BuildMode) -> CmdResult {
         BUILD_INFO=$build_info cargo build $opts;
     }
 }
+
+pub fn build_ui() -> CmdResult {
+    run_cmd! {
+        info "Building ui ...";
+        cd ./ui;
+        npm install;
+        npm run build;
+    }
+}

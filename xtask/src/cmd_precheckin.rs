@@ -84,7 +84,7 @@ fn run_art_tests() -> CmdResult {
 
 fn run_s3_api_tests() -> CmdResult {
     cmd_service::init_service(ServiceName::All, BuildMode::Debug)?;
-    cmd_service::start_services(ServiceName::All, BuildMode::Debug)?;
+    cmd_service::start_services(ServiceName::All, BuildMode::Debug, false)?;
     run_cmd! {
         info "Run cargo tests (s3 api tests)";
         cargo test -- --test-threads 1;

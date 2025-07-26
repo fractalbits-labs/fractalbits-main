@@ -16,6 +16,7 @@ export interface FractalbitsVpcStackProps extends cdk.StackProps {
   benchType?: "service_endpoint" | "external" | null;
   availabilityZone?: string;
   bssInstanceTypes: string;
+  browserIp?: string;
 }
 
 export class FractalbitsVpcStack extends cdk.Stack {
@@ -37,6 +38,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       enableDnsSupport: true,
       subnetConfiguration: [
         {name: 'PrivateSubnet', subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24},
+        {name: 'PublicSubnet', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24},
       ],
     });
 
@@ -146,6 +148,17 @@ export class FractalbitsVpcStack extends cdk.Stack {
       // { id: 'nss_server_secondary', subnet: ec2.SubnetType.PRIVATE_ISOLATED, instanceType: nss_instance_type, sg: privateSg },
     ];
 
+    if (props.browserIp) {
+      const guiServerSg = new ec2.SecurityGroup(this, 'GuiServerSG', {
+        vpc: this.vpc,
+        securityGroupName: 'FractalbitsGuiServerSG',
+        description: 'Allow inbound on port 80 from a specific IP address',
+        allowAllOutbound: true,
+      });
+      guiServerSg.addIngressRule(ec2.Peer.ipv4(`${props.browserIp}/32`), ec2.Port.tcp(80), 'Allow access to port 80 from specific IP');
+      instanceConfigs.push({id: 'gui_server', subnet: ec2.SubnetType.PUBLIC, instanceType: new ec2.InstanceType('c8g.large'), sg: guiServerSg});
+    }
+
     let benchClientAsg: autoscaling.AutoScalingGroup | undefined;
     let benchClientService: servicediscovery.Service | undefined;
     if (props.benchType === "external") {
@@ -241,11 +254,21 @@ export class FractalbitsVpcStack extends cdk.Stack {
         id: 'nss_server_secondary',
         bootstrapOptions: `${forBenchFlag} nss_server --bucket=${bucketName} --volume_id=${ebsVolumeId} --iam_role=${ec2Role.roleName}`
       },
+      {
+        id: 'gui_server',
+        bootstrapOptions: `gui_server --bucket=${bucket.bucketName} --nss_ip=${instances["nss_server_primary"].instancePrivateIp} --rss_ip=${instances["root_server"].instancePrivateIp}`
+      },
     ];
     if (props.benchType === "external") {
       instanceBootstrapOptions.push({
         id: 'bench_server',
         bootstrapOptions: `bench_server --bench_client_service_id=${benchClientService?.serviceId} --bench_client_num=${props.numBenchClients}`,
+      });
+    }
+    if (props.browserIp) {
+      instanceBootstrapOptions.push({
+        id: 'gui_server',
+        bootstrapOptions: `${forBenchFlag} gui_server --bucket=${bucket.bucketName} --nss_ip=${instances["nss_server_primary"].instancePrivateIp} --rss_ip=${instances["root_server"].instancePrivateIp}`
       });
     }
     instanceBootstrapOptions.forEach(({id, bootstrapOptions}) => {
@@ -330,6 +353,13 @@ export class FractalbitsVpcStack extends cdk.Stack {
       new cdk.CfnOutput(this, 'benchClientAsgName', {
         value: benchClientAsg.autoScalingGroupName,
         description: `Bench Client Auto Scaling Group Name`,
+      });
+    }
+
+    if (props.browserIp) {
+      new cdk.CfnOutput(this, 'GuiServerPublicIp', {
+        value: instances['gui_server'].instancePublicIp,
+        description: 'Public IP of the GUI Server',
       });
     }
   }

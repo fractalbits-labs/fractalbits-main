@@ -1,14 +1,11 @@
 use crate::*;
 
-pub fn bootstrap(
-    service_id: &str,
-    bucket_name: &str,
-    nss_ip: &str,
-    rss_ip: &str,
-    for_bench: bool,
-) -> CmdResult {
+pub fn bootstrap(bucket_name: &str, nss_ip: &str, rss_ip: &str) -> CmdResult {
     install_rpms(&["amazon-cloudwatch-agent", "nmap-ncat", "perf"])?;
     download_binaries(&["api_server"])?;
+
+    let builds_bucket = format!("s3://fractalbits-builds-{}", get_current_aws_region()?);
+    run_cmd!(aws s3 cp --no-progress $builds_bucket/ui $WEB_ROOT --recursive)?;
 
     let bss_service_name = "bss-server.fractalbits.local";
     info!("Waiting for bss with dns name: {bss_service_name}");
@@ -28,22 +25,8 @@ pub fn bootstrap(
 
     create_config(bucket_name, &bss_ip, nss_ip, rss_ip)?;
 
-    if for_bench {
-        // Try to download tools for micro-benchmarking
-        download_binaries(&["rewrk_rpc", "fbs", "test_art"])?;
-        // Testing data for bss-rpc
-        xtask_tools::gen_uuids(1_000_000, "/data/uuids.data")?;
-        // Testing data for bss-rpc
-        run_cmd! {
-            cd /data;
-            info "Generating random 10_000_000 keys for nss-rpc";
-            /opt/fractalbits/bin/test_art --gen --size 10000000;
-        }?;
-    }
-
     // setup_cloudwatch_agent()?;
     create_systemd_unit_file("api_server", true)?;
-    create_cloudmap_register_and_deregister_service(service_id)?;
 
     Ok(())
 }
@@ -62,7 +45,8 @@ port = 80
 root_domain = ".localhost"
 with_metrics = false
 request_timeout_seconds = 115
-allow_missing_or_bad_signature = false
+allow_missing_or_bad_signature = true
+web_root = "{WEB_ROOT}"
 
 [s3_cache]
 s3_host = "http://s3.{aws_region}.amazonaws.com"

@@ -24,6 +24,7 @@ pub struct Config {
 
     pub s3_cache: S3CacheConfig,
     pub allow_missing_or_bad_signature: bool,
+    pub web_root: String,
 }
 
 #[allow(dead_code)]
@@ -62,6 +63,7 @@ impl Default for Config {
             with_metrics: true,
             request_timeout_seconds: 115,
             allow_missing_or_bad_signature: false,
+            web_root: "../ui/dist".into(),
         }
     }
 }

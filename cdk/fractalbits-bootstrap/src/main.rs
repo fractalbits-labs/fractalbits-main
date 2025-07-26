@@ -3,6 +3,7 @@ mod bench_client;
 mod bench_server;
 mod bss_server;
 mod common;
+mod gui_server;
 mod nss_server;
 mod root_server;
 
@@ -45,6 +46,18 @@ enum Command {
         )]
         service_id: String,
 
+        #[clap(long, long_help = "S3 bucket name for fractalbits service")]
+        bucket: String,
+
+        #[clap(long, long_help = "primary nss_server IP address")]
+        nss_ip: String,
+
+        #[clap(long, long_help = "root_server IP address")]
+        rss_ip: String,
+    },
+
+    #[clap(about = "Run on api_server instance to bootstrap fractalbits service(s)")]
+    GuiServer {
         #[clap(long, long_help = "S3 bucket name for fractalbits service")]
         bucket: String,
 
@@ -173,6 +186,11 @@ fn main() -> CmdResult {
             nss_ip,
             rss_ip,
         } => api_server::bootstrap(&service_id, &bucket, &nss_ip, &rss_ip, for_bench)?,
+        Command::GuiServer {
+            bucket,
+            nss_ip,
+            rss_ip,
+        } => gui_server::bootstrap(&bucket, &nss_ip, &rss_ip)?,
         Command::BssServer {
             service_id,
             meta_stack_testing,

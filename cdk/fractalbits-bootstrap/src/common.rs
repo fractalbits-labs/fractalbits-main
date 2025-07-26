@@ -2,6 +2,7 @@ use cmd_lib::*;
 
 pub const BIN_PATH: &str = "/opt/fractalbits/bin/";
 pub const ETC_PATH: &str = "/opt/fractalbits/etc/";
+pub const WEB_ROOT: &str = "/opt/fractalbits/www/";
 pub const API_SERVER_CONFIG: &str = "api_server_cloud_config.toml";
 pub const BSS_SERVER_CONFIG: &str = "bss_server_cloud_config.toml";
 pub const NSS_SERVER_CONFIG: &str = "nss_server_cloud_config.toml";

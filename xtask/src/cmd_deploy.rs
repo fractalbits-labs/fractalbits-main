@@ -110,6 +110,8 @@ pub fn run_cmd_deploy(
         }?;
     }
 
+    cmd_build::build_ui()?;
+
     info!("Uploading Rust-built binaries");
     let rust_bins = [
         "api_server",
@@ -135,6 +137,8 @@ pub fn run_cmd_deploy(
     for bin in &zig_bins {
         run_cmd!(aws s3 cp zig-out/bin/$bin $bucket/$arch/$bin)?;
     }
+
+    run_cmd!(aws s3 cp ui/dist $bucket/ui --recursive)?;
 
     // Upload bss_server separately
     if bss_use_i3 {

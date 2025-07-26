@@ -86,6 +86,7 @@ async fn main() {
     }
 
     let port = config.port;
+    let web_root = &config.web_root.clone();
     let app_state = AppState::new(ArcConfig(Arc::new(config))).await;
 
     let api_key_routes = Router::new()
@@ -94,7 +95,7 @@ async fn main() {
         .route("/{key_id}", delete(api_key_routes::delete_api_key));
 
     let app = Router::new()
-        .nest_service("/ui", ServeDir::new("../ui/dist"))
+        .nest_service("/ui", ServeDir::new(web_root))
         .nest("/api_keys", api_key_routes)
         .fallback(any_handler)
         .layer(

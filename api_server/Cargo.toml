@@ -13,7 +13,8 @@ kv_client_traits.workspace = true
 slotmap_conn_pool.workspace = true
 
 serde.workspace = true
-axum = { workspace = true, features = ["json"] }
+config.workspace = true
+axum.workspace = true
 axum-extra.workspace = true
 axum-macros.workspace = true
 tokio.workspace = true

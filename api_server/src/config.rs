@@ -1,13 +1,6 @@
-use std::fs;
 use std::net::SocketAddr;
-use std::ops::Deref;
-use std::path::PathBuf;
-use std::sync::Arc;
 
-use axum_macros::FromRef;
-use serde::Deserialize;
-
-#[derive(Deserialize, Debug, Clone)]
+#[derive(serde::Deserialize, Debug, Clone)]
 pub struct Config {
     pub bss_addr: SocketAddr,
     pub nss_addr: SocketAddr,
@@ -28,7 +21,7 @@ pub struct Config {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, Debug, Clone)]
+#[derive(serde::Deserialize, Debug, Clone)]
 pub struct S3CacheConfig {
     pub s3_host: String,
     pub s3_port: u16,
@@ -65,21 +58,5 @@ impl Default for Config {
             allow_missing_or_bad_signature: false,
             web_root: "../ui/dist".into(),
         }
-    }
-}
-
-pub fn read_config(config_file: PathBuf) -> Config {
-    let config = fs::read_to_string(config_file).unwrap();
-
-    toml::from_str(&config).unwrap()
-}
-
-#[derive(Clone, FromRef)]
-pub struct ArcConfig(pub Arc<Config>);
-
-impl Deref for ArcConfig {
-    type Target = Config;
-    fn deref(&self) -> &Config {
-        &self.0
     }
 }

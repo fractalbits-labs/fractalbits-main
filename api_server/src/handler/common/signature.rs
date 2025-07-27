@@ -75,7 +75,9 @@ pub async fn verify_request(
     let request =
         streaming::parse_streaming_body(req, &checked_signature, &app.config.region, "s3")?;
 
-    let api_key = checked_signature.key.ok_or(Error::RpcErrorRss(RpcErrorRss::NotFound))?;
+    let api_key = checked_signature
+        .key
+        .ok_or(Error::RpcErrorRss(RpcErrorRss::NotFound))?;
 
     Ok(VerifiedRequest {
         request,

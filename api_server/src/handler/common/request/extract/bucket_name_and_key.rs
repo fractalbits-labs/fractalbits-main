@@ -1,11 +1,12 @@
 use axum::{
-    extract::{FromRef, FromRequestParts},
+    extract::FromRequestParts,
     http::{request::Parts, uri::Authority},
     RequestPartsExt,
 };
 use axum_extra::extract::Host;
+use std::sync::Arc;
 
-use crate::{config::ArcConfig, handler::common::s3_error::S3Error};
+use crate::{handler::common::s3_error::S3Error, AppState, Config};
 
 pub struct BucketAndKeyName {
     pub bucket: String,
@@ -15,7 +16,7 @@ pub struct BucketAndKeyName {
 impl BucketAndKeyName {
     async fn buket_name_from_host(
         parts: &mut Parts,
-        config: ArcConfig,
+        config: &Config,
     ) -> Result<Option<String>, S3Error> {
         let Host(host) = parts.extract::<Host>().await?;
         let authority: Authority = host.parse::<Authority>()?;
@@ -42,17 +43,15 @@ impl BucketAndKeyName {
     }
 }
 
-impl<S> FromRequestParts<S> for BucketAndKeyName
-where
-    ArcConfig: FromRef<S>,
-    S: Send + Sync,
-{
+impl FromRequestParts<Arc<AppState>> for BucketAndKeyName {
     type Rejection = S3Error;
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
         let full_key = parts.uri.path().to_owned();
-        let config = ArcConfig::from_ref(state);
-        let (bucket, key) = match Self::buket_name_from_host(parts, config).await? {
+        let (bucket, key) = match Self::buket_name_from_host(parts, &state.config).await? {
             // Virtual-hosted-style request
             Some(bucket) => (bucket, full_key),
             // Path-style request
@@ -88,18 +87,11 @@ fn check_key_name(n: &str) -> Result<(), S3Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
-    use axum::{body::Body, http::Request, routing::get, Router};
+    use crate::Config;
+    use axum::{body::Body, http::Request, Router};
     use http_body_util::BodyExt;
     use std::sync::Arc;
     use tower::ServiceExt;
-
-    fn app() -> Router {
-        let config = ArcConfig(Arc::new(Config::default()));
-        Router::new()
-            .route("/{*key}", get(handler))
-            .with_state(config)
-    }
 
     async fn handler(
         BucketAndKeyName {
@@ -117,7 +109,13 @@ mod tests {
     }
 
     async fn send_request_get_body(bucket_name: &str) -> String {
-        let body = app()
+        let config = Arc::new(Config::default());
+        let app_state = Arc::new(AppState::new(config).await);
+        let app = Router::new()
+            .route("/{*key}", axum::routing::get(handler))
+            .with_state(app_state);
+
+        let body = app
             .oneshot(
                 Request::builder()
                     .uri(format!("http://{bucket_name}.localhost:3000/obj1?query1"))

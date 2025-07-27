@@ -3,11 +3,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 mod api_key_routes;
 
-use api_server::{
-    config::{self, ArcConfig},
-    handler::any_handler,
-    AppState,
-};
+use api_server::{handler::any_handler, AppState, Config};
 use axum::{
     extract::Request,
     routing::{delete, get, post},
@@ -56,8 +52,19 @@ async fn main() {
 
     let opt = Opt::parse();
     let config = match opt.config_file {
-        Some(config_file) => config::read_config(config_file),
-        None => config::Config::default(),
+        Some(config_file) => config::Config::builder()
+            .add_source(config::File::from(config_file).required(true))
+            .add_source(config::Environment::with_prefix("APP"))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap(),
+        None => config::Config::builder()
+            .add_source(config::Environment::with_prefix("APP"))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap_or_else(|_| Config::default()),
     };
 
     if config.with_metrics {
@@ -87,7 +94,7 @@ async fn main() {
 
     let port = config.port;
     let web_root = &config.web_root.clone();
-    let app_state = AppState::new(ArcConfig(Arc::new(config))).await;
+    let app_state = AppState::new(Arc::new(config)).await;
 
     let api_key_routes = Router::new()
         .route("/", post(api_key_routes::create_api_key))

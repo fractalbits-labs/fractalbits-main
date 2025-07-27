@@ -1,7 +1,11 @@
-use axum::{body::Body, extract::rejection::QueryRejection, http::{header::ToStrError, Request}};
+use axum::{
+    body::Body,
+    extract::rejection::QueryRejection,
+    http::{header::ToStrError, Request},
+};
 use rpc_client_rss::RpcErrorRss;
-use thiserror::Error;
 use sync_wrapper::SyncWrapper;
+use thiserror::Error;
 
 /// Errors of this crate
 #[derive(Debug, Error)]

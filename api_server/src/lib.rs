@@ -1,4 +1,4 @@
-pub mod config;
+mod config;
 pub mod handler;
 mod object_layout;
 
@@ -6,11 +6,10 @@ use aws_sdk_s3::{
     config::{BehaviorVersion, Credentials, Region},
     Client as S3Client, Config as S3Config,
 };
-use axum::extract::FromRef;
 
 use bucket_tables::{table::KvClientProvider, Versioned};
 use bytes::Bytes;
-use config::{ArcConfig, S3CacheConfig};
+pub use config::{Config, S3CacheConfig};
 use futures::stream::{self, StreamExt};
 use metrics::histogram;
 use moka::future::Cache;
@@ -37,7 +36,7 @@ use uuid::Uuid;
 pub type BlobId = uuid::Uuid;
 
 pub struct AppState {
-    pub config: ArcConfig,
+    pub config: Arc<Config>,
     pub cache: Arc<Cache<String, Versioned<String>>>,
 
     rpc_clients_nss: ConnPool<Arc<RpcClientNss>, SocketAddr>,
@@ -45,12 +44,6 @@ pub struct AppState {
 
     blob_client: Arc<BlobClient>,
     blob_deletion: Sender<(BlobId, usize)>,
-}
-
-impl FromRef<Arc<AppState>> for ArcConfig {
-    fn from_ref(state: &Arc<AppState>) -> Self {
-        Self(state.config.0.clone())
-    }
 }
 
 impl KvClientProvider for AppState {
@@ -71,7 +64,7 @@ impl KvClientProvider for AppState {
 }
 
 impl AppState {
-    pub async fn new(config: ArcConfig) -> Self {
+    pub async fn new(config: Arc<Config>) -> Self {
         let rpc_clients_rss =
             Self::new_rpc_clients_pool_rss(config.rss_addr, config.rss_conn_num).await;
         let rpc_clients_nss =

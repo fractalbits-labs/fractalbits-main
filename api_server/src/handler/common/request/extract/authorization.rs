@@ -1,16 +1,15 @@
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use crate::{
-    config::ArcConfig,
-    handler::common::{
-        s3_error::S3Error,
-        time::{LONG_DATETIME, SHORT_DATE},
-        xheader,
-    },
+use crate::handler::common::{
+    s3_error::S3Error,
+    time::{LONG_DATETIME, SHORT_DATE},
+    xheader,
 };
+use crate::AppState;
 use axum::{
-    extract::{FromRef, FromRequestParts},
+    extract::FromRequestParts,
     http::{
         header::{ToStrError, AUTHORIZATION},
         request::Parts,
@@ -64,15 +63,14 @@ impl Scope {
     }
 }
 
-impl<S> FromRequestParts<S> for AuthFromHeaders
-where
-    ArcConfig: FromRef<S>,
-    S: Send + Sync,
-{
+impl FromRequestParts<Arc<AppState>> for AuthFromHeaders {
     type Rejection = S3Error;
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let config = ArcConfig::from_ref(state);
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let config = &state.config;
         match Self::from_request_parts_inner(parts, state) {
             Ok(auth) => Ok(auth),
             Err(e) => {
@@ -87,11 +85,10 @@ where
 }
 
 impl AuthFromHeaders {
-    fn from_request_parts_inner<S>(parts: &mut Parts, _state: &S) -> Result<Self, S3Error>
-    where
-        ArcConfig: FromRef<S>,
-        S: Send + Sync,
-    {
+    fn from_request_parts_inner(
+        parts: &mut Parts,
+        _state: &Arc<AppState>,
+    ) -> Result<Self, S3Error> {
         let authorization = match parts.headers.get(AUTHORIZATION) {
             Some(auth) => auth.to_str()?,
             None => return Err(S3Error::AccessDenied),

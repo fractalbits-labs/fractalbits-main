@@ -114,16 +114,8 @@ WantedBy=multi-user.target
     Ok(())
 }
 
-// Note using imds sdk would need to use async apis, we'd rather keep it simple as it is for now
 pub fn get_current_aws_region() -> FunResult {
-    const HDR_TOKEN_TTL: &str = "X-aws-ec2-metadata-token-ttl-seconds";
-    const HDR_TOKEN: &str = "X-aws-ec2-metadata-token";
-    const IMDS_URL: &str = "http://169.254.169.254";
-    const TOKEN_PATH: &str = "latest/api/token";
-    const ID_PATH: &str = "latest/dynamic/instance-identity/document";
-
-    let token = run_fun!(curl -sS -X PUT -H "$HDR_TOKEN_TTL: 21600" "$IMDS_URL/$TOKEN_PATH")?;
-    run_fun!(curl -sS -H "$HDR_TOKEN: $token" "$IMDS_URL/$ID_PATH" | jq -r .region)
+    run_fun!(ec2-metadata --region | awk r"{print $2}")
 }
 
 // https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/storage-twp.html

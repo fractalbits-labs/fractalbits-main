@@ -4,7 +4,6 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as servicediscovery from 'aws-cdk-lib/aws-servicediscovery';
 import {createInstance, createUserData, createEc2Asg, addAsgDeregistrationLifecycleHook} from './ec2-utils';
-import {FractalbitsHelperStack} from './fractalbits-helper-stack';
 
 interface FractalbitsBenchVpcStackProps extends cdk.StackProps {
   serviceEndpoint: string;

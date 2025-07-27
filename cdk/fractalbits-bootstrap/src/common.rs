@@ -7,7 +7,6 @@ pub const API_SERVER_CONFIG: &str = "api_server_cloud_config.toml";
 pub const BSS_SERVER_CONFIG: &str = "bss_server_cloud_config.toml";
 pub const NSS_SERVER_CONFIG: &str = "nss_server_cloud_config.toml";
 pub const ROOT_SERVER_CONFIG: &str = "root_server_cloud_config.toml";
-pub const BENCH_SERVER_WORKLOAD_CONFIG: &str = "bench_workload.yaml";
 pub const BENCH_SERVER_BENCH_START_SCRIPT: &str = "bench_start.sh";
 pub const BOOTSTRAP_DONE_FILE: &str = "/opt/fractalbits/.bootstrap_done";
 #[allow(dead_code)]
@@ -64,9 +63,6 @@ Environment="RUST_LOG=info""##
         "bss_server" => {
             requires = "data-local.mount";
             format!("{BIN_PATH}{service_name} -c {ETC_PATH}{BSS_SERVER_CONFIG}")
-        }
-        "bench_server" => {
-            format!("{BIN_PATH}warp run {ETC_PATH}{BENCH_SERVER_WORKLOAD_CONFIG}")
         }
         "bench_client" => {
             format!("{BIN_PATH}warp client")

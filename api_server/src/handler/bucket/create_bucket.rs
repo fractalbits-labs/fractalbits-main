@@ -78,7 +78,8 @@ pub async fn create_bucket_handler(
         }
     }
 
-    let resp = nss_rpc_retry!(app, create_root_inode(&bucket_name)).await?;
+    let rpc_timeout = app.config.rpc_timeout();
+    let resp = nss_rpc_retry!(app, create_root_inode(&bucket_name, Some(rpc_timeout))).await?;
     let root_blob_name = match resp.result.unwrap() {
         create_root_inode_response::Result::Ok(res) => res,
         create_root_inode_response::Result::Err(e) => {
@@ -91,7 +92,11 @@ pub async fn create_bucket_handler(
     for i in 0..retry_times {
         let bucket_table: Table<Arc<AppState>, BucketTable> =
             Table::new(app.clone(), Some(app.cache.clone()));
-        if bucket_table.get(bucket_name.clone(), false).await.is_ok() {
+        if bucket_table
+            .get(bucket_name.clone(), false, Some(rpc_timeout))
+            .await
+            .is_ok()
+        {
             return Err(S3Error::BucketAlreadyExists);
         }
 
@@ -105,7 +110,9 @@ pub async fn create_bucket_handler(
 
         let api_key_table: Table<Arc<AppState>, ApiKeyTable> =
             Table::new(app.clone(), Some(app.cache.clone()));
-        let mut api_key = api_key_table.get(api_key_id.clone(), false).await?;
+        let mut api_key = api_key_table
+            .get(api_key_id.clone(), false, Some(rpc_timeout))
+            .await?;
         api_key
             .data
             .authorized_buckets
@@ -118,7 +125,7 @@ pub async fn create_bucket_handler(
             i,
         );
         match bucket_table
-            .put_with_extra::<ApiKeyTable>(&bucket, &api_key)
+            .put_with_extra::<ApiKeyTable>(&bucket, &api_key, Some(rpc_timeout))
             .await
         {
             Err(e) => {

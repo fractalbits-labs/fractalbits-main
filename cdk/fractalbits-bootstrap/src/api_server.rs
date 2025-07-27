@@ -61,7 +61,8 @@ region = "{aws_region}"
 port = 80
 root_domain = ".localhost"
 with_metrics = false
-request_timeout_seconds = 115
+http_request_timeout_seconds = 5
+rpc_timeout_seconds = 4
 allow_missing_or_bad_signature = false
 web_root = "{WEB_ROOT}"
 

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::{
     message::MessageHeader,
     rpc_client::{InflightRpcGuard, Message, RpcClient, RpcError},
@@ -15,6 +17,7 @@ impl RpcClient {
         root_blob_name: &str,
         key: &str,
         value: Bytes,
+        timeout: Option<Duration>,
     ) -> Result<PutInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "put_inode");
         let mut nss_key = key.to_string();
@@ -37,7 +40,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -55,6 +58,7 @@ impl RpcClient {
         &self,
         root_blob_name: &str,
         key: &str,
+        timeout: Option<Duration>,
     ) -> Result<GetInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "get_inode");
         let mut nss_key = key.to_string();
@@ -76,7 +80,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -98,6 +102,7 @@ impl RpcClient {
         delimiter: &str,
         start_after: &str,
         skip_mpu_parts: bool,
+        timeout: Option<Duration>,
     ) -> Result<ListInodesResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "list_inodes");
         let mut start_after_owned = start_after.to_string();
@@ -125,7 +130,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -143,6 +148,7 @@ impl RpcClient {
         &self,
         root_blob_name: &str,
         key: &str,
+        timeout: Option<Duration>,
     ) -> Result<DeleteInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "delete_inode");
         let mut nss_key = key.to_string();
@@ -164,7 +170,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -181,6 +187,7 @@ impl RpcClient {
     pub async fn create_root_inode(
         &self,
         bucket: &str,
+        timeout: Option<Duration>,
     ) -> Result<CreateRootInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "create_root_inode");
         let body = CreateRootInodeRequest {
@@ -199,7 +206,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -216,6 +223,7 @@ impl RpcClient {
     pub async fn delete_root_inode(
         &self,
         root_blob_name: &str,
+        timeout: Option<Duration>,
     ) -> Result<DeleteRootInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "delete_root_inode");
         let body = DeleteRootInodeRequest {
@@ -234,7 +242,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -253,6 +261,7 @@ impl RpcClient {
         root_blob_name: &str,
         src_path: &str,
         dst_path: &str,
+        timeout: Option<Duration>,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("nss", "rename_dir");
         let body = RenameDirRequest {
@@ -273,7 +282,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {

@@ -118,7 +118,12 @@ pub async fn put_object_handler(
         let start = Instant::now();
         let res = nss_rpc_retry!(
             app,
-            put_inode(&bucket.root_blob_name, &key, object_layout_bytes.clone())
+            put_inode(
+                &bucket.root_blob_name,
+                &key,
+                object_layout_bytes.clone(),
+                Some(app.config.rpc_timeout())
+            )
         )
         .await;
         histogram!("nss_rpc", "op" => "put_inode").record(start.elapsed().as_nanos() as f64);

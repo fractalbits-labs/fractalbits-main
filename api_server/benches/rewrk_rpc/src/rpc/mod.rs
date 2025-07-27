@@ -136,7 +136,7 @@ async fn benchmark_nss_read(
             let future = async move {
                 let request_start = Instant::now();
                 let result = rpc_client
-                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key)
+                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, None)
                     .await
                     .map(|_| ())
                     .map_err(|e| anyhow::anyhow!(e));
@@ -172,7 +172,7 @@ async fn benchmark_nss_read(
             let future = async move {
                 let request_start = Instant::now();
                 let result = rpc_client
-                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key)
+                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, None)
                     .await
                     .map(|_| ())
                     .map_err(|e| anyhow::anyhow!(e));
@@ -216,7 +216,7 @@ async fn benchmark_bss_write(
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
                 let result = rpc_client
-                    .put_blob(blob_id, 0, content)
+                    .put_blob(blob_id, 0, content, None)
                     .await
                     .map(|_| ()) // Map Ok(usize) to Ok(())
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorBss to anyhow::Error
@@ -253,7 +253,7 @@ async fn benchmark_bss_write(
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
                 let result = rpc_client
-                    .put_blob(blob_id, 0, content)
+                    .put_blob(blob_id, 0, content, None)
                     .await
                     .map(|_| ()) // Map Ok(usize) to Ok(())
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorBss to anyhow::Error
@@ -296,7 +296,7 @@ async fn benchmark_bss_read(
                 let blob_id = Uuid::parse_str(&uuid).unwrap();
                 let mut content = Bytes::new();
                 let result = rpc_client
-                    .get_blob(blob_id, 0, &mut content)
+                    .get_blob(blob_id, 0, &mut content, None)
                     .await
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorBss to anyhow::Error
                 (request_start, result.map(|_| content))
@@ -332,7 +332,7 @@ async fn benchmark_bss_read(
                 let blob_id = Uuid::parse_str(&uuid).unwrap();
                 let mut content = Bytes::new();
                 let result = rpc_client
-                    .get_blob(blob_id, 0, &mut content)
+                    .get_blob(blob_id, 0, &mut content, None)
                     .await
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorBss to anyhow::Error
                 (request_start, result.map(|_| content))
@@ -371,7 +371,7 @@ async fn benchmark_nss_write(
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
                 let result = rpc_client
-                    .put_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, value)
+                    .put_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, value, None)
                     .await
                     .map(|_| ()) // Map Ok(PutInodeResponse) to Ok(())
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorNss to anyhow::Error
@@ -407,7 +407,7 @@ async fn benchmark_nss_write(
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
                 let result = rpc_client
-                    .put_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, value)
+                    .put_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, value, None)
                     .await
                     .map(|_| ()) // Map Ok(PutInodeResponse) to Ok(())
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorNss to anyhow::Error

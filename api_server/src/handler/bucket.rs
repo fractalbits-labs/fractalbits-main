@@ -21,9 +21,10 @@ use std::{sync::Arc, time::Instant};
 pub async fn resolve_bucket(app: Arc<AppState>, bucket_name: String) -> Result<Bucket, S3Error> {
     let start = Instant::now();
     let cache = app.cache.clone();
+    let rpc_timeout = app.config.rpc_timeout();
     let bucket_table: Table<Arc<AppState>, BucketTable> = Table::new(app, Some(cache));
     let duration = start.elapsed();
-    match bucket_table.get(bucket_name, true).await {
+    match bucket_table.get(bucket_name, true, Some(rpc_timeout)).await {
         Ok(bucket) => {
             histogram!("resolve_bucket_nanos", "status" => "Ok").record(duration.as_nanos() as f64);
             Ok(bucket.data)

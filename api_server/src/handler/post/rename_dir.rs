@@ -29,7 +29,7 @@ pub async fn rename_dir_handler(
 
     let root_blob_name = bucket.root_blob_name.clone();
 
-    nss_rpc_retry!(app, rename_dir(&root_blob_name, &src_path, &dst_path))
+    nss_rpc_retry!(app, rename_dir(&root_blob_name, &src_path, &dst_path, Some(app.config.rpc_timeout())))
         .await
         .map_err(|e| {
             error!(bucket=%bucket.bucket_name, %src_path, %dst_path, error=%e, "failed to rename directory");

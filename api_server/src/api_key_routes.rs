@@ -59,7 +59,7 @@ pub async fn create_api_key(
     })?;
 
     let table: Table<_, ApiKeyTable> = Table::new(app.clone(), None);
-    table.put(&api_key).await.map_err(|e| {
+    table.put(&api_key, Some(app.config.rpc_timeout())).await.map_err(|e| {
         error!("Failed to put API key to RSS: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -80,7 +80,7 @@ pub async fn delete_api_key(
     let key_id = key_id.trim_start_matches("/api_keys/").to_string();
     info!("Deleting API key with key_id: {}", key_id);
     let table: Table<_, ApiKeyTable> = Table::new(app.clone(), None);
-    let api_key = table.get(key_id, true).await.map_err(|e| {
+    let api_key = table.get(key_id, true, Some(app.config.rpc_timeout())).await.map_err(|e| {
         error!("Failed to get API key from RSS: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -90,7 +90,7 @@ pub async fn delete_api_key(
             }),
         )
     })?;
-    table.delete(&api_key.data).await.map_err(|e| {
+    table.delete(&api_key.data, Some(app.config.rpc_timeout())).await.map_err(|e| {
         error!("Failed to put API key to RSS: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -109,7 +109,7 @@ pub async fn list_api_keys(
 ) -> Result<Json<Vec<ApiKeyResponse>>, (StatusCode, Json<ErrorResponse>)> {
     info!("Listing API keys");
     let table: Table<_, ApiKeyTable> = Table::new(app.clone(), None);
-    let api_keys = table.list().await.map_err(|e| {
+    let api_keys = table.list(Some(app.config.rpc_timeout())).await.map_err(|e| {
         error!("Failed to list API keys from RSS: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,

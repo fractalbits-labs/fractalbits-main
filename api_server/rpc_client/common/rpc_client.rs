@@ -8,7 +8,7 @@ use std::os::fd::RawFd;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::{
     self,
@@ -214,6 +214,7 @@ impl RpcClient {
         &self,
         request_id: u32,
         msg: Message,
+        timeout: Option<Duration>,
     ) -> Result<MessageFrame, RpcError> {
         let (tx, rx) = oneshot::channel();
         assert!(self.requests.lock().insert(request_id, tx).is_none());
@@ -223,14 +224,15 @@ impl RpcClient {
         gauge!("rpc_request_pending_in_send_queue", "type" => RPC_TYPE).increment(1.0);
         debug!(%request_id, "request sent from handler:");
 
-        let timeout_val = std::time::Duration::from_secs(110); // TODO: align with s3 handler setting
-        let result = tokio::time::timeout(timeout_val, rx).await;
-        let result = match result {
-            Ok(result) => result,
-            Err(_) => {
-                warn!(socket_fd=%self.socket_fd, %request_id, "{RPC_TYPE} rpc request timeout");
-                return Err(RpcError::InternalResponseError("timeout".into()));
-            }
+        let result = match timeout {
+            None => rx.await,
+            Some(rpc_timeout) => match tokio::time::timeout(rpc_timeout, rx).await {
+                Ok(result) => result,
+                Err(_) => {
+                    warn!(socket_fd=%self.socket_fd, %request_id, "{RPC_TYPE} rpc request timeout");
+                    return Err(RpcError::InternalResponseError("timeout".into()));
+                }
+            },
         };
         result.map_err(RpcError::OneshotRecvError)
     }

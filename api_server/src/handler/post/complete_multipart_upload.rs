@@ -286,7 +286,12 @@ pub async fn complete_multipart_upload_handler(
     let new_object_bytes: Bytes = to_bytes_in::<_, Error>(&object, Vec::new())?.into();
     let resp = nss_rpc_retry!(
         app,
-        put_inode(&bucket.root_blob_name, &key, new_object_bytes.clone())
+        put_inode(
+            &bucket.root_blob_name,
+            &key,
+            new_object_bytes.clone(),
+            Some(app.config.rpc_timeout())
+        )
     )
     .await?;
     match resp.result.unwrap() {

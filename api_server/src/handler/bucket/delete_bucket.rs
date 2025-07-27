@@ -22,6 +22,7 @@ pub async fn delete_bucket_handler(
     _request: Request,
 ) -> Result<Response, S3Error> {
     info!("handling delete_bucket request: {}", bucket.bucket_name);
+    let rpc_timeout = app.config.rpc_timeout();
     let api_key_id = {
         if !api_key
             .data
@@ -33,7 +34,11 @@ pub async fn delete_bucket_handler(
         api_key.data.key_id.clone()
     };
 
-    let resp = nss_rpc_retry!(app, delete_root_inode(&bucket.root_blob_name)).await?;
+    let resp = nss_rpc_retry!(
+        app,
+        delete_root_inode(&bucket.root_blob_name, Some(rpc_timeout))
+    )
+    .await?;
     match resp.result.unwrap() {
         delete_root_inode_response::Result::Ok(res) => res,
         delete_root_inode_response::Result::ErrNotEmpty(_e) => {
@@ -51,7 +56,9 @@ pub async fn delete_bucket_handler(
             Table::new(app.clone(), Some(app.cache.clone()));
         let api_key_table: Table<Arc<AppState>, ApiKeyTable> =
             Table::new(app.clone(), Some(app.cache.clone()));
-        let mut api_key = api_key_table.get(api_key_id.clone(), false).await?;
+        let mut api_key = api_key_table
+            .get(api_key_id.clone(), false, Some(rpc_timeout))
+            .await?;
         api_key.data.authorized_buckets.remove(&bucket.bucket_name);
         tracing::debug!(
             "Deleting {} from api_key {} (retry={})",
@@ -61,7 +68,7 @@ pub async fn delete_bucket_handler(
         );
 
         match bucket_table
-            .delete_with_extra::<ApiKeyTable>(bucket, &api_key)
+            .delete_with_extra::<ApiKeyTable>(bucket, &api_key, Some(rpc_timeout))
             .await
         {
             Err(RpcErrorRss::Retry) => continue,

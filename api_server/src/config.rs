@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct Config {
@@ -13,14 +13,24 @@ pub struct Config {
     pub region: String,
     pub root_domain: String,
     pub with_metrics: bool,
-    pub request_timeout_seconds: u64,
+    pub http_request_timeout_seconds: u64,
+    pub rpc_timeout_seconds: u64,
 
     pub s3_cache: S3CacheConfig,
     pub allow_missing_or_bad_signature: bool,
     pub web_root: String,
 }
 
-#[allow(dead_code)]
+impl Config {
+    pub fn rpc_timeout(&self) -> Duration {
+        Duration::from_secs(self.rpc_timeout_seconds)
+    }
+
+    pub fn http_request_timeout(&self) -> Duration {
+        Duration::from_secs(self.http_request_timeout_seconds)
+    }
+}
+
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct S3CacheConfig {
     pub s3_host: String,
@@ -54,7 +64,8 @@ impl Default for Config {
             root_domain: ".localhost".into(),
             s3_cache: S3CacheConfig::default(),
             with_metrics: true,
-            request_timeout_seconds: 115,
+            http_request_timeout_seconds: 5,
+            rpc_timeout_seconds: 4,
             allow_missing_or_bad_signature: false,
             web_root: "../ui/dist".into(),
         }

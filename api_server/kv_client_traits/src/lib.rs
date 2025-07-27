@@ -1,4 +1,4 @@
-use std::{ops::Deref, sync::Arc};
+use std::{ops::Deref, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use rpc_client_rss::{RpcClientRss, RpcErrorRss};
@@ -27,31 +27,51 @@ impl<T: Sized> From<(i64, T)> for Versioned<T> {
 #[async_trait]
 pub trait KvClient {
     type Error: std::error::Error;
-    async fn put(&self, key: &str, value: &Versioned<String>) -> Result<(), Self::Error>;
+    async fn put(
+        &self,
+        key: &str,
+        value: &Versioned<String>,
+        timeout: Option<Duration>,
+    ) -> Result<(), Self::Error>;
     async fn put_with_extra(
         &self,
         key: &str,
         value: &Versioned<String>,
         extra_key: &str,
         extra_value: &Versioned<String>,
+        timeout: Option<Duration>,
     ) -> Result<(), Self::Error>;
-    async fn get(&self, key: &str) -> Result<Versioned<String>, Self::Error>;
-    async fn delete(&self, key: &str) -> Result<(), Self::Error>;
+    async fn get(
+        &self,
+        key: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Versioned<String>, Self::Error>;
+    async fn delete(&self, key: &str, timeout: Option<Duration>) -> Result<(), Self::Error>;
     async fn delete_with_extra(
         &self,
         key: &str,
         extra_key: &str,
         extra_value: &Versioned<String>,
+        timeout: Option<Duration>,
     ) -> Result<(), Self::Error>;
-    async fn list(&self, prefix: &str) -> Result<Vec<String>, Self::Error>;
+    async fn list(
+        &self,
+        prefix: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Vec<String>, Self::Error>;
 }
 
 #[async_trait]
 impl<T: KvClient + Sync + Send> KvClient for Arc<T> {
     type Error = T::Error;
 
-    async fn put(&self, key: &str, value: &Versioned<String>) -> Result<(), Self::Error> {
-        self.deref().put(key, value).await
+    async fn put(
+        &self,
+        key: &str,
+        value: &Versioned<String>,
+        timeout: Option<Duration>,
+    ) -> Result<(), Self::Error> {
+        self.deref().put(key, value, timeout).await
     }
 
     async fn put_with_extra(
@@ -60,18 +80,23 @@ impl<T: KvClient + Sync + Send> KvClient for Arc<T> {
         value: &Versioned<String>,
         extra_key: &str,
         extra_value: &Versioned<String>,
+        timeout: Option<Duration>,
     ) -> Result<(), Self::Error> {
         self.deref()
-            .put_with_extra(key, value, extra_key, extra_value)
+            .put_with_extra(key, value, extra_key, extra_value, timeout)
             .await
     }
 
-    async fn get(&self, key: &str) -> Result<Versioned<String>, Self::Error> {
-        self.deref().get(key).await
+    async fn get(
+        &self,
+        key: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Versioned<String>, Self::Error> {
+        self.deref().get(key, timeout).await
     }
 
-    async fn delete(&self, key: &str) -> Result<(), Self::Error> {
-        self.deref().delete(key).await
+    async fn delete(&self, key: &str, timeout: Option<Duration>) -> Result<(), Self::Error> {
+        self.deref().delete(key, timeout).await
     }
 
     async fn delete_with_extra(
@@ -79,34 +104,52 @@ impl<T: KvClient + Sync + Send> KvClient for Arc<T> {
         key: &str,
         extra_key: &str,
         extra_value: &Versioned<String>,
+        timeout: Option<Duration>,
     ) -> Result<(), Self::Error> {
         self.deref()
-            .delete_with_extra(key, extra_key, extra_value)
+            .delete_with_extra(key, extra_key, extra_value, timeout)
             .await
     }
 
-    async fn list(&self, prefix: &str) -> Result<Vec<String>, Self::Error> {
-        self.deref().list(prefix).await
+    async fn list(
+        &self,
+        prefix: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Vec<String>, Self::Error> {
+        self.deref().list(prefix, timeout).await
     }
 }
 
 #[async_trait]
 impl KvClient for RpcClientRss {
     type Error = RpcErrorRss;
-    async fn put(&self, key: &str, value: &Versioned<String>) -> Result<(), Self::Error> {
-        Self::put(self, value.version, key, &value.data).await
+    async fn put(
+        &self,
+        key: &str,
+        value: &Versioned<String>,
+        timeout: Option<Duration>,
+    ) -> Result<(), Self::Error> {
+        Self::put(self, value.version, key, &value.data, timeout).await
     }
 
-    async fn get(&self, key: &str) -> Result<Versioned<String>, Self::Error> {
-        Self::get(self, key).await.map(|x| x.into())
+    async fn get(
+        &self,
+        key: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Versioned<String>, Self::Error> {
+        Self::get(self, key, timeout).await.map(|x| x.into())
     }
 
-    async fn delete(&self, key: &str) -> Result<(), Self::Error> {
-        Self::delete(self, key).await
+    async fn delete(&self, key: &str, timeout: Option<Duration>) -> Result<(), Self::Error> {
+        Self::delete(self, key, timeout).await
     }
 
-    async fn list(&self, prefix: &str) -> Result<Vec<String>, Self::Error> {
-        Self::list(self, prefix).await
+    async fn list(
+        &self,
+        prefix: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Vec<String>, Self::Error> {
+        Self::list(self, prefix, timeout).await
     }
 
     async fn put_with_extra(
@@ -115,6 +158,7 @@ impl KvClient for RpcClientRss {
         value: &Versioned<String>,
         extra_key: &str,
         extra_value: &Versioned<String>,
+        timeout: Option<Duration>,
     ) -> Result<(), Self::Error> {
         Self::put_with_extra(
             self,
@@ -124,6 +168,7 @@ impl KvClient for RpcClientRss {
             extra_value.version,
             extra_key,
             &extra_value.data,
+            timeout,
         )
         .await
     }
@@ -133,7 +178,16 @@ impl KvClient for RpcClientRss {
         key: &str,
         extra_key: &str,
         extra_value: &Versioned<String>,
+        timeout: Option<Duration>,
     ) -> Result<(), Self::Error> {
-        Self::delete_with_extra(self, key, extra_value.version, extra_key, &extra_value.data).await
+        Self::delete_with_extra(
+            self,
+            key,
+            extra_value.version,
+            extra_key,
+            &extra_value.data,
+            timeout,
+        )
+        .await
     }
 }

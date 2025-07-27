@@ -61,7 +61,12 @@ pub async fn create_multipart_upload_handler(
     let object_layout_bytes: Bytes = to_bytes_in::<_, Error>(&object_layout, Vec::new())?.into();
     let _resp = nss_rpc_retry!(
         app,
-        put_inode(&bucket.root_blob_name, &key, object_layout_bytes.clone())
+        put_inode(
+            &bucket.root_blob_name,
+            &key,
+            object_layout_bytes.clone(),
+            Some(app.config.rpc_timeout())
+        )
     )
     .await?;
     let init_mpu_res = InitiateMultipartUploadResult {

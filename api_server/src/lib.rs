@@ -72,7 +72,14 @@ impl AppState {
 
         let (tx, rx) = mpsc::channel(1024 * 1024);
         let blob_client = Arc::new(
-            BlobClient::new(config.bss_addr, config.bss_conn_num, &config.s3_cache, rx).await,
+            BlobClient::new(
+                config.bss_addr,
+                config.bss_conn_num,
+                &config.s3_cache,
+                rx,
+                config.rpc_timeout(),
+            )
+            .await,
         );
 
         let cache = Arc::new(
@@ -143,6 +150,7 @@ pub struct BlobClient {
     #[allow(dead_code)]
     blob_deletion_task_handle: JoinHandle<()>,
     bss_addr: SocketAddr,
+    rpc_timeout: Duration,
 }
 
 impl BlobClient {
@@ -151,6 +159,7 @@ impl BlobClient {
         bss_conn_num: u16,
         config: &S3CacheConfig,
         rx: Receiver<(BlobId, usize)>,
+        rpc_timeout: Duration,
     ) -> Self {
         let clients_bss = ConnPool::new();
         for _ in 0..bss_conn_num as usize {
@@ -182,7 +191,9 @@ impl BlobClient {
         let blob_deletion_task_handle = tokio::spawn({
             let clients_bss = clients_bss.clone();
             async move {
-                if let Err(e) = Self::blob_deletion_task(clients_bss, rx, bss_addr).await {
+                if let Err(e) =
+                    Self::blob_deletion_task(clients_bss, rx, bss_addr, rpc_timeout).await
+                {
                     tracing::error!("FATAL: blob deletion task error: {e}");
                 }
             }
@@ -194,6 +205,7 @@ impl BlobClient {
             s3_cache_bucket: config.s3_bucket.clone(),
             blob_deletion_task_handle,
             bss_addr,
+            rpc_timeout,
         }
     }
 
@@ -211,6 +223,7 @@ impl BlobClient {
         clients_bss: ConnPool<Arc<RpcClientBss>, SocketAddr>,
         mut input: Receiver<(BlobId, usize)>,
         bss_addr: SocketAddr,
+        timeout: Duration,
     ) -> Result<(), RpcErrorBss> {
         while let Some((blob_id, block_numbers)) = input.recv().await {
             let deleted = stream::iter(0..block_numbers)
@@ -220,7 +233,7 @@ impl BlobClient {
                         let res = rpc_retry!(
                             clients_bss,
                             checkout(bss_addr),
-                            delete_blob(blob_id, block_number as u32)
+                            delete_blob(blob_id, block_number as u32, Some(timeout))
                         )
                         .await;
                         match res {
@@ -252,7 +265,11 @@ impl BlobClient {
         histogram!("blob_size", "operation" => "put").record(body.len() as f64);
         let start = Instant::now();
         if block_number == 0 && body.len() < ObjectLayout::DEFAULT_BLOCK_SIZE as usize {
-            let res = bss_rpc_retry!(self, put_blob(blob_id, block_number, body.clone())).await;
+            let res = bss_rpc_retry!(
+                self,
+                put_blob(blob_id, block_number, body.clone(), Some(self.rpc_timeout))
+            )
+            .await;
             return res;
         }
 
@@ -264,7 +281,10 @@ impl BlobClient {
                 .key(&s3_key)
                 .body(body.clone().into())
                 .send(),
-            bss_rpc_retry!(self, put_blob(blob_id, block_number, body.clone()))
+            bss_rpc_retry!(
+                self,
+                put_blob(blob_id, block_number, body.clone(), Some(self.rpc_timeout))
+            )
         );
         histogram!("rpc_duration_nanos", "type"  => "bss_s3_join",  "name" => "put_blob_join_with_s3")
             .record(start.elapsed().as_nanos() as f64);
@@ -278,7 +298,11 @@ impl BlobClient {
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<(), RpcErrorBss> {
-        let res = bss_rpc_retry!(self, get_blob(blob_id, block_number, body)).await;
+        let res = bss_rpc_retry!(
+            self,
+            get_blob(blob_id, block_number, body, Some(self.rpc_timeout))
+        )
+        .await;
         if res.is_ok() {
             histogram!("blob_size", "operation" => "get").record(body.len() as f64);
         }
@@ -293,7 +317,10 @@ impl BlobClient {
                 .bucket(&self.s3_cache_bucket)
                 .key(&s3_key)
                 .send(),
-            bss_rpc_retry!(self, delete_blob(blob_id, block_number))
+            bss_rpc_retry!(
+                self,
+                delete_blob(blob_id, block_number, Some(self.rpc_timeout))
+            )
         );
         if let Err(e) = res_s3 {
             // note this blob may not be uploaded to s3 yet

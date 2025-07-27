@@ -269,7 +269,8 @@ pub async fn list_objects(
             &prefix,
             &delimiter,
             &start_after,
-            true
+            true,
+            Some(app.config.rpc_timeout())
         )
     )
     .await?;

@@ -278,7 +278,9 @@ pub async fn verify_v4(
 ) -> Result<Option<Versioned<ApiKey>>, Error> {
     let api_key_table: Table<Arc<AppState>, ApiKeyTable> =
         Table::new(app.clone(), Some(app.cache.clone()));
-    let key = api_key_table.get(auth.key_id.clone(), true).await?;
+    let key = api_key_table
+        .get(auth.key_id.clone(), true, Some(app.config.rpc_timeout()))
+        .await?;
 
     let mut hmac = signing_hmac(&auth.date, &key.data.secret_key, &app.config.region)
         .map_err(|_| Error::Other("Unable to build signing HMAC".into()))?;
@@ -297,5 +299,7 @@ pub async fn get_api_key(
 ) -> Result<Versioned<ApiKey>, RpcErrorRss> {
     let api_key_table: Table<Arc<AppState>, ApiKeyTable> =
         Table::new(app.clone(), Some(app.cache.clone()));
-    api_key_table.get(access_key.to_string(), true).await
+    api_key_table
+        .get(access_key.to_string(), true, Some(app.config.rpc_timeout()))
+        .await
 }

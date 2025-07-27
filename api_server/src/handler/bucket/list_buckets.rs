@@ -91,7 +91,7 @@ pub async fn list_buckets_handler(
     let bucket_table: Table<Arc<AppState>, BucketTable> =
         Table::new(app.clone(), Some(app.cache.clone()));
     let buckets: Vec<Bucket> = bucket_table
-        .list()
+        .list(Some(app.config.rpc_timeout()))
         .await?
         .iter()
         .map(|bucket| Bucket::from_table_with_region(bucket, &app.config.region))

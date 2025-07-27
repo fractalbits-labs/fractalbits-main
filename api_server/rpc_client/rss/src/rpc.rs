@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::{
     message::MessageHeader,
@@ -13,7 +13,13 @@ use tracing::{error, warn};
 include!(concat!(env!("OUT_DIR"), "/rss_ops.rs"));
 
 impl RpcClient {
-    pub async fn put(&self, version: i64, key: &str, value: &str) -> Result<(), RpcError> {
+    pub async fn put(
+        &self,
+        version: i64,
+        key: &str,
+        value: &str,
+        timeout: Option<Duration>,
+    ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "put");
         let start = Instant::now();
         let body = PutRequest {
@@ -34,7 +40,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -74,6 +80,7 @@ impl RpcClient {
         extra_version: i64,
         extra_key: &str,
         extra_value: &str,
+        timeout: Option<Duration>,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "put_with_extra");
         let start = Instant::now();
@@ -98,7 +105,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -131,7 +138,11 @@ impl RpcClient {
         }
     }
 
-    pub async fn get(&self, key: &str) -> Result<(i64, String), RpcError> {
+    pub async fn get(
+        &self,
+        key: &str,
+        timeout: Option<Duration>,
+    ) -> Result<(i64, String), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get");
         let start = Instant::now();
         let body = GetRequest {
@@ -150,7 +161,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -182,7 +193,7 @@ impl RpcClient {
         }
     }
 
-    pub async fn delete(&self, key: &str) -> Result<(), RpcError> {
+    pub async fn delete(&self, key: &str, timeout: Option<Duration>) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "delete");
         let start = Instant::now();
         let body = DeleteRequest {
@@ -201,7 +212,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 error!(rpc=%"delete", %request_id, %key, error=?e, "rss rpc failed");
@@ -231,6 +242,7 @@ impl RpcClient {
         extra_version: i64,
         extra_key: &str,
         extra_value: &str,
+        timeout: Option<Duration>,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "delete_with_extra");
         let start = Instant::now();
@@ -253,7 +265,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -286,7 +298,11 @@ impl RpcClient {
         }
     }
 
-    pub async fn list(&self, prefix: &str) -> Result<Vec<String>, RpcError> {
+    pub async fn list(
+        &self,
+        prefix: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Vec<String>, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "list");
         let start = Instant::now();
         let body = ListRequest {
@@ -305,7 +321,7 @@ impl RpcClient {
             .map_err(RpcError::EncodeError)?;
 
         let resp_bytes = self
-            .send_request(header.id, Message::Bytes(request_bytes.freeze()))
+            .send_request(header.id, Message::Bytes(request_bytes.freeze()), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {

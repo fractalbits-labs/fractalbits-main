@@ -95,7 +95,7 @@ pub async fn any_handler(
     let endpoint_name = endpoint.as_str();
     let gauge_guard = InflightRequestGuard::new(endpoint_name);
     let result = tokio::time::timeout(
-        Duration::from_secs(app.config.request_timeout_seconds),
+        Duration::from_secs(app.config.http_request_timeout_seconds),
         any_handler_inner(app, bucket.clone(), key.clone(), auth, request, endpoint),
     )
     .await;

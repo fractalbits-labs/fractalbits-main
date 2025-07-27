@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::{
     codec::MessageFrame,
     message::{Command, MessageHeader},
@@ -14,6 +16,7 @@ impl RpcClient {
         blob_id: Uuid,
         block_number: u32,
         body: Bytes,
+        timeout: Option<Duration>,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "put_blob");
         let mut header = MessageHeader::default();
@@ -26,7 +29,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, body);
         self
-            .send_request(header.id, Message::Frame(msg_frame))
+            .send_request(header.id, Message::Frame(msg_frame), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -42,6 +45,7 @@ impl RpcClient {
         blob_id: Uuid,
         block_number: u32,
         body: &mut Bytes,
+        timeout: Option<Duration>,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "get_blob");
         let mut header = MessageHeader::default();
@@ -54,7 +58,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp = self
-            .send_request(header.id, Message::Frame(msg_frame))
+            .send_request(header.id, Message::Frame(msg_frame), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -66,7 +70,12 @@ impl RpcClient {
         Ok(())
     }
 
-    pub async fn delete_blob(&self, blob_id: Uuid, block_number: u32) -> Result<(), RpcError> {
+    pub async fn delete_blob(
+        &self,
+        blob_id: Uuid,
+        block_number: u32,
+        timeout: Option<Duration>,
+    ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "delete_blob");
         let mut header = MessageHeader::default();
         let request_id = self.gen_request_id();
@@ -78,7 +87,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         self
-            .send_request(header.id, Message::Frame(msg_frame))
+            .send_request(header.id, Message::Frame(msg_frame), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {

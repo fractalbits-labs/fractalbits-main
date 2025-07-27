@@ -30,7 +30,11 @@ pub async fn get_raw_object(
     root_blob_name: &str,
     key: &str,
 ) -> Result<ObjectLayout, S3Error> {
-    let resp = nss_rpc_retry!(app, get_inode(root_blob_name, key)).await?;
+    let resp = nss_rpc_retry!(
+        app,
+        get_inode(root_blob_name, key, Some(app.config.rpc_timeout()))
+    )
+    .await?;
 
     let object_bytes = match resp.result.unwrap() {
         get_inode_response::Result::Ok(res) => res,
@@ -64,7 +68,8 @@ pub async fn list_raw_objects(
             &prefix,
             &delimiter,
             &start_after,
-            skip_mpu_parts
+            skip_mpu_parts,
+            Some(app.config.rpc_timeout())
         )
     )
     .await?;

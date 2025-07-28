@@ -23,6 +23,7 @@ export class FractalbitsHelperStack extends cdk.Stack {
       handler: 'index.handler',
       code: lambda.Code.fromAsset('lib/lambda/deregister-asg-instances'),
       role: deregisterLambdaRole,
+      timeout: cdk.Duration.seconds(60),
     });
 
     const deregisterProvider = new cr.Provider(this, 'DeregisterProvider', {

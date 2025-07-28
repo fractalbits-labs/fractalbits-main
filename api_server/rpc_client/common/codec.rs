@@ -36,7 +36,7 @@ impl Decoder for MesssageCodec {
         if size > MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Frame of size {} is too large.", size),
+                format!("Frame of size {size} is too large."),
             ));
         }
 

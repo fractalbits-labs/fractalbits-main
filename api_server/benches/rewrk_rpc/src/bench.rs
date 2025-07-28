@@ -63,14 +63,14 @@ pub fn start_benchmark(settings: BenchmarkSettings) {
         if settings.rpc == "nss" {
             if let Err(e) = rt.block_on(run_for_nss(settings.clone())) {
                 eprintln!();
-                eprintln!("{}", e);
+                eprintln!("{e}");
                 return;
             }
         } else {
             #[allow(clippy::collapsible_else_if)]
             if let Err(e) = rt.block_on(run_for_bss(settings.clone())) {
                 eprintln!();
-                eprintln!("{}", e);
+                eprintln!("{e}");
                 return;
             }
         }
@@ -228,7 +228,7 @@ async fn run_for_bss(settings: BenchmarkSettings) -> Result<()> {
 
 /// Uber lazy way of just stringing everything and limiting it to 2 d.p
 fn string<T: Display>(value: T) -> String {
-    format!("{:.2}", value)
+    format!("{value:.2}")
 }
 
 /// Turns a fairly un-readable float in seconds / Duration into a human
@@ -246,19 +246,19 @@ fn humanize(time: Duration) -> String {
     let mut human = Vec::new();
 
     if days != 0 {
-        human.push(format!("{} day(s)", days));
+        human.push(format!("{days} day(s)"));
     };
 
     if hours != 0 {
-        human.push(format!("{} hour(s)", hours));
+        human.push(format!("{hours} hour(s)"));
     };
 
     if minutes != 0 {
-        human.push(format!("{} minute(s)", minutes));
+        human.push(format!("{minutes} minute(s)"));
     };
 
     if seconds != 0 {
-        human.push(format!("{} second(s)", seconds));
+        human.push(format!("{seconds} second(s)"));
     };
 
     human.join(", ")

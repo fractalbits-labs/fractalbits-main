@@ -155,7 +155,7 @@ pub fn run_cmd_deploy(
 
 fn get_build_bucket_name() -> FunResult {
     let region = run_fun!(aws configure list | grep region | awk r"{print $2}")?;
-    Ok(format!("fractalbits-builds-{}", region))
+    Ok(format!("fractalbits-builds-{region}"))
 }
 
 pub fn update_builds_bucket_access_policy() -> CmdResult {

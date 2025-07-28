@@ -8,7 +8,7 @@ pub fn create_mixed_workload_config(
 ) -> CmdResult {
     let mut warp_clients_str = String::new();
     for ip in client_ips {
-        warp_clients_str.push_str(&format!("  - {}:7761\n", ip));
+        warp_clients_str.push_str(&format!("  - {ip}:7761\n"));
     }
 
     let config_content = format!(

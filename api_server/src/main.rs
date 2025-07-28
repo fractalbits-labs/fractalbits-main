@@ -121,7 +121,7 @@ async fn main() {
         .with_state(Arc::new(app_state))
         .into_make_service_with_connect_info::<SocketAddr>();
 
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .unwrap()

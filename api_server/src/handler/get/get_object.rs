@@ -283,11 +283,7 @@ async fn get_object_range_content(
                     }
                     // with intersection
                     if obj_offset < range.end && obj_offset + mpu_size > range.start {
-                        let blob_start = if range.start > obj_offset {
-                            range.start - obj_offset
-                        } else {
-                            0
-                        };
+                        let blob_start = range.start.saturating_sub(obj_offset);
                         let blob_end = if range.end > obj_offset + mpu_size {
                             mpu_size - blob_start
                         } else {
@@ -402,11 +398,7 @@ async fn get_range_blob_stream(
                         Some(None)
                     } else {
                         // The chunk has an intersection with the requested range
-                        let start_in_chunk = if *chunk_offset > start {
-                            0
-                        } else {
-                            start - *chunk_offset
-                        };
+                        let start_in_chunk = start.saturating_sub(*chunk_offset);
                         let end_in_chunk = if *chunk_offset + chunk_len < end {
                             chunk_len
                         } else {

@@ -25,16 +25,16 @@ impl fmt::Display for ApiSignature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut parts = Vec::new();
         if let Some(upload_id) = &self.upload_id {
-            parts.push(format!("uploadId={}", upload_id));
+            parts.push(format!("uploadId={upload_id}"));
         }
         if let Some(part_number) = self.part_number {
-            parts.push(format!("partNumber={}", part_number));
+            parts.push(format!("partNumber={part_number}"));
         }
         if let Some(list_type) = &self.list_type {
-            parts.push(format!("list-type={}", list_type));
+            parts.push(format!("list-type={list_type}"));
         }
         if let Some(x_amz_copy_source) = &self.x_amz_copy_source {
-            parts.push(format!("x-amz-copy-source={}", x_amz_copy_source));
+            parts.push(format!("x-amz-copy-source={x_amz_copy_source}"));
         }
         write!(f, "{}", parts.join("&"))
     }

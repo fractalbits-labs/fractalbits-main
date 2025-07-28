@@ -72,6 +72,7 @@ impl RpcClient {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn put_with_extra(
         &self,
         version: i64,

@@ -45,7 +45,7 @@ pub enum Error {
     Other(String),
 
     #[error("Signature error: {0}")]
-    SignatureError(Box<Error>, SyncWrapper<Request<Body>>),
+    SignatureError(Box<Error>, Box<SyncWrapper<Request<Body>>>),
 }
 
 impl From<Box<dyn std::error::Error + Send + Sync>> for Error {

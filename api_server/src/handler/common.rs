@@ -104,7 +104,10 @@ pub fn mpu_get_part_prefix(mut key: String, part_number: u64) -> String {
 }
 
 pub fn mpu_parse_part_number(mpu_key: &str) -> Result<u32, S3Error> {
-    let part_str = mpu_key.split('#').last().ok_or(S3Error::InternalError)?;
+    let part_str = mpu_key
+        .split('#')
+        .next_back()
+        .ok_or(S3Error::InternalError)?;
     Ok(part_str
         .parse::<u32>()
         .map_err(|_| S3Error::InternalError)?

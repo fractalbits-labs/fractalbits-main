@@ -52,7 +52,7 @@ fn main() {
     let duration = match parse_duration(duration) {
         Ok(dur) => dur,
         Err(e) => {
-            eprintln!("failed to parse duration parameter: {}", e);
+            eprintln!("failed to parse duration parameter: {e}");
             return;
         }
     };
@@ -141,7 +141,7 @@ fn parse_duration(duration: &str) -> Result<Duration> {
 
             Duration::from_secs(seconds)
         } else {
-            return Err(Error::msg(format!("invalid match: {:?}", cap)));
+            return Err(Error::msg(format!("invalid match: {cap:?}")));
         };
 
         dur += add_to
@@ -149,8 +149,7 @@ fn parse_duration(duration: &str) -> Result<Duration> {
 
     if dur.as_secs() == 0 {
         return Err(Error::msg(format!(
-            "failed to extract any valid duration from {}",
-            duration
+            "failed to extract any valid duration from {duration}"
         )));
     }
 

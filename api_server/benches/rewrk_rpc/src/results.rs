@@ -200,8 +200,8 @@ impl WorkerResult {
         println!("  Requests:");
         println!(
             "    Total: {:^7} Req/Sec: {:^7}",
-            format!("{}", total).as_str().bright_cyan(),
-            format!("{:.2}", avg).as_str().bright_cyan()
+            format!("{total}").as_str().bright_cyan(),
+            format!("{avg:.2}").as_str().bright_cyan()
         )
     }
 
@@ -258,7 +258,7 @@ impl WorkerResult {
             println!();
 
             for (message, count) in &self.error_map {
-                println!("{} Errors: {}", count, message);
+                println!("{count} Errors: {message}");
             }
         }
     }
@@ -281,7 +281,7 @@ impl WorkerResult {
                 "requests_avg": null,
             });
 
-            println!("{}", out);
+            println!("{out}");
             return;
         }
 
@@ -304,6 +304,6 @@ impl WorkerResult {
             "requests_avg": avg_request_per_sec,
         });
 
-        println!("{}", out)
+        println!("{out}")
     }
 }

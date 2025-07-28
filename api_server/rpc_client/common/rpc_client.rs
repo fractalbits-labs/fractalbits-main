@@ -80,7 +80,7 @@ impl ErrorRetryable for RpcError {
 }
 
 pub enum Message {
-    Frame(MessageFrame),
+    Frame(Box<MessageFrame>),
     Bytes(Bytes),
 }
 

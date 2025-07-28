@@ -46,8 +46,7 @@ pub fn canonical_request(
         .iter()
         .map(|name| {
             let value = headers.get(name).ok_or(SignatureError::Invalid(format!(
-                "signed header `{}` is not present",
-                name
+                "signed header `{name}` is not present"
             )))?;
             let value = std::str::from_utf8(value.as_bytes())?;
             Ok(format!("{}:{}", name.as_str(), value.trim()))

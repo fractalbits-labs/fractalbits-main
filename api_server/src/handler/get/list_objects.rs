@@ -134,7 +134,7 @@ pub async fn list_objects_handler(
         return Err(S3Error::UnsupportedArgument);
     }
     let start_after = match opts.marker {
-        Some(ref marker) => format!("/{}", marker),
+        Some(ref marker) => format!("/{marker}"),
         None => "".into(),
     };
 

@@ -194,8 +194,7 @@ impl Checksums {
             let algo = extra.algorithm();
             if self.extract(Some(algo)) != Some(extra) {
                 return Err(Error::InvalidDigest(format!(
-                    "Failed to validate checksum for algorithm {:?}",
-                    algo
+                    "Failed to validate checksum for algorithm {algo:?}"
                 )));
             }
         }

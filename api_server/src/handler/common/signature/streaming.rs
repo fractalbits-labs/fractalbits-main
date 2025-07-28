@@ -334,7 +334,7 @@ impl From<StreamingPayloadError> for Error {
             StreamingPayloadError::InvalidSignature => {
                 Error::Other("Invalid payload signature".into())
             }
-            StreamingPayloadError::Message(e) => Error::Other(format!("Chunk format error: {}", e)),
+            StreamingPayloadError::Message(e) => Error::Other(format!("Chunk format error: {e}")),
         }
     }
 }

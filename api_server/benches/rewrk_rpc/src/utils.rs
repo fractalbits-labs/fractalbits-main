@@ -18,6 +18,6 @@ pub fn format_data(data_size: f64) -> String {
     } else if data_size > KILOBYTE {
         format!("{:.2} KB", data_size / KILOBYTE)
     } else {
-        format!("{:.2} B", data_size)
+        format!("{data_size:.2} B")
     }
 }

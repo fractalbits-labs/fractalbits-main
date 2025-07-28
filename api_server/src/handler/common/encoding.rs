@@ -11,9 +11,9 @@ pub fn uri_encode(string: &str, encode_slash: bool) -> String {
             _ => {
                 #[allow(clippy::format_collect)]
                 result.push_str(
-                    &format!("{}", c)
+                    &format!("{c}")
                         .bytes()
-                        .map(|b| format!("%{:02X}", b))
+                        .map(|b| format!("%{b:02X}"))
                         .collect::<String>(),
                 );
             }

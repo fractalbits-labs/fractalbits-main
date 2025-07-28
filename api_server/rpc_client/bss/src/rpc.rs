@@ -29,7 +29,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, body);
         self
-            .send_request(header.id, Message::Frame(msg_frame), timeout)
+            .send_request(header.id, Message::Frame(Box::new(msg_frame)), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -58,7 +58,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp = self
-            .send_request(header.id, Message::Frame(msg_frame), timeout)
+            .send_request(header.id, Message::Frame(Box::new(msg_frame)), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -87,7 +87,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         self
-            .send_request(header.id, Message::Frame(msg_frame), timeout)
+            .send_request(header.id, Message::Frame(Box::new(msg_frame)), timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {

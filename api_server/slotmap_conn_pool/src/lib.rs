@@ -129,7 +129,7 @@ impl<T: Poolable, K: Key> ConnPool<T, K> {
                     // Proceed with recreation.
                     let new_conn = match T::new(addr_key.clone().into()).await {
                         Ok(c) => c,
-                        Err(e) => panic!("Failed to create new connection: {:?}", e),
+                        Err(e) => panic!("Failed to create new connection: {e:?}"),
                     };
 
                     // Acquire write lock to modify the pool.

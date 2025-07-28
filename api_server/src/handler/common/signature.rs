@@ -69,7 +69,12 @@ pub async fn verify_request(
     let checked_signature =
         match payload::check_payload_signature(app.clone(), auth, &mut req).await {
             Ok(cs) => cs,
-            Err(e) => return Err(Error::SignatureError(Box::new(e), SyncWrapper::new(req))),
+            Err(e) => {
+                return Err(Error::SignatureError(
+                    Box::new(e),
+                    Box::new(SyncWrapper::new(req)),
+                ))
+            }
         };
 
     let request =

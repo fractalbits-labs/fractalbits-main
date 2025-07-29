@@ -179,7 +179,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
         this.vpc,
         privateSg,
         ec2Role,
-        ['c7g.large'],
+        ['c8g.xlarge'],
         benchClientBootstrapOptions,
         props.numBenchClients,
         props.numBenchClients
@@ -212,7 +212,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       this.vpc,
       publicSg,
       ec2Role,
-      ['c8g.large'],
+      ['c8g.xlarge'],
       apiServerBootstrapOptions,
       props.numApiServers,
       props.numApiServers

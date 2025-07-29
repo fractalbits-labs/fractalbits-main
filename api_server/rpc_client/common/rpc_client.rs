@@ -79,8 +79,9 @@ impl ErrorRetryable for RpcError {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum Message {
-    Frame(Box<MessageFrame>),
+    Frame(MessageFrame),
     Bytes(Bytes),
 }
 

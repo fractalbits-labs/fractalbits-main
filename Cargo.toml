@@ -16,6 +16,7 @@ members = [
     "root_server/ebs-failover",
     "xtask",
     "xtask/tools",
+    "play/test_s3_express/s3_express_sdk_test",
 ]
 resolver = "2"
 

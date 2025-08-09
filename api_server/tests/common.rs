@@ -30,12 +30,20 @@ pub struct Context {
 impl Context {
     pub async fn create_bucket(&self, name: &str) -> String {
         let bucket_name = name.to_owned();
-        self.client
-            .create_bucket()
-            .bucket(name)
-            .send()
-            .await
-            .unwrap();
+
+        // Try to create the bucket, ignoring if it already exists
+        match self.client.create_bucket().bucket(name).send().await {
+            Ok(_) => {}
+            Err(e) => {
+                // Check if it's a BucketAlreadyOwnedByYou error
+                let service_error = e.into_service_error();
+                if !service_error.is_bucket_already_owned_by_you() {
+                    panic!("Failed to create bucket: {:?}", service_error);
+                }
+                // If bucket already exists and we own it, that's fine
+            }
+        }
+
         bucket_name
     }
 

@@ -350,6 +350,14 @@ async fn test_multipart_with_checksum() {
 async fn test_uploadlistpart() {
     let ctx = common::context();
     let bucket = ctx.create_bucket("uploadpart").await;
+    // Use a unique key to avoid interference from other tests or previous runs
+    let test_key = format!(
+        "test-uploadlistpart-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
 
     let u1 = vec![0xee; SZ_5MB];
     let u2 = vec![0x11; SZ_5MB];
@@ -358,7 +366,7 @@ async fn test_uploadlistpart() {
         .client
         .create_multipart_upload()
         .bucket(&bucket)
-        .key("a")
+        .key(&test_key)
         .send()
         .await
         .unwrap();
@@ -371,7 +379,7 @@ async fn test_uploadlistpart() {
             .client
             .list_parts()
             .bucket(&bucket)
-            .key("a")
+            .key(&test_key)
             .upload_id(uid)
             .send()
             .await
@@ -384,7 +392,7 @@ async fn test_uploadlistpart() {
         .client
         .upload_part()
         .bucket(&bucket)
-        .key("a")
+        .key(&test_key)
         .upload_id(uid)
         .part_number(2)
         .body(ByteStream::from(u1))
@@ -398,7 +406,7 @@ async fn test_uploadlistpart() {
             .client
             .list_parts()
             .bucket(&bucket)
-            .key("a")
+            .key(&test_key)
             .upload_id(uid)
             .send()
             .await
@@ -417,7 +425,7 @@ async fn test_uploadlistpart() {
         .client
         .upload_part()
         .bucket(&bucket)
-        .key("a")
+        .key(&test_key)
         .upload_id(uid)
         .part_number(1)
         .body(ByteStream::from(u2))
@@ -431,7 +439,7 @@ async fn test_uploadlistpart() {
             .client
             .list_parts()
             .bucket(&bucket)
-            .key("a")
+            .key(&test_key)
             .upload_id(uid)
             .send()
             .await
@@ -459,7 +467,7 @@ async fn test_uploadlistpart() {
             .client
             .list_parts()
             .bucket(&bucket)
-            .key("a")
+            .key(&test_key)
             .upload_id(uid)
             .max_parts(1)
             .send()
@@ -470,7 +478,7 @@ async fn test_uploadlistpart() {
         assert_eq!(r.next_part_number_marker.as_deref(), Some("1"));
         assert_eq!(r.max_parts.unwrap(), 1_i32);
         assert!(r.is_truncated.unwrap());
-        assert_eq!(r.key.unwrap(), "a");
+        assert_eq!(r.key.as_ref().unwrap(), &test_key);
         assert_eq!(r.upload_id.unwrap().as_str(), uid.as_str());
         let parts = r.parts.unwrap();
         assert_eq!(parts.len(), 1);
@@ -482,7 +490,7 @@ async fn test_uploadlistpart() {
             .client
             .list_parts()
             .bucket(&bucket)
-            .key("a")
+            .key(&test_key)
             .upload_id(uid)
             .max_parts(1)
             .part_number_marker(r.next_part_number_marker.as_ref().unwrap())
@@ -495,7 +503,7 @@ async fn test_uploadlistpart() {
             r.next_part_number_marker.as_ref().unwrap()
         );
         assert_eq!(r2.max_parts.unwrap(), 1_i32);
-        assert_eq!(r2.key.unwrap(), "a");
+        assert_eq!(r2.key.as_ref().unwrap(), &test_key);
         assert_eq!(r2.upload_id.unwrap().as_str(), uid.as_str());
         let parts = r2.parts.unwrap();
         assert_eq!(parts.len(), 1);
@@ -524,7 +532,7 @@ async fn test_uploadlistpart() {
     ctx.client
         .complete_multipart_upload()
         .bucket(&bucket)
-        .key("a")
+        .key(&test_key)
         .upload_id(uid)
         .multipart_upload(cmp)
         .send()
@@ -536,7 +544,7 @@ async fn test_uploadlistpart() {
         .client
         .list_parts()
         .bucket(&bucket)
-        .key("a")
+        .key(&test_key)
         .upload_id(uid)
         .send()
         .await
@@ -548,7 +556,7 @@ async fn test_uploadlistpart() {
             .client
             .head_object()
             .bucket(&bucket)
-            .key("a")
+            .key(&test_key)
             .send()
             .await
             .unwrap();

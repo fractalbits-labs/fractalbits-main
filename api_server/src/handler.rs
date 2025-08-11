@@ -244,15 +244,7 @@ async fn any_handler_inner(
         }
         Endpoint::Put(put_endpoint) => {
             let bucket = bucket::resolve_bucket(app.clone(), bucket_name).await?;
-            put_handler(
-                app,
-                request,
-                api_key,
-                &bucket,
-                key,
-                put_endpoint,
-            )
-            .await
+            put_handler(app, request, api_key, &bucket, key, put_endpoint).await
         }
         Endpoint::Post(post_endpoint) => {
             let bucket = bucket::resolve_bucket(app.clone(), bucket_name).await?;
@@ -327,19 +319,9 @@ async fn put_handler(
     endpoint: PutEndpoint,
 ) -> Result<Response, S3Error> {
     match endpoint {
-        PutEndpoint::PutObject => {
-            put::put_object_handler(app, request, bucket, key).await
-        }
+        PutEndpoint::PutObject => put::put_object_handler(app, request, bucket, key).await,
         PutEndpoint::UploadPart(part_number, upload_id) => {
-            put::upload_part_handler(
-                app,
-                request,
-                bucket,
-                key,
-                part_number,
-                upload_id,
-            )
-            .await
+            put::upload_part_handler(app, request, bucket, key, part_number, upload_id).await
         }
         PutEndpoint::CopyObject => {
             put::copy_object_handler(app, request, api_key, bucket, key).await
@@ -358,21 +340,12 @@ async fn post_handler(
 ) -> Result<Response, S3Error> {
     match endpoint {
         PostEndpoint::CompleteMultipartUpload(upload_id) => {
-            post::complete_multipart_upload_handler(
-                app,
-                request,
-                bucket,
-                key,
-                upload_id,
-            )
-            .await
+            post::complete_multipart_upload_handler(app, request, bucket, key, upload_id).await
         }
         PostEndpoint::CreateMultipartUpload => {
             post::create_multipart_upload_handler(app, request, bucket, key).await
         }
-        PostEndpoint::DeleteObjects => {
-            post::delete_objects_handler(app, request, bucket).await
-        }
+        PostEndpoint::DeleteObjects => post::delete_objects_handler(app, request, bucket).await,
     }
 }
 
@@ -387,9 +360,7 @@ async fn delete_handler(
         DeleteEndpoint::AbortMultipartUpload(upload_id) => {
             delete::abort_multipart_upload_handler(app, request, bucket, key, upload_id).await
         }
-        DeleteEndpoint::DeleteObject => {
-            delete::delete_object_handler(app, bucket, key).await
-        }
+        DeleteEndpoint::DeleteObject => delete::delete_object_handler(app, bucket, key).await,
     }
 }
 

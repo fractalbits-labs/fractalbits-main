@@ -202,13 +202,7 @@ pub async fn copy_object_handler(
     let (source_obj, body) =
         get_copy_source_object(app.clone(), api_key, &header_opts.x_amz_copy_source).await?;
 
-    put_object_handler(
-        app,
-        Request::new(ReqBody::from(body)),
-        bucket,
-        key,
-    )
-    .await?;
+    put_object_handler(app, Request::new(ReqBody::from(body)), bucket, key).await?;
 
     Xml(CopyObjectResult::default()
         .etag(source_obj.etag()?)

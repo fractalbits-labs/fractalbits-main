@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{convert::From, str::Utf8Error};
 
 use axum::{

@@ -2918,8 +2918,10 @@ dependencies = [
  "mimalloc",
  "rpc_client_common",
  "rpc_client_rss",
+ "serde",
  "slotmap_conn_pool",
  "tokio",
+ "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
 ]

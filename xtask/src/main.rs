@@ -54,7 +54,7 @@ enum Cmd {
     #[clap(about = "Run precheckin tests")]
     Precheckin {
         #[clap(long, long_help = "Run s3 api tests only")]
-        api_only: bool,
+        s3_api_only: bool,
     },
 
     #[clap(about = "Test root server leader election")]
@@ -175,7 +175,7 @@ fn main() -> CmdResult {
             cmd_build::build_rewrk_rpc()?;
             cmd_build::build_ui(UI_DEFAULT_REGION)?;
         }
-        Cmd::Precheckin { api_only } => cmd_precheckin::run_cmd_precheckin(api_only)?,
+        Cmd::Precheckin { s3_api_only } => cmd_precheckin::run_cmd_precheckin(s3_api_only)?,
         Cmd::TestLeaderElection => {
             // Initialize DDB local with leader election table and run tests
             cmd_service::init_service(ServiceName::DdbLocal, BuildMode::Debug)?;

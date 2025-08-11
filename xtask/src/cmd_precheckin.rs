@@ -1,14 +1,13 @@
 use crate::*;
 
-pub fn run_cmd_precheckin(api_only: bool) -> CmdResult {
+pub fn run_cmd_precheckin(s3_api_only: bool) -> CmdResult {
     let working_dir = run_fun!(pwd)?;
     cmd_service::stop_service(ServiceName::All)?;
     cmd_build::build_rust_servers(BuildMode::Debug)?;
     cmd_build::build_zig_servers(BuildMode::Debug)?;
 
-    if api_only {
-        run_s3_api_tests()?;
-        return run_leader_election_tests();
+    if s3_api_only {
+        return run_s3_api_tests();
     }
 
     cmd_service::init_service(ServiceName::All, BuildMode::Debug)?;

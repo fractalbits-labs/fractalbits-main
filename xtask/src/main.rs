@@ -192,7 +192,7 @@ fn main() -> CmdResult {
                 AWS_DEFAULT_REGION=fakeRegion
                 AWS_ACCESS_KEY_ID=fakeMyKeyId
                 AWS_SECRET_ACCESS_KEY=fakeSecretAccessKey
-                cargo run --package root_server --bin rss_admin --
+                ./target/debug/rss_leader_admin
                     --region fakeRegion
                     --ddb-endpoint "http://localhost:8000"
                     show-leader;

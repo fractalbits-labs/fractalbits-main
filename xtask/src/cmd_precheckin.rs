@@ -83,7 +83,7 @@ fn run_s3_api_tests() -> CmdResult {
     cmd_service::start_services(ServiceName::All, BuildMode::Debug, false)?;
     run_cmd! {
         info "Run cargo tests (s3 api tests)";
-        cargo test -- --test-threads 1;
+        cargo test --package api_server -- --test-threads 1;
     }?;
     let _ = cmd_service::stop_service(ServiceName::All);
 
@@ -97,7 +97,7 @@ fn run_leader_election_tests() -> CmdResult {
 
     run_cmd! {
         info "Running root_server leader election tests";
-        cargo test --package root_server --test leader_election_test -- --test-threads 1 --nocapture;
+        cargo test --package root_server --test leader_election_test -- --test-threads 1;
     }?;
 
     let _ = cmd_service::stop_service(ServiceName::DdbLocal);

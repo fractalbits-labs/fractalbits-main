@@ -1,4 +1,4 @@
-use axum::http::{HeaderMap, HeaderValue, Method};
+use actix_web::http::{header::HeaderMap, Method};
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
 use sha2::{Digest, Sha256};
@@ -27,7 +27,7 @@ pub fn canonical_request(
     method: &Method,
     canonical_uri: &str,
     query_params: &BTreeMap<String, String>,
-    headers: &HeaderMap<HeaderValue>,
+    headers: &HeaderMap,
     signed_headers: &BTreeSet<String>,
     content_sha256: &str,
 ) -> Result<String, SignatureError> {

@@ -11,14 +11,6 @@ use tokio::task;
 use super::checksum::*;
 use super::*;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Serialize, Deserialize)]
-pub enum ChecksumAlgorithm {
-    Crc32,
-    Crc32c,
-    Sha1,
-    Sha256,
-}
-
 pub struct ReqBody {
     pub(crate) stream: SyncWrapper<BoxStream<'static, Result<Frame<Bytes>, Error>>>,
     pub(crate) checksummer: Checksummer,
@@ -28,8 +20,14 @@ pub struct ReqBody {
 
 pub type StreamingChecksumReceiver = task::JoinHandle<Result<Checksums, Error>>;
 
-impl From<axum::body::Body> for ReqBody {
-    fn from(body: axum::body::Body) -> Self {
+impl ReqBody {
+    /// Create a ReqBody from any http-body compatible body type
+    pub fn from_http_body<B>(body: B) -> Self
+    where
+        B: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        super::Error: From<B::Error>,
+    {
         let expected_checksums = ExpectedChecksums::default();
         let checksummer = Checksummer::init(&expected_checksums, false);
 
@@ -41,9 +39,12 @@ impl From<axum::body::Body> for ReqBody {
             trailer_algorithm: None,
         }
     }
-}
 
-impl ReqBody {
+    /// Create an empty ReqBody
+    pub fn empty() -> Self {
+        Self::from_http_body(http_body_util::Empty::<bytes::Bytes>::new())
+    }
+
     pub fn add_expected_checksums(&mut self, more: ExpectedChecksums) {
         if more.md5.is_some() {
             self.expected_checksums.md5 = more.md5;
@@ -111,7 +112,20 @@ impl ReqBody {
                     Err(frame) => {
                         let trailers = frame.into_trailers().unwrap();
                         let algo = trailer_algorithm.unwrap();
-                        expected_checksums.extra = Some(extract_checksum_value(&trailers, algo)?);
+                        // Convert http::HeaderMap to actix_web::http::header::HeaderMap for checksum processing
+                        let mut actix_trailers = actix_web::http::header::HeaderMap::new();
+                        for (name, value) in trailers.iter() {
+                            if let (Ok(actix_name), Ok(actix_value)) = (
+                                actix_web::http::header::HeaderName::from_bytes(
+                                    name.as_str().as_bytes(),
+                                ),
+                                actix_web::http::header::HeaderValue::from_bytes(value.as_bytes()),
+                            ) {
+                                actix_trailers.insert(actix_name, actix_value);
+                            }
+                        }
+                        expected_checksums.extra =
+                            Some(extract_checksum_value(&actix_trailers, algo)?);
                         break;
                     }
                 }

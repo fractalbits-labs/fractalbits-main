@@ -2,13 +2,14 @@ use bytes::Bytes;
 use rpc_client_common::nss_rpc_retry;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::handler::common::s3_error::S3Error;
 use crate::handler::{
-    common::response::xml::{Xml, XmlnsS3},
+    common::{
+        response::xml::{Xml, XmlnsS3},
+        s3_error::S3Error,
+    },
     ObjectRequestContext,
 };
-use crate::object_layout::*;
-use axum::response::Response;
+use crate::object_layout::{gen_version_id, MpuState, ObjectLayout, ObjectState};
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
 use serde::Serialize;
 
@@ -41,7 +42,7 @@ struct InitiateMultipartUploadResult {
 
 pub async fn create_multipart_upload_handler(
     ctx: ObjectRequestContext,
-) -> Result<Response, S3Error> {
+) -> Result<actix_web::HttpResponse, S3Error> {
     let bucket = ctx.resolve_bucket().await?;
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -65,11 +66,13 @@ pub async fn create_multipart_upload_handler(
         )
     )
     .await?;
+
     let init_mpu_res = InitiateMultipartUploadResult {
         xmlns: Default::default(),
         bucket: bucket.bucket_name.clone(),
         key: ctx.key,
         upload_id: version_id.simple().to_string(),
     };
+
     Xml(init_mpu_res).try_into()
 }

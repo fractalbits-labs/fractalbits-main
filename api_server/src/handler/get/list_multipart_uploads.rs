@@ -5,11 +5,10 @@ use crate::handler::{
     },
     ObjectRequestContext,
 };
-use axum::{extract::Query, response::Response, RequestPartsExt};
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 struct ListMultipartUploadsOptions {
     delimiter: Option<String>,
@@ -73,8 +72,10 @@ struct CommonPrefixes {
 
 pub async fn list_multipart_uploads_handler(
     ctx: ObjectRequestContext,
-) -> Result<Response, S3Error> {
-    let Query(_opts): Query<ListMultipartUploadsOptions> =
-        ctx.request.into_parts().0.extract().await?;
+) -> Result<actix_web::HttpResponse, S3Error> {
+    // Parse query parameters
+    let query_string = ctx.request.query_string();
+    let _opts: ListMultipartUploadsOptions =
+        serde_urlencoded::from_str(query_string).unwrap_or_default();
     Xml(ListMultipartUploadsResult::default()).try_into()
 }

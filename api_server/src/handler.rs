@@ -7,55 +7,51 @@ mod head;
 mod post;
 mod put;
 
-use metrics::{counter, gauge, histogram, Gauge};
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
 use crate::AppState;
-use axum::{
-    body::Body,
-    extract::{ConnectInfo, FromRequestParts, State},
-    http,
-    response::{IntoResponse, Response},
+use actix_web::{
+    web::{self, Payload},
+    HttpRequest, HttpResponse, ResponseError,
 };
 use bucket::BucketEndpoint;
 use common::{
-    authorization::Authorization,
     request::extract::*,
     s3_error::S3Error,
-    signature::{self, body::ReqBody, verify_request, VerifiedRequest},
+    signature::{self, payload::*},
 };
 use data_types::{ApiKey, Bucket, Versioned};
 use delete::DeleteEndpoint;
 use endpoint::Endpoint;
 use get::GetEndpoint;
 use head::HeadEndpoint;
+use metrics::{counter, gauge, histogram, Gauge};
 use post::PostEndpoint;
 use put::PutEndpoint;
-use rpc_client_common::RpcError;
-
-pub type Request<T = ReqBody> = http::Request<T>;
+use rpc_client_rss::RpcErrorRss;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 pub struct BucketRequestContext {
     pub app: Arc<AppState>,
-    pub request: Request,
+    pub request: HttpRequest,
     pub api_key: Versioned<ApiKey>,
     pub bucket_name: String,
+    pub payload: actix_web::dev::Payload,
 }
 
 impl BucketRequestContext {
     pub fn new(
         app: Arc<AppState>,
-        request: Request,
+        request: HttpRequest,
         api_key: Versioned<ApiKey>,
         bucket_name: String,
+        payload: actix_web::dev::Payload,
     ) -> Self {
         Self {
             app,
             request,
             api_key,
             bucket_name,
+            payload,
         }
     }
 
@@ -66,19 +62,21 @@ impl BucketRequestContext {
 
 pub struct ObjectRequestContext {
     pub app: Arc<AppState>,
-    pub request: Request,
+    pub request: HttpRequest,
     pub api_key: Option<Versioned<ApiKey>>,
     pub bucket_name: String,
     pub key: String,
+    pub payload: actix_web::dev::Payload,
 }
 
 impl ObjectRequestContext {
     pub fn new(
         app: Arc<AppState>,
-        request: Request,
+        request: HttpRequest,
         api_key: Option<Versioned<ApiKey>>,
         bucket_name: String,
         key: String,
+        payload: actix_web::dev::Payload,
     ) -> Self {
         Self {
             app,
@@ -86,6 +84,7 @@ impl ObjectRequestContext {
             api_key,
             bucket_name,
             key,
+            payload,
         }
     }
 
@@ -94,63 +93,83 @@ impl ObjectRequestContext {
     }
 }
 
+/// Extracts data from request and returns early with warning log on failure
 macro_rules! extract_or_return {
-    ($parts:expr, $app:expr, $extractor:ty) => {
-        match <$extractor>::from_request_parts($parts, $app).await {
-            Ok(value) => value,
+    ($extractor_type:ty, $req:expr) => {{
+        use actix_web::FromRequest;
+        match <$extractor_type>::from_request($req, &mut actix_web::dev::Payload::None).await {
+            Ok(extracted) => extracted,
             Err(rejection) => {
                 tracing::warn!(
-                    "failed to extract parts at {}:{} {:?} {:?}",
+                    "failed to extract {} at {}:{} {:?} {:?}",
+                    stringify!($extractor_type),
                     file!(),
                     line!(),
                     rejection,
-                    $parts
+                    $req.uri()
                 );
-                return rejection.into_response();
+                return Ok(S3Error::InternalError.error_response());
             }
         }
-    };
+    }};
 }
 
-pub async fn any_handler(
-    State(app): State<Arc<AppState>>,
-    ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
-    request: http::Request<Body>,
-) -> Response {
+pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpResponse, S3Error> {
     let start = Instant::now();
-    let (mut parts, body) = request.into_parts();
-    let ApiCommandFromQuery(api_cmd) = extract_or_return!(&mut parts, &app, ApiCommandFromQuery);
-    let AuthFromHeaders(auth) = extract_or_return!(&mut parts, &app, AuthFromHeaders);
-    let BucketAndKeyName { bucket, key } = extract_or_return!(&mut parts, &app, BucketAndKeyName);
-    let api_sig = extract_or_return!(&mut parts, &app, ApiSignature);
-    let request = http::Request::from_parts(parts, body);
+
+    // Extract all the required data using the macro
+    let ApiCommandFromQuery(api_cmd) = extract_or_return!(ApiCommandFromQuery, &req);
+    let AuthFromHeaders(auth) = extract_or_return!(AuthFromHeaders, &req);
+    let BucketAndKeyName { bucket, key } = extract_or_return!(BucketAndKeyName, &req);
+    let api_sig = extract_or_return!(ApiSignatureExtractor, &req);
+
+    let client_addr = req
+        .connection_info()
+        .realip_remote_addr()
+        .unwrap_or("0.0.0.0:0")
+        .to_string();
 
     tracing::debug!(%bucket, %key, %client_addr);
 
     let resource = format!("/{bucket}{key}");
-    let endpoint =
-        match Endpoint::from_extractors(&request, &bucket, &key, api_cmd, api_sig.clone()) {
-            Err(e) => {
-                let api_cmd = api_cmd.map_or("".into(), |cmd| cmd.to_string());
-                tracing::warn!(
-                    %api_cmd,
-                    %api_sig,
-                    %bucket,
-                    %key,
-                    %client_addr,
-                    error=?e,
-                    "failed to create endpoint"
-                );
-                return e.into_response_with_resource(&resource);
-            }
-            Ok(endpoint) => endpoint,
-        };
+    let endpoint = match Endpoint::from_extractors(&req, &bucket, &key, api_cmd, api_sig.0.clone())
+    {
+        Err(e) => {
+            let api_cmd = api_cmd.map_or("".into(), |cmd| cmd.to_string());
+            tracing::warn!(
+                %api_cmd,
+                %api_sig,
+                %bucket,
+                %key,
+                %client_addr,
+                error = ?e,
+                "failed to create endpoint"
+            );
+            return Ok(e.error_response_with_resource(&resource));
+        }
+        Ok(endpoint) => endpoint,
+    };
 
     let endpoint_name = endpoint.as_str();
     let gauge_guard = InflightRequestGuard::new(endpoint_name);
+
+    // Get app state
+    let app_data = req
+        .app_data::<web::Data<Arc<AppState>>>()
+        .ok_or(S3Error::InternalError)?;
+    let app = app_data.get_ref().clone();
+
     let result = tokio::time::timeout(
         Duration::from_secs(app.config.http_request_timeout_seconds),
-        any_handler_inner(app, bucket.clone(), key.clone(), auth, request, endpoint),
+        any_handler_inner(
+            app,
+            bucket.clone(),
+            key.clone(),
+            auth,
+            &req,
+            payload.into_inner(),
+            endpoint,
+        ),
     )
     .await;
     let duration = start.elapsed();
@@ -167,7 +186,7 @@ pub async fn any_handler(
                 "request timed out"
             );
             counter!("request_timeout", "endpoint" => endpoint_name).increment(1);
-            return S3Error::InternalError.into_response_with_resource(&resource);
+            return Ok(S3Error::InternalError.error_response_with_resource(&resource));
         }
     };
 
@@ -175,39 +194,44 @@ pub async fn any_handler(
         Ok(response) => {
             histogram!("request_duration_nanos", "status" => format!("{endpoint_name}_Ok"))
                 .record(duration.as_nanos() as f64);
-            response
+            Ok(response)
         }
         Err(e) => {
             histogram!("request_duration_nanos", "status" => format!("{endpoint_name}_Err"))
                 .record(duration.as_nanos() as f64);
             tracing::error!(
-                endpoint=%endpoint_name,
+                endpoint = %endpoint_name,
                 %bucket,
                 %key,
                 %client_addr,
-                error=?e,
+                error = ?e,
                 "failed to handle request"
             );
-            e.into_response_with_resource(&resource)
+            Ok(e.error_response_with_resource(&resource))
         }
     }
 }
 
 async fn any_handler_inner(
     app: Arc<AppState>,
-    bucket_name: String,
+    bucket: String,
     key: String,
     auth: Option<Authentication>,
-    request: http::Request<Body>,
+    request: &HttpRequest,
+    payload: actix_web::dev::Payload,
     endpoint: Endpoint,
-) -> Result<Response, S3Error> {
-    let (parts, body) = request.into_parts();
-    let request = http::Request::from_parts(parts, body);
+) -> Result<HttpResponse, S3Error> {
     let start = Instant::now();
 
-    let VerifiedRequest {
-        request, api_key, ..
-    } = if app.config.allow_missing_or_bad_signature {
+    tracing::debug!(
+        "Starting signature verification, allow_missing_or_bad_signature={}, auth={:?}",
+        app.config.allow_missing_or_bad_signature,
+        auth
+    );
+    let verified_result: Result<VerifiedRequest, S3Error> = if app
+        .config
+        .allow_missing_or_bad_signature
+    {
         if auth.is_none() {
             tracing::warn!("allowing anonymous access, falling back to 'test_api_key'");
             let access_key = "test_api_key";
@@ -215,86 +239,94 @@ async fn any_handler_inner(
                 .get_api_key(access_key.to_string())
                 .await
                 .map_err(|_| S3Error::InvalidAccessKeyId)?;
-            VerifiedRequest {
-                request: request.map(ReqBody::from),
+            Ok(VerifiedRequest {
                 api_key,
                 content_sha256_header: signature::ContentSha256Header::UnsignedPayload,
-            }
+            })
         } else if let Some(auth) = auth {
+            // Signature verification doesn't use body (it's marked as _body in the function)
             match verify_request(app.clone(), request, &auth).await {
-                Ok(res) => res,
-                Err(signature::error::Error::SignatureError(e, request_wrapper)) => {
-                    let request = request_wrapper.into_inner();
-                    match *e {
-                        signature::error::Error::RpcError(RpcError::NotFound) => {
-                            return Err(S3Error::InvalidAccessKeyId);
-                        }
-                        _ => {
-                            tracing::warn!(
-                                "allowed bad signature for {:?}, falling back to 'test_api_key'",
-                                auth
-                            );
-                            let access_key = "test_api_key";
-                            let api_key = app
-                                .get_api_key(access_key.to_string())
-                                .await
-                                .map_err(|_| S3Error::InvalidAccessKeyId)?;
-                            VerifiedRequest {
-                                request: request.map(ReqBody::from),
-                                api_key,
-                                content_sha256_header:
-                                    signature::ContentSha256Header::UnsignedPayload,
-                            }
-                        }
-                    }
+                Ok(verified) => Ok(verified),
+                Err(signature::error::Error::RpcErrorRss(RpcErrorRss::NotFound)) => {
+                    return Err(S3Error::InvalidAccessKeyId);
                 }
                 Err(e) => {
-                    tracing::error!("unexpected error during signature verification: {:?}", e);
-                    return Err(S3Error::InternalError);
+                    tracing::warn!(
+                        "allowed bad signature for {:?}, falling back to 'test_api_key', error: {:?}",
+                        auth, e
+                    );
+                    let access_key = "test_api_key";
+                    let api_key = app
+                        .get_api_key(access_key.to_string())
+                        .await
+                        .map_err(|_| S3Error::InvalidAccessKeyId)?;
+                    Ok(VerifiedRequest {
+                        api_key,
+                        content_sha256_header: signature::ContentSha256Header::UnsignedPayload,
+                    })
                 }
             }
         } else {
             return Err(S3Error::InvalidSignature);
         }
     } else {
-        let auth = auth.ok_or(S3Error::InvalidSignature)?;
-        match verify_request(app.clone(), request, &auth).await {
-            Ok(res) => res,
-            Err(signature::error::Error::SignatureError(e, _)) => match *e {
-                signature::error::Error::RpcError(RpcError::NotFound) => {
-                    return Err(S3Error::InvalidAccessKeyId);
-                }
-                _ => {
-                    return Err(S3Error::InvalidSignature);
-                }
-            },
-            Err(e) => {
-                tracing::error!("unexpected error during signature verification: {:?}", e);
-                return Err(S3Error::InternalError);
+        let auth_unwrapped = auth.ok_or(S3Error::InvalidSignature)?;
+        match verify_request(app.clone(), request, &auth_unwrapped).await {
+            Ok(verified) => Ok(verified),
+            Err(signature::error::Error::RpcErrorRss(RpcErrorRss::NotFound)) => {
+                return Err(S3Error::InvalidAccessKeyId);
+            }
+            Err(_) => {
+                return Err(S3Error::InvalidSignature);
             }
         }
     };
+
+    let verified_request = verified_result?;
+    let api_key = verified_request.api_key;
+
+    tracing::debug!(
+        "Signature verification completed, api_key.key_id={}",
+        api_key.data.key_id
+    );
+
     histogram!("verify_request_duration_nanos", "endpoint" => endpoint.as_str())
         .record(start.elapsed().as_nanos() as f64);
 
-    let allowed = match endpoint.authorization_type() {
-        Authorization::Read => api_key.data.allow_read(&bucket_name),
-        Authorization::Write => api_key.data.allow_write(&bucket_name),
-        Authorization::Owner => api_key.data.allow_owner(&bucket_name),
-        Authorization::None => true,
+    // Check authorization
+    let authorization_type = endpoint.authorization_type();
+    let allowed = match authorization_type {
+        common::authorization::Authorization::Read => api_key.data.allow_read(&bucket),
+        common::authorization::Authorization::Write => api_key.data.allow_write(&bucket),
+        common::authorization::Authorization::Owner => api_key.data.allow_owner(&bucket),
+        common::authorization::Authorization::None => true,
     };
+    tracing::debug!(
+        "Authorization check: endpoint={:?}, bucket={}, required={:?}, allowed={}",
+        endpoint.as_str(),
+        bucket,
+        authorization_type,
+        allowed
+    );
     if !allowed {
         return Err(S3Error::AccessDenied);
     }
 
     match endpoint {
         Endpoint::Bucket(bucket_endpoint) => {
-            let bucket_ctx = BucketRequestContext::new(app, request, api_key, bucket_name);
+            let bucket_ctx =
+                BucketRequestContext::new(app, request.clone(), api_key, bucket, payload);
             bucket_handler(bucket_ctx, bucket_endpoint).await
         }
         ref _object_endpoints => {
-            let object_ctx =
-                ObjectRequestContext::new(app, request, Some(api_key), bucket_name, key);
+            let object_ctx = ObjectRequestContext::new(
+                app,
+                request.clone(),
+                Some(api_key),
+                bucket,
+                key,
+                payload,
+            );
             match endpoint {
                 Endpoint::Head(head_endpoint) => head_handler(object_ctx, head_endpoint).await,
                 Endpoint::Get(get_endpoint) => get_handler(object_ctx, get_endpoint).await,
@@ -312,7 +344,7 @@ async fn any_handler_inner(
 async fn bucket_handler(
     ctx: BucketRequestContext,
     endpoint: BucketEndpoint,
-) -> Result<Response, S3Error> {
+) -> Result<HttpResponse, S3Error> {
     match endpoint {
         BucketEndpoint::CreateBucket => bucket::create_bucket_handler(ctx).await,
         BucketEndpoint::DeleteBucket => bucket::delete_bucket_handler(ctx).await,
@@ -324,7 +356,7 @@ async fn bucket_handler(
 async fn head_handler(
     ctx: ObjectRequestContext,
     endpoint: HeadEndpoint,
-) -> Result<Response, S3Error> {
+) -> Result<HttpResponse, S3Error> {
     match endpoint {
         HeadEndpoint::HeadObject => head::head_object_handler(ctx).await,
     }
@@ -333,7 +365,7 @@ async fn head_handler(
 async fn get_handler(
     ctx: ObjectRequestContext,
     endpoint: GetEndpoint,
-) -> Result<Response, S3Error> {
+) -> Result<HttpResponse, S3Error> {
     match endpoint {
         GetEndpoint::GetObject => get::get_object_handler(ctx).await,
         GetEndpoint::GetObjectAttributes => get::get_object_attributes_handler(ctx).await,
@@ -347,7 +379,7 @@ async fn get_handler(
 async fn put_handler(
     ctx: ObjectRequestContext,
     endpoint: PutEndpoint,
-) -> Result<Response, S3Error> {
+) -> Result<HttpResponse, S3Error> {
     match endpoint {
         PutEndpoint::PutObject => put::put_object_handler(ctx).await,
         PutEndpoint::UploadPart(part_number, upload_id) => {
@@ -362,7 +394,7 @@ async fn put_handler(
 async fn post_handler(
     ctx: ObjectRequestContext,
     endpoint: PostEndpoint,
-) -> Result<Response, S3Error> {
+) -> Result<HttpResponse, S3Error> {
     match endpoint {
         PostEndpoint::CompleteMultipartUpload(upload_id) => {
             post::complete_multipart_upload_handler(ctx, upload_id).await
@@ -375,7 +407,7 @@ async fn post_handler(
 async fn delete_handler(
     ctx: ObjectRequestContext,
     endpoint: DeleteEndpoint,
-) -> Result<Response, S3Error> {
+) -> Result<HttpResponse, S3Error> {
     match endpoint {
         DeleteEndpoint::AbortMultipartUpload(upload_id) => {
             delete::abort_multipart_upload_handler(ctx, upload_id).await

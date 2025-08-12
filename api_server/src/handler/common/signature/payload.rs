@@ -1,24 +1,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use axum::body::Body;
-use axum::extract::Query;
-use axum::http::header::{HeaderMap, HeaderValue, AUTHORIZATION, HOST};
-use axum::http::{request::Request, Method};
-use axum::RequestExt;
+use actix_web::http::header::{HeaderMap, AUTHORIZATION, HOST};
+use actix_web::HttpRequest;
 use chrono::{DateTime, Utc};
 use data_types::{ApiKey, Versioned};
 use hmac::Mac;
 use itertools::Itertools;
+use rpc_client_rss::RpcErrorRss;
 use sha2::{Digest, Sha256};
 
 use crate::handler::common::{request::extract::Authentication, xheader};
+use crate::AppState;
 
 use super::super::data::Hash;
-
-use super::*;
-
 use super::super::encoding::uri_encode;
+use super::*;
 
 pub struct CheckedSignature {
     pub key: Option<Versioned<ApiKey>>,
@@ -26,27 +23,52 @@ pub struct CheckedSignature {
     pub signature_header: Option<String>,
 }
 
+pub struct VerifiedRequest {
+    pub api_key: Versioned<ApiKey>,
+    pub content_sha256_header: ContentSha256Header,
+}
+
+pub async fn verify_request(
+    app: Arc<AppState>,
+    request: &HttpRequest,
+    auth: &Authentication,
+) -> Result<VerifiedRequest, Error> {
+    let checked_signature = check_payload_signature(app.clone(), auth, request).await?;
+
+    let api_key = checked_signature
+        .key
+        .ok_or(Error::RpcErrorRss(RpcErrorRss::NotFound))?;
+
+    Ok(VerifiedRequest {
+        api_key,
+        content_sha256_header: checked_signature.content_sha256_header,
+    })
+}
+
 pub async fn check_payload_signature(
     app: Arc<AppState>,
     auth: &Authentication,
-    request: &mut Request<Body>,
+    request: &HttpRequest,
 ) -> Result<CheckedSignature, Error> {
-    let Query(mut query): Query<BTreeMap<String, String>> = request.extract_parts().await?;
+    let query_string = request.query_string();
+    let mut query: BTreeMap<String, String> =
+        serde_urlencoded::from_str(query_string).unwrap_or_default();
 
     if query.contains_key(xheader::X_AMZ_ALGORITHM.as_str()) {
-        // We check for presigned-URL-style authentication first, because
-        // the browser or something else could inject an Authorization header
-        // that is totally unrelated to AWS signatures.
+        // Presigned URL style authentication
         check_presigned_signature(app, auth, request, &mut query).await
-    } else if request.headers().contains_key(AUTHORIZATION) {
+    } else if request.headers().contains_key(AUTHORIZATION.as_str()) {
+        // Standard signature authentication
         check_standard_signature(app, auth, request).await
     } else {
         // Unsigned (anonymous) request
         let content_sha256 = request
             .headers()
-            .get(xheader::X_AMZ_CONTENT_SHA256)
+            .get(xheader::X_AMZ_CONTENT_SHA256.as_str())
             .map(|x| x.to_str())
-            .transpose()?;
+            .transpose()
+            .map_err(|e| Error::Other(format!("Invalid header: {e}")))?;
+
         Ok(CheckedSignature {
             key: None,
             content_sha256_header: parse_x_amz_content_sha256(content_sha256)?,
@@ -90,17 +112,20 @@ fn parse_x_amz_content_sha256(header: Option<&str>) -> Result<ContentSha256Heade
 pub async fn check_standard_signature(
     app: Arc<AppState>,
     authentication: &Authentication,
-    request: &mut Request<Body>,
+    request: &HttpRequest,
 ) -> Result<CheckedSignature, Error> {
-    let query_params: Query<BTreeMap<String, String>> = request.extract_parts().await?;
+    let query_params: BTreeMap<String, String> =
+        serde_urlencoded::from_str(request.query_string()).unwrap_or_default();
+
     let canonical_request = canonical_request(
         request.method(),
-        request.uri().path(),
+        request.path(),
         &query_params,
         request.headers(),
         &authentication.signed_headers,
         &authentication.content_sha256,
     )?;
+
     let string_to_sign = string_to_sign(
         &authentication.date,
         &authentication.scope.to_sign_string(),
@@ -124,29 +149,26 @@ pub async fn check_standard_signature(
 async fn check_presigned_signature(
     app: Arc<AppState>,
     authentication: &Authentication,
-    request: &mut Request<Body>,
+    request: &HttpRequest,
     query: &mut BTreeMap<String, String>,
 ) -> Result<CheckedSignature, Error> {
     let signed_headers = &authentication.signed_headers;
-    // Verify that all necessary request headers are included in signed_headers
-    // For AWSv4 pre-signed URLs, the following must be included:
-    // - the Host header (mandatory)
-    // - all x-amz-* headers used in the request
+
+    // Verify signed headers
     verify_signed_headers(request.headers(), signed_headers)?;
 
-    // The X-Amz-Signature value is passed as a query parameter,
-    // but the signature cannot be computed from a string that contains itself.
-    // AWS specifies that all query params except X-Amz-Signature are included
-    // in the canonical request.
+    // Remove X-Amz-Signature from query for canonical request calculation
     query.remove(xheader::X_AMZ_SIGNATURE.as_str());
+
     let canonical_request = canonical_request(
         request.method(),
-        request.uri().path(),
+        request.path(),
         query,
         request.headers(),
         signed_headers,
         &authentication.content_sha256,
     )?;
+
     let string_to_sign = string_to_sign(
         &authentication.date,
         &authentication.scope.to_sign_string(),
@@ -158,34 +180,6 @@ async fn check_presigned_signature(
 
     let key = verify_v4(app, authentication, string_to_sign.as_bytes()).await?;
 
-    // In the page on presigned URLs, AWS specifies that if a signed query
-    // parameter and a signed header of the same name have different values,
-    // then an InvalidRequest error is raised.
-    let headers_mut = request.headers_mut();
-    for (name, value) in query.iter() {
-        if let Some(existing) = headers_mut.get(name) {
-            if signed_headers.contains(name) && existing.as_bytes() != value.as_bytes() {
-                return Err(Error::Other(format!(
-                    "Conflicting values for `{name}` in query parameters and request headers"
-                )));
-            }
-        }
-        if name.starts_with("x-amz-") {
-            // Query parameters that start by x-amz- are actually intended to stand in for
-            // headers that can't be added at the time the request is made.
-            // What we do is just add them to the Request object as regular headers,
-            // that will be handled downstream as if they were included like in a normal request.
-            // (Here we allow such query parameters to override headers with the same name
-            // that are not signed, however there is not much reason that this would happen)
-            headers_mut.insert(
-                HeaderName::from_lowercase(name.as_bytes()).unwrap(),
-                HeaderValue::from_bytes(value.as_bytes()).unwrap(),
-            );
-        }
-    }
-
-    // Presigned URLs always use UNSIGNED-PAYLOAD,
-    // so there is no sha256 hash to return.
     Ok(CheckedSignature {
         key,
         content_sha256_header: ContentSha256Header::UnsignedPayload,
@@ -212,23 +206,23 @@ pub fn string_to_sign(datetime: &DateTime<Utc>, scope_string: &str, canonical_re
     let mut hasher = Sha256::default();
     hasher.update(canonical_req.as_bytes());
     [
-        AWS4_HMAC_SHA256,
-        &datetime.format(LONG_DATETIME).to_string(),
+        "AWS4-HMAC-SHA256",
+        &datetime.format("%Y%m%dT%H%M%SZ").to_string(),
         scope_string,
-        &hex::encode(hasher.finalize().as_slice()),
+        &format!("{:x}", hasher.finalize()),
     ]
     .join("\n")
 }
 
 pub fn canonical_request(
-    method: &Method,
+    method: &actix_web::http::Method,
     canonical_uri: &str,
     query_params: &BTreeMap<String, String>,
-    headers: &HeaderMap<HeaderValue>,
+    headers: &actix_web::http::header::HeaderMap,
     signed_headers: &BTreeSet<String>,
     content_sha256: &str,
 ) -> Result<String, Error> {
-    // Canonical query string from passed HeaderMap
+    // Canonical query string from passed query params
     let canonical_query_string = {
         let mut items = Vec::with_capacity(query_params.len());
         for (key, value) in query_params.iter() {
@@ -242,11 +236,17 @@ pub fn canonical_request(
     let canonical_header_string = signed_headers
         .iter()
         .map(|name| {
-            let value = headers.get(name).ok_or(Error::Other(format!(
-                "signed header `{name}` is not present"
-            )))?;
-            let value = std::str::from_utf8(value.as_bytes())?;
-            Ok(format!("{}:{}", name.as_str(), value.trim()))
+            let value = headers
+                .get(name)
+                .ok_or_else(|| Error::Other(format!("signed header `{name}` is not present")))?;
+            // Handle potentially non-ASCII header values (e.g., x-amz-meta-* headers with unicode)
+            let value_str = if let Ok(s) = value.to_str() {
+                s.to_string()
+            } else {
+                // For non-ASCII headers, convert bytes to UTF-8 lossy
+                String::from_utf8_lossy(value.as_bytes()).to_string()
+            };
+            Ok(format!("{}:{}", name.as_str(), value_str.trim()))
         })
         .collect::<Result<Vec<String>, Error>>()?
         .join("\n");
@@ -261,6 +261,7 @@ pub fn canonical_request(
         &signed_headers,
         content_sha256,
     ];
+
     Ok(list.join("\n"))
 }
 

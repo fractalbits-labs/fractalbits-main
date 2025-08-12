@@ -8,22 +8,19 @@ use crate::{
             request::extract::BucketAndKeyName,
             response::xml::{Xml, XmlnsS3},
             s3_error::S3Error,
-            signature::{body::ReqBody, checksum::ChecksumValue},
+            signature::checksum::ChecksumValue,
             time, xheader,
         },
-        get::get_object_content,
+        get::get_object_content_as_bytes,
         put::put_object_handler,
         ObjectRequestContext,
     },
     object_layout::*,
     AppState,
 };
-use axum::{
-    body::Body,
-    http::{header, HeaderMap, HeaderValue},
-    response::Response,
-};
+use actix_web::http::header::{self, HeaderMap, HeaderValue};
 use base64::{prelude::BASE64_STANDARD, Engine};
+use bytes::Bytes;
 use data_types::{ApiKey, Versioned};
 use serde::Serialize;
 
@@ -191,21 +188,55 @@ impl CopyObjectResult {
     }
 }
 
-pub async fn copy_object_handler(ctx: ObjectRequestContext) -> Result<Response, S3Error> {
+pub async fn copy_object_handler(
+    ctx: ObjectRequestContext,
+) -> Result<actix_web::HttpResponse, S3Error> {
     let _bucket = ctx.resolve_bucket().await?;
     let api_key = ctx.api_key.ok_or(S3Error::InternalError)?;
     let header_opts = HeaderOpts::from_headers(ctx.request.headers())?;
-    let (source_obj, body) =
-        get_copy_source_object(ctx.app.clone(), &api_key, &header_opts.x_amz_copy_source).await?;
+    // We need to get the source object first. Since Versioned doesn't implement Clone,
+    // we'll create a simple ApiKey for the source operation and reuse the original for put
+    let source_api_key = Versioned::new(
+        0,
+        ApiKey {
+            key_id: api_key.data.key_id.clone(),
+            secret_key: api_key.data.secret_key.clone(),
+            name: api_key.data.name.clone(),
+            allow_create_bucket: api_key.data.allow_create_bucket,
+            authorized_buckets: api_key.data.authorized_buckets.clone(),
+            is_deleted: api_key.data.is_deleted,
+        },
+    );
+    let (source_obj, source_body) = get_copy_source_object(
+        ctx.app.clone(),
+        &source_api_key,
+        &header_opts.x_amz_copy_source,
+    )
+    .await?;
 
+    tracing::info!(
+        "Copy object request: bucket={}, key={}, source={}",
+        ctx.bucket_name,
+        ctx.key,
+        header_opts.x_amz_copy_source
+    );
+
+    // Convert the source body to bytes
+    let source_body_bytes = actix_web::body::to_bytes(source_body)
+        .await
+        .map_err(|_| S3Error::InternalError)?;
+    let actix_body_bytes = source_body_bytes;
+
+    // Use the existing put_object handler to store the copied object
     let new_ctx = ObjectRequestContext::new(
         ctx.app,
-        axum::http::Request::new(ReqBody::from(body)),
+        ctx.request,
         Some(api_key),
         ctx.bucket_name,
         ctx.key,
+        actix_web::dev::Payload::from(actix_body_bytes),
     );
-    put_object_handler(new_ctx).await?;
+    let _put_response = put_object_handler(new_ctx).await?;
 
     Xml(CopyObjectResult::default()
         .etag(source_obj.etag()?)
@@ -218,7 +249,7 @@ async fn get_copy_source_object(
     app: Arc<AppState>,
     api_key: &Versioned<ApiKey>,
     copy_source: &str,
-) -> Result<(ObjectLayout, Body), S3Error> {
+) -> Result<(ObjectLayout, Bytes), S3Error> {
     let copy_source = percent_encoding::percent_decode_str(copy_source).decode_utf8()?;
 
     let (source_bucket_name, source_key) =
@@ -231,6 +262,6 @@ async fn get_copy_source_object(
     let source_bucket = bucket::resolve_bucket(app.clone(), source_bucket_name.clone()).await?;
     let source_obj = get_raw_object(&app, &source_bucket.root_blob_name, &source_key).await?;
     let (source_obj_content, _) =
-        get_object_content(app, &source_bucket, &source_obj, source_key, None).await?;
+        get_object_content_as_bytes(app, &source_bucket, &source_obj, source_key, None).await?;
     Ok((source_obj, source_obj_content))
 }

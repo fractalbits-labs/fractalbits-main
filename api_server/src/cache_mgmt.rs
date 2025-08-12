@@ -1,8 +1,6 @@
-use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
+use actix_web::{
+    web::{Data, Json, Path},
+    HttpResponse, Result,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -23,9 +21,10 @@ pub struct AzStatusUpdateRequest {
 
 /// Invalidate a specific bucket from the cache
 pub async fn invalidate_bucket(
-    State(app): State<Arc<AppState>>,
-    Path(bucket_name): Path<String>,
-) -> impl IntoResponse {
+    app: Data<Arc<AppState>>,
+    path: Path<String>,
+) -> Result<HttpResponse> {
+    let bucket_name = path.into_inner();
     info!("Invalidating bucket cache for: {}", bucket_name);
 
     // The cache key format for buckets should match what's used in bucket::resolve_bucket
@@ -37,14 +36,15 @@ pub async fn invalidate_bucket(
         message: format!("Bucket '{}' cache invalidated", bucket_name),
     };
 
-    (StatusCode::OK, Json(response))
+    Ok(HttpResponse::Ok().json(response))
 }
 
 /// Invalidate a specific API key from the cache
 pub async fn invalidate_api_key(
-    State(app): State<Arc<AppState>>,
-    Path(key_id): Path<String>,
-) -> impl IntoResponse {
+    app: Data<Arc<AppState>>,
+    path: Path<String>,
+) -> Result<HttpResponse> {
+    let key_id = path.into_inner();
     info!("Invalidating API key cache for: {}", key_id);
 
     // The cache key format for API keys should match what's used in get_api_key
@@ -56,15 +56,16 @@ pub async fn invalidate_api_key(
         message: format!("API key '{}' cache invalidated", key_id),
     };
 
-    (StatusCode::OK, Json(response))
+    Ok(HttpResponse::Ok().json(response))
 }
 
 /// Update az_status cache for a specific AZ with new status value
 pub async fn update_az_status(
-    State(app): State<Arc<AppState>>,
-    Path(az_id): Path<String>,
-    Json(request): Json<AzStatusUpdateRequest>,
-) -> impl IntoResponse {
+    app: Data<Arc<AppState>>,
+    path: Path<String>,
+    request: Json<AzStatusUpdateRequest>,
+) -> Result<HttpResponse> {
+    let az_id = path.into_inner();
     info!(
         "Updating az_status cache for: {} with status: {}",
         az_id, request.status
@@ -84,19 +85,19 @@ pub async fn update_az_status(
             ),
         };
 
-        (StatusCode::OK, Json(response))
+        Ok(HttpResponse::Ok().json(response))
     } else {
         let response = CacheInvalidationResponse {
             status: "error".to_string(),
             message: "AZ status cache not available for this storage backend".to_string(),
         };
 
-        (StatusCode::NOT_FOUND, Json(response))
+        Ok(HttpResponse::NotFound().json(response))
     }
 }
 
 /// Clear the entire cache
-pub async fn clear_cache(State(app): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn clear_cache(app: Data<Arc<AppState>>) -> Result<HttpResponse> {
     warn!("Clearing entire cache");
 
     // Invalidate all entries in the cache
@@ -107,16 +108,13 @@ pub async fn clear_cache(State(app): State<Arc<AppState>>) -> impl IntoResponse 
         message: "All cache entries cleared".to_string(),
     };
 
-    (StatusCode::OK, Json(response))
+    Ok(HttpResponse::Ok().json(response))
 }
 
 /// Health check endpoint for management API
-pub async fn mgmt_health() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "status": "healthy",
-            "service": "api_server_cache_management"
-        })),
-    )
+pub async fn mgmt_health() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "status": "healthy",
+        "service": "api_server_cache_management"
+    })))
 }

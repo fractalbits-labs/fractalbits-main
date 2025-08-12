@@ -1,10 +1,5 @@
-use axum::{
-    body::Body,
-    extract::rejection::QueryRejection,
-    http::{header::ToStrError, Request},
-};
-use rpc_client_common::RpcError;
-use sync_wrapper::SyncWrapper;
+use actix_web::http::header::ToStrError;
+use rpc_client_rss::RpcErrorRss;
 use thiserror::Error;
 
 /// Errors of this crate
@@ -26,11 +21,11 @@ pub enum Error {
     #[error("Invalid digest: {0}")]
     InvalidDigest(String),
 
-    #[error(transparent)]
-    QueryRejection(#[from] QueryRejection),
+    #[error("Query parsing error: {0}")]
+    QueryParsingError(String),
 
     #[error(transparent)]
-    RpcError(#[from] RpcError),
+    RpcErrorRss(#[from] RpcErrorRss),
 
     #[error(transparent)]
     FromHexError(#[from] hex::FromHexError),
@@ -38,18 +33,26 @@ pub enum Error {
     #[error(transparent)]
     ToStrError(#[from] ToStrError),
 
-    #[error(transparent)]
-    AxumError(#[from] axum::Error),
+    #[error("HTTP processing error: {0}")]
+    HttpProcessingError(String),
+
+    // Generic HTTP body error that can come from any body implementation
+    #[error("Body error: {0}")]
+    BodyError(String),
 
     #[error("Other: {0}")]
     Other(String),
-
-    #[error("Signature error: {0}")]
-    SignatureError(Box<Error>, Box<SyncWrapper<Request<Body>>>),
 }
 
 impl From<Box<dyn std::error::Error + Send + Sync>> for Error {
     fn from(err: Box<dyn std::error::Error + Send + Sync>) -> Self {
         Error::Other(err.to_string())
+    }
+}
+
+impl From<std::convert::Infallible> for Error {
+    fn from(_: std::convert::Infallible) -> Self {
+        // Infallible can never actually be constructed, so this is unreachable
+        unreachable!("Infallible can never be constructed")
     }
 }

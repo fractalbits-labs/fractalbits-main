@@ -1,15 +1,10 @@
-use axum::{
-    extract::{FromRequestParts, Query},
-    http::request::Parts,
-    RequestPartsExt,
-};
+use actix_web::{dev::Payload, FromRequest, HttpRequest};
+use futures::future::{ready, Ready};
 use serde::Deserialize;
 use std::fmt;
 
-use crate::handler::common::s3_error::S3Error;
-
 #[allow(dead_code)]
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct ApiSignature {
     #[serde(rename = "uploadId")]
@@ -40,70 +35,95 @@ impl fmt::Display for ApiSignature {
     }
 }
 
-impl<S> FromRequestParts<S> for ApiSignature
-where
-    S: Send + Sync,
-{
-    type Rejection = S3Error;
+#[derive(Debug, Clone)]
+pub struct ApiSignatureExtractor(pub ApiSignature);
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let Query(mut api_signature): Query<ApiSignature> = parts.extract().await?;
-        if let Some(x_amz_copy_source) = parts.headers.get("x-amz-copy-source") {
-            if let Ok(value) = x_amz_copy_source.to_str() {
-                api_signature.x_amz_copy_source = Some(value.to_owned());
-            }
+impl std::fmt::Display for ApiSignatureExtractor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ApiSignatureExtractor(upload_id: {:?}, part_number: {:?}, list_type: {:?}, x_amz_copy_source: {:?})",
+               self.0.upload_id, self.0.part_number, self.0.list_type, self.0.x_amz_copy_source)
+    }
+}
+
+impl FromRequest for ApiSignatureExtractor {
+    type Error = actix_web::Error;
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
+        // Use serde_urlencoded to properly deserialize query parameters
+        let query_string = req.query_string();
+        let mut api_signature: ApiSignature =
+            serde_urlencoded::from_str(query_string).unwrap_or_default();
+
+        // Extract x-amz-copy-source from headers if present
+        if let Some(copy_source) = req
+            .headers()
+            .get("x-amz-copy-source")
+            .and_then(|v| v.to_str().ok())
+        {
+            api_signature.x_amz_copy_source = Some(copy_source.to_string());
         }
-        Ok(api_signature)
+
+        ready(Ok(ApiSignatureExtractor(api_signature)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::Request, routing::get, Router};
-    use http_body_util::BodyExt;
-    use tower::ServiceExt;
+    use actix_web::{test, web, App, HttpResponse};
 
-    fn app() -> Router {
-        Router::new().route("/{*key}", get(handler))
+    async fn handler(api_signature: ApiSignatureExtractor) -> HttpResponse {
+        let upload_id = api_signature.0.upload_id.unwrap_or_default();
+        HttpResponse::Ok().body(upload_id)
     }
 
-    async fn handler(api_signature: ApiSignature) -> String {
-        if let Some(upload_id) = api_signature.upload_id {
-            upload_id
-        } else {
-            "".into()
-        }
-    }
-
-    #[tokio::test]
+    #[actix_web::test]
     async fn test_extract_api_signature_from_query_ok() {
         let api_signature_str = "uploadId=abc123";
         assert_eq!(send_request_get_body(api_signature_str).await, "abc123");
     }
 
     async fn send_request_get_body(api_signature: &str) -> String {
-        let api_signature = if api_signature.is_empty() {
-            ""
+        let app = test::init_service(App::new().route("/{key:.*}", web::get().to(handler))).await;
+
+        let uri = if api_signature.is_empty() {
+            "/obj1".to_string()
         } else {
-            &format!("?{api_signature}")
+            format!("/obj1?{}", api_signature)
         };
-        let body = app()
-            .oneshot(
-                Request::builder()
-                    .uri(format!("http://my-bucket.localhost/obj1{api_signature}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap()
-            .into_body();
-        let bytes = body.collect().await.unwrap().to_bytes();
-        String::from_utf8(bytes.to_vec()).unwrap()
+
+        let req = test::TestRequest::get().uri(&uri).to_request();
+
+        let resp = test::call_service(&app, req).await;
+        let body = test::read_body(resp).await;
+        String::from_utf8(body.to_vec()).unwrap()
+    }
+
+    #[actix_web::test]
+    async fn test_extract_api_signature_from_header() {
+        let app = test::init_service(App::new().route(
+            "/{key:.*}",
+            web::get().to(|sig: ApiSignatureExtractor| async move {
+                let copy_source = sig.0.x_amz_copy_source.unwrap_or_default();
+                HttpResponse::Ok().body(copy_source)
+            }),
+        ))
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/obj1")
+            .insert_header(("x-amz-copy-source", "bucket/key"))
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        let body = test::read_body(resp).await;
+        let result = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(result, "bucket/key");
     }
 
     #[test]
-    fn test_display_api_signature() {
+    async fn test_display_api_signature() {
         let api_signature = ApiSignature {
             upload_id: Some("abc123".to_string()),
             part_number: Some(1),

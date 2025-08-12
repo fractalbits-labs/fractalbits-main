@@ -1,19 +1,12 @@
-use axum::body::Body;
-use axum::http::{self, Method};
-
 use super::{
-    bucket::BucketEndpoint,
-    common::{
-        authorization::Authorization,
-        request::extract::{ApiCommand, ApiSignature},
-        s3_error::S3Error,
-    },
-    delete::DeleteEndpoint,
-    get::GetEndpoint,
-    head::HeadEndpoint,
-    post::PostEndpoint,
-    put::PutEndpoint,
+    bucket::BucketEndpoint, common::s3_error::S3Error, delete::DeleteEndpoint, get::GetEndpoint,
+    head::HeadEndpoint, post::PostEndpoint, put::PutEndpoint,
 };
+use crate::handler::common::{
+    authorization::Authorization,
+    request::extract::{ApiCommand, ApiSignature},
+};
+use actix_web::http::Method;
 
 pub enum Endpoint {
     Get(GetEndpoint),
@@ -26,7 +19,7 @@ pub enum Endpoint {
 
 impl Endpoint {
     pub fn from_extractors(
-        request: &http::Request<Body>,
+        request: &actix_web::HttpRequest,
         bucket_name: &str,
         key: &str,
         api_cmd: Option<ApiCommand>,

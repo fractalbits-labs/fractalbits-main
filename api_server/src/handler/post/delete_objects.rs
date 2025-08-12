@@ -1,15 +1,14 @@
 use crate::handler::common::{
+    buffer_payload,
     response::xml::{Xml, XmlnsS3},
     s3_error::S3Error,
 };
 use crate::handler::delete::delete_object_handler;
 use crate::handler::ObjectRequestContext;
-use axum::response::Response;
 use bytes::Buf;
 use serde::{Deserialize, Serialize};
 
 // Xml request
-
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 struct Delete {
@@ -64,21 +63,29 @@ struct Error {
     version_id: String,
 }
 
-pub async fn delete_objects_handler(ctx: ObjectRequestContext) -> Result<Response, S3Error> {
+pub async fn delete_objects_handler(
+    ctx: ObjectRequestContext,
+) -> Result<actix_web::HttpResponse, S3Error> {
     let _bucket = ctx.resolve_bucket().await?;
-    let body = ctx.request.into_body().collect().await?;
+
+    // Extract body from payload using the helper function
+    let body = buffer_payload(ctx.payload).await?;
+
+    // Parse the XML body to get the list of objects to delete
     let to_be_deleted: Delete = quick_xml::de::from_reader(body.reader())?;
+
     let mut delete_result = DeleteResult::default();
+
+    // Process each object to be deleted
     for obj in to_be_deleted.object {
         let key = format!("/{}\0", obj.key);
         let delete_ctx = ObjectRequestContext::new(
             ctx.app.clone(),
-            axum::http::Request::new(crate::handler::common::signature::body::ReqBody::from(
-                axum::body::Body::empty(),
-            )),
+            ctx.request.clone(),
             None,
             ctx.bucket_name.clone(),
             key,
+            actix_web::dev::Payload::None,
         );
         match delete_object_handler(delete_ctx).await {
             Ok(_) => {
@@ -89,16 +96,28 @@ pub async fn delete_objects_handler(ctx: ObjectRequestContext) -> Result<Respons
                 delete_result.deleted.push(deleted);
             }
             Err(e) => {
-                delete_result.error = Some(Error {
-                    code: e.as_ref().to_owned(),
-                    key: obj.key,
-                    message: e.to_string(),
-                    version_id: "".into(),
-                });
-                break;
+                // Check if it's a "not found" error which is allowed in S3
+                if matches!(e, S3Error::NoSuchKey) {
+                    // S3 allows deleting non-existing objects
+                    let deleted = Deleted {
+                        key: obj.key,
+                        ..Default::default()
+                    };
+                    delete_result.deleted.push(deleted);
+                } else {
+                    // For other errors, record them in the error field
+                    delete_result.error = Some(Error {
+                        code: e.as_ref().to_owned(),
+                        key: obj.key,
+                        message: e.to_string(),
+                        version_id: "".to_string(),
+                    });
+                    break;
+                }
             }
         }
     }
 
+    // Generate XML response using Xml wrapper
     Xml(delete_result).try_into()
 }

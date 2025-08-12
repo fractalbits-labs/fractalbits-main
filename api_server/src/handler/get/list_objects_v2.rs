@@ -1,6 +1,8 @@
+use nss_codec::list_inodes_response;
 use rpc_client_common::nss_rpc_retry;
 use std::sync::Arc;
 
+use crate::object_layout::ObjectLayout;
 use crate::{
     handler::{
         common::{
@@ -12,14 +14,12 @@ use crate::{
     },
     AppState,
 };
-use axum::{extract::Query, response::Response, RequestPartsExt};
 use data_types::Bucket;
 use rkyv::{self, rancor::Error};
 use serde::{Deserialize, Serialize};
+use serde_urlencoded;
 
-use crate::object_layout::ObjectLayout;
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 struct QueryOpts {
     list_type: Option<String>,
@@ -192,10 +192,17 @@ pub struct Prefix {
     prefix: String,
 }
 
-pub async fn list_objects_v2_handler(ctx: ObjectRequestContext) -> Result<Response, S3Error> {
-    let bucket = ctx.resolve_bucket().await?;
-    let Query(opts): Query<QueryOpts> = ctx.request.into_parts().0.extract().await?;
-    tracing::debug!("list_objects_v2 {opts:?}");
+pub async fn list_objects_v2_handler(
+    ctx: ObjectRequestContext,
+) -> Result<actix_web::HttpResponse, S3Error> {
+    // Parse query parameters - need to handle URL decoding properly
+    let query_string = ctx.request.query_string();
+    // Use serde_urlencoded which handles URL decoding automatically
+    let opts: QueryOpts = serde_urlencoded::from_str(query_string).unwrap_or_default();
+    tracing::debug!(
+        "list_objects_v2 query_string='{}' parsed={opts:?}",
+        query_string
+    );
 
     // Sanity checks
     if opts.list_type != Some("2".into()) {
@@ -205,7 +212,7 @@ pub async fn list_objects_v2_handler(ctx: ObjectRequestContext) -> Result<Respon
         );
         return Err(S3Error::InvalidArgument1);
     }
-    if let Some(encoding_type) = opts.encoding_type {
+    if let Some(encoding_type) = &opts.encoding_type {
         if encoding_type != "url" {
             tracing::warn!(
                 "expecting content_type as \"url\" only, got {}",
@@ -214,6 +221,9 @@ pub async fn list_objects_v2_handler(ctx: ObjectRequestContext) -> Result<Respon
             return Err(S3Error::InvalidArgument1);
         }
     }
+
+    // Get bucket info
+    let bucket = ctx.resolve_bucket().await?;
 
     let max_keys = opts.max_keys.unwrap_or(1000);
     let prefix = format!("/{}", opts.prefix.clone().unwrap_or_default());
@@ -231,8 +241,22 @@ pub async fn list_objects_v2_handler(ctx: ObjectRequestContext) -> Result<Respon
         start_after = format!("/{start_after}");
     }
 
+    tracing::debug!(
+        "Calling list_objects with max_keys={}, prefix='{}', delimiter='{}', start_after='{}'",
+        max_keys,
+        prefix,
+        delimiter,
+        start_after
+    );
+
     let (objs, common_prefixes, next_continuation_token) =
         list_objects(ctx.app, &bucket, max_keys, prefix, delimiter, start_after).await?;
+
+    tracing::debug!(
+        "list_objects returned {} objects, {} common_prefixes",
+        objs.len(),
+        common_prefixes.len()
+    );
 
     Xml(ListBucketResult::default()
         .key_count(objs.len())
@@ -257,6 +281,9 @@ pub async fn list_objects(
     delimiter: String,
     start_after: String,
 ) -> Result<(Vec<Object>, Vec<Prefix>, Option<String>), S3Error> {
+    tracing::debug!("NSS list_inodes call with root_blob_name='{}', max_keys={}, prefix='{}', delimiter='{}', start_after='{}'",
+        bucket.root_blob_name, max_keys, prefix, delimiter, start_after);
+
     let resp = nss_rpc_retry!(
         app,
         list_inodes(
@@ -273,9 +300,12 @@ pub async fn list_objects(
 
     // Process results
     let inodes = match resp.result.unwrap() {
-        nss_codec::list_inodes_response::Result::Ok(res) => res.inodes,
-        nss_codec::list_inodes_response::Result::Err(e) => {
-            tracing::error!(e);
+        list_inodes_response::Result::Ok(res) => {
+            tracing::debug!("NSS returned {} inodes", res.inodes.len());
+            res.inodes
+        }
+        list_inodes_response::Result::Err(e) => {
+            tracing::error!("NSS list_inodes error: {}", e);
             return Err(S3Error::InternalError);
         }
     };

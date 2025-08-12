@@ -1,10 +1,13 @@
-use axum::{body::Body, http::header, response::Response};
+use actix_web::HttpResponse;
 use bytes::Buf;
 use rpc_client_common::RpcError;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::handler::{common::s3_error::S3Error, BucketRequestContext};
+use crate::handler::{
+    common::{buffer_payload, s3_error::S3Error},
+    BucketRequestContext,
+};
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
@@ -33,7 +36,7 @@ struct BucketConfig {
     bucket_type: String,
 }
 
-pub async fn create_bucket_handler(ctx: BucketRequestContext) -> Result<Response, S3Error> {
+pub async fn create_bucket_handler(ctx: BucketRequestContext) -> Result<HttpResponse, S3Error> {
     info!("handling create_bucket request: {}", ctx.bucket_name);
 
     // Validate permissions and bucket name
@@ -57,7 +60,7 @@ pub async fn create_bucket_handler(ctx: BucketRequestContext) -> Result<Response
     }
 
     // Parse and validate the request body
-    let body = ctx.request.into_body().collect().await?;
+    let body = buffer_payload(ctx.payload).await?;
     if !body.is_empty() {
         let create_bucket_conf: CreateBucketConfiguration =
             quick_xml::de::from_reader(body.reader())?;
@@ -80,9 +83,15 @@ pub async fn create_bucket_handler(ctx: BucketRequestContext) -> Result<Response
     match result {
         Ok(_) => {
             info!("Successfully created bucket: {}", ctx.bucket_name);
-            Ok(Response::builder()
-                .header(header::LOCATION, format!("/{}", ctx.bucket_name))
-                .body(Body::empty())?)
+            // Invalidate API key cache since it now has new bucket permissions
+            ctx.app
+                .cache
+                .invalidate(&format!("api_key:{api_key_id}"))
+                .await;
+
+            Ok(HttpResponse::Ok()
+                .insert_header(("location", format!("/{}", ctx.bucket_name)))
+                .finish())
         }
         Err(e) => {
             tracing::error!("Failed to create bucket {}: {}", ctx.bucket_name, e);

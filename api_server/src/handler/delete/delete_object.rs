@@ -1,14 +1,3 @@
-use metrics::histogram;
-use rpc_client_common::nss_rpc_retry;
-
-use axum::{
-    body::Body,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
-use rkyv::{self, rancor::Error};
-use tokio::sync::mpsc::Sender;
-
 use crate::{
     handler::{
         common::{list_raw_objects, mpu_get_part_prefix, s3_error::S3Error},
@@ -17,8 +6,16 @@ use crate::{
     object_layout::{MpuState, ObjectLayout, ObjectState},
     BlobId,
 };
+use actix_web::HttpResponse;
+use metrics::histogram;
+use nss_codec::delete_inode_response;
+use rkyv::{self, rancor::Error};
+use rpc_client_common::nss_rpc_retry;
+use tokio::sync::mpsc::Sender;
 
-pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<Response, S3Error> {
+pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<HttpResponse, S3Error> {
+    tracing::debug!("DeleteObject handler: {}/{}", ctx.bucket_name, ctx.key);
+
     let bucket = ctx.resolve_bucket().await?;
     let blob_deletion = ctx.app.get_blob_deletion();
     let rpc_timeout = ctx.app.config.rpc_timeout();
@@ -29,81 +26,96 @@ pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<Response
     .await?;
 
     let object_bytes = match resp.result.unwrap() {
-        // S3 allow delete non-existing object
-        nss_codec::delete_inode_response::Result::ErrNotFound(()) => {
+        delete_inode_response::Result::Ok(res) => res,
+        delete_inode_response::Result::ErrNotFound(_) => {
+            // Object doesn't exist - S3 returns success for idempotent operations
             tracing::debug!(
                 "delete non-existing object {}/{}",
                 bucket.bucket_name,
                 ctx.key
             );
-            return Ok(Response::new(Body::empty()));
+            return Ok(HttpResponse::NoContent().finish());
         }
-        nss_codec::delete_inode_response::Result::ErrAlreadyDeleted(()) => {
+        delete_inode_response::Result::ErrAlreadyDeleted(_) => {
+            // Object already deleted - S3 returns success for idempotent operations
             tracing::warn!(
                 "object {}/{} is already deleted",
                 bucket.bucket_name,
                 ctx.key
             );
-            return Ok(Response::new(Body::empty()));
+            return Ok(HttpResponse::NoContent().finish());
         }
-        nss_codec::delete_inode_response::Result::Ok(res) => res,
-        nss_codec::delete_inode_response::Result::ErrOthers(e) => {
-            tracing::error!(e);
+        delete_inode_response::Result::ErrOthers(e) => {
+            tracing::error!("delete_inode error: {}", e);
             return Err(S3Error::InternalError);
         }
     };
 
-    let object = rkyv::from_bytes::<ObjectLayout, Error>(&object_bytes)?;
-    if let Ok(size) = object.size() {
-        histogram!("object_size", "operation" => "delete").record(size as f64);
-    }
-    match object.state {
-        ObjectState::Normal(..) => {
-            delete_blob(
-                bucket.tracking_root_blob_name.clone(),
-                &object,
-                blob_deletion,
-            )
-            .await?;
+    if !object_bytes.is_empty() {
+        let object: ObjectLayout =
+            rkyv::from_bytes::<ObjectLayout, Error>(&object_bytes).map_err(|e| {
+                tracing::error!("Failed to deserialize object: {e}");
+                S3Error::InternalError
+            })?;
+
+        // Record metrics for deleted object size
+        if let Ok(size) = object.size() {
+            histogram!("object_size", "operation" => "delete").record(size as f64);
         }
-        ObjectState::Mpu(mpu_state) => match mpu_state {
-            MpuState::Uploading => {
-                tracing::warn!("invalid mpu state: Uploading");
-                return Err(S3Error::InvalidObjectState);
-            }
-            MpuState::Aborted => {
-                tracing::warn!("invalid mpu state: Aborted");
-                return Err(S3Error::InvalidObjectState);
-            }
-            MpuState::Completed { .. } => {
-                let mpu_prefix = mpu_get_part_prefix(ctx.key.clone(), 0);
-                let mpus = list_raw_objects(
-                    &ctx.app,
-                    &bucket.root_blob_name,
-                    10000,
-                    &mpu_prefix,
-                    "",
-                    "",
-                    false,
+
+        // Handle cleanup based on object state
+        match &object.state {
+            ObjectState::Normal(..) => {
+                // Delete blob for normal objects
+                delete_blob(
+                    bucket.tracking_root_blob_name.clone(),
+                    &object,
+                    blob_deletion,
                 )
                 .await?;
-                for (mpu_key, mpu_obj) in mpus.iter() {
-                    nss_rpc_retry!(
-                        ctx.app,
-                        delete_inode(&bucket.root_blob_name, &mpu_key, Some(rpc_timeout))
-                    )
-                    .await?;
-                    delete_blob(
-                        bucket.tracking_root_blob_name.clone(),
-                        mpu_obj,
-                        blob_deletion.clone(),
-                    )
-                    .await?;
-                }
             }
-        },
+            ObjectState::Mpu(mpu_state) => match mpu_state {
+                MpuState::Uploading => {
+                    tracing::warn!("invalid mpu state: Uploading");
+                    return Err(S3Error::InvalidObjectState);
+                }
+                MpuState::Aborted => {
+                    tracing::warn!("invalid mpu state: Aborted");
+                    return Err(S3Error::InvalidObjectState);
+                }
+                MpuState::Completed { .. } => {
+                    // Clean up completed multipart upload parts
+                    let mpu_prefix = mpu_get_part_prefix(ctx.key.clone(), 0);
+                    let mpus = list_raw_objects(
+                        &ctx.app,
+                        &bucket.root_blob_name,
+                        10000,
+                        &mpu_prefix,
+                        "",
+                        "",
+                        false,
+                    )
+                    .await?;
+                    for (mpu_key, mpu_obj) in mpus.iter() {
+                        nss_rpc_retry!(
+                            ctx.app,
+                            delete_inode(&bucket.root_blob_name, &mpu_key, Some(rpc_timeout))
+                        )
+                        .await?;
+                        // Delete blob for each multipart upload part
+                        delete_blob(
+                            bucket.tracking_root_blob_name.clone(),
+                            mpu_obj,
+                            blob_deletion.clone(),
+                        )
+                        .await?;
+                    }
+                }
+            },
+        }
     }
-    Ok((StatusCode::NO_CONTENT).into_response())
+
+    Ok(HttpResponse::NoContent().finish())
 }
 
 async fn delete_blob(

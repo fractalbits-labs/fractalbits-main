@@ -1,8 +1,6 @@
 use std::str::Utf8Error;
 
 use crate::handler::common::time::SHORT_DATE;
-
-use axum::extract::rejection::QueryRejection;
 use chrono::{DateTime, Utc};
 use hex::FromHexError;
 use hmac::{Hmac, Mac};
@@ -16,8 +14,8 @@ type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Error, Debug)]
 pub enum SignatureError {
-    #[error(transparent)]
-    QueryRejection(#[from] QueryRejection),
+    #[error("Query parsing error: {0}")]
+    QueryParsingError(String),
 
     #[error(transparent)]
     Utf8Error(#[from] Utf8Error),

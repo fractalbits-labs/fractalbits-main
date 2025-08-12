@@ -1,19 +1,13 @@
-use std::io;
 use std::sync::Arc;
 use std::{net::SocketAddr, path::PathBuf};
 
 mod api_key_routes;
 mod cache_mgmt;
 
+use actix_files::Files;
+use actix_web::{middleware::Logger, web, App, HttpServer};
 use api_server::{handler::any_handler, AppState, Config};
-use axum::{
-    extract::Request,
-    routing::{delete, get, post},
-    serve::ListenerExt,
-    Router,
-};
 use clap::Parser;
-use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
@@ -27,10 +21,11 @@ struct Opt {
     config_file: Option<PathBuf>,
 }
 
-#[tokio::main]
+#[actix_web::main]
 async fn main() {
     // AWS SDK suppression filter
-    let third_party_filter = "tower_http=warn,hyper_util=warn,aws_smithy=warn,aws_sdk=warn";
+    let third_party_filter =
+        "tower_http=warn,hyper_util=warn,aws_smithy=warn,aws_sdk=warn,actix_web=warn,actix_server=warn";
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -46,17 +41,11 @@ async fn main() {
                 .with_file(true)
                 .with_line_number(true)
                 .without_time()
-                .with_writer(io::stderr)
                 .with_filter(tracing_subscriber::filter::LevelFilter::ERROR),
         )
-        .with(
-            tracing_subscriber::fmt::layer()
-                .without_time()
-                .with_writer(io::stderr)
-                .with_filter(tracing_subscriber::filter::filter_fn(|meta| {
-                    *meta.level() != tracing::Level::ERROR
-                })),
-        )
+        .with(tracing_subscriber::fmt::layer().without_time().with_filter(
+            tracing_subscriber::filter::filter_fn(|meta| *meta.level() != tracing::Level::ERROR),
+        ))
         .init();
 
     eprintln!(
@@ -122,110 +111,94 @@ async fn main() {
         }
     }
 
-    let api_key_routes = Router::new()
-        .route("/", post(api_key_routes::create_api_key))
-        .route("/", get(api_key_routes::list_api_keys))
-        .route("/{key_id}", delete(api_key_routes::delete_api_key));
-
-    // Cache management routes - internal use only
-    let mgmt_routes = Router::new()
-        .route("/health", get(cache_mgmt::mgmt_health))
-        .route(
-            "/cache/invalidate/bucket/{name}",
-            post(cache_mgmt::invalidate_bucket),
-        )
-        .route(
-            "/cache/invalidate/api_key/{id}",
-            post(cache_mgmt::invalidate_api_key),
-        )
-        .route(
-            "/cache/update/az_status/{id}",
-            post(cache_mgmt::update_az_status),
-        )
-        .route("/cache/clear", post(cache_mgmt::clear_cache));
-
-    // Main application router
-    let main_router = if let Ok(web_root) = std::env::var("GUI_WEB_ROOT") {
-        info!(%web_root, "serving ui");
-        config.allow_missing_or_bad_signature = true;
-        Router::new()
-            .nest_service("/ui", ServeDir::new(web_root))
-            .nest("/api_keys", api_key_routes)
-            .fallback(any_handler)
-    } else {
-        Router::new().fallback(any_handler)
-    };
-
     let port = config.port;
     let mgmt_port = config.mgmt_port;
-    let app_state = Arc::new(AppState::new(Arc::new(config)).await);
-    let main_app = main_router
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|req: &Request| {
-                    let method = req.method();
-                    let uri = req.uri();
-                    let path = uri.path();
-
-                    tracing::debug_span!("request", %method, %uri, path)
-                })
-                // By default `TraceLayer` will log 5xx responses but we're doing our specific
-                // logging of errors so disable that
-                .on_failure(()),
-        )
-        .with_state(app_state.clone())
-        .into_make_service_with_connect_info::<SocketAddr>();
+    // Get web root from environment variable
+    let web_root = match std::env::var("GUI_WEB_ROOT") {
+        Ok(gui_web_root) => {
+            config.allow_missing_or_bad_signature = true;
+            Some(PathBuf::from(gui_web_root))
+        }
+        Err(_) => None,
+    };
+    let app_state = AppState::new(Arc::new(config)).await;
+    let app_state_arc = Arc::new(app_state);
 
     // Start main server
-    let main_addr = format!("0.0.0.0:{port}");
-    let main_listener = tokio::net::TcpListener::bind(main_addr)
-        .await
-        .unwrap()
-        .tap_io(|tcp_stream| {
-            if let Err(err) = tcp_stream.set_nodelay(true) {
-                tracing::warn!("failed to set TCP_NODELAY on incoming connection: {err:#}");
-            }
-        });
-
     info!("Main server started at port {port}");
+    let main_server = HttpServer::new({
+        let app_state_arc = app_state_arc.clone();
+        let web_root = web_root.clone();
+        move || {
+            let web_root = web_root.clone();
+            let mut app = App::new()
+                .app_data(web::Data::new(app_state_arc.clone()))
+                // Configure payload size limits for S3 operations
+                // S3 supports up to 5GB per object, but multipart uploads can be up to 5TB
+                // Set a reasonable limit for testing and production use
+                .app_data(web::PayloadConfig::default().limit(5_368_709_120)) // 5GB limit
+                .wrap(Logger::default());
+
+            if let Some(web_root) = web_root {
+                app = app
+                    .service(Files::new("/ui", web_root).index_file("index.html"))
+                    .service(
+                        web::scope("/api_keys")
+                            .route("/", web::post().to(api_key_routes::create_api_key))
+                            .route("/", web::get().to(api_key_routes::list_api_keys))
+                            .route(
+                                "/{key_id}",
+                                web::delete().to(api_key_routes::delete_api_key),
+                            ),
+                    )
+            }
+            app.default_service(web::route().to(any_handler))
+        }
+    })
+    .bind(format!("0.0.0.0:{port}"))
+    .unwrap();
 
     // Start management server
-    let mgmt_app = Router::new()
-        .nest("/mgmt", mgmt_routes)
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|req: &Request| {
-                    let method = req.method();
-                    let uri = req.uri();
-                    let path = uri.path();
-
-                    tracing::debug_span!("mgmt_request", %method, %uri, path)
-                })
-                .on_failure(()),
-        )
-        .with_state(app_state)
-        .into_make_service_with_connect_info::<SocketAddr>();
-
-    let mgmt_addr = format!("0.0.0.0:{mgmt_port}");
-    let mgmt_listener = tokio::net::TcpListener::bind(mgmt_addr)
-        .await
-        .unwrap()
-        .tap_io(|tcp_stream| {
-            if let Err(err) = tcp_stream.set_nodelay(true) {
-                tracing::warn!("failed to set TCP_NODELAY on mgmt connection: {err:#}");
-            }
-        });
-
     info!("Management server started at port {mgmt_port}");
+    let mgmt_server = HttpServer::new({
+        let app_state_arc = app_state_arc.clone();
+        move || {
+            App::new()
+                .app_data(web::Data::new(app_state_arc.clone()))
+                .wrap(Logger::default())
+                .service(
+                    web::scope("/mgmt")
+                        .route("/health", web::get().to(cache_mgmt::mgmt_health))
+                        .route(
+                            "/cache/invalidate/bucket/{name}",
+                            web::post().to(cache_mgmt::invalidate_bucket),
+                        )
+                        .route(
+                            "/cache/invalidate/api_key/{id}",
+                            web::post().to(cache_mgmt::invalidate_api_key),
+                        )
+                        .route(
+                            "/cache/update/az_status/{id}",
+                            web::post().to(cache_mgmt::update_az_status),
+                        )
+                        .route("/cache/clear", web::post().to(cache_mgmt::clear_cache)),
+                )
+        }
+    })
+    .bind(format!("0.0.0.0:{mgmt_port}"))
+    .unwrap();
 
     // Run both servers concurrently
+    let main_server_future = main_server.run();
+    let mgmt_server_future = mgmt_server.run();
+
     tokio::select! {
-        result = axum::serve(main_listener, main_app) => {
+        result = main_server_future => {
             if let Err(e) = result {
                 tracing::error!("Main server stopped: {e}");
             }
         }
-        result = axum::serve(mgmt_listener, mgmt_app) => {
+        result = mgmt_server_future => {
             if let Err(e) = result {
                 tracing::error!("Management server stopped: {e}");
             }

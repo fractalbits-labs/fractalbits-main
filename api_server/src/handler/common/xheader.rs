@@ -1,4 +1,4 @@
-use axum::http::HeaderName;
+use actix_web::http::header::HeaderName;
 
 // ---- Constants used in AWSv4 signatures ----
 pub const X_AMZ_ALGORITHM: HeaderName = HeaderName::from_static("x-amz-algorithm");

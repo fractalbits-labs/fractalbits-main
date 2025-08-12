@@ -8,21 +8,48 @@ pub mod signature;
 pub mod time;
 pub mod xheader;
 
-use rpc_client_common::nss_rpc_retry;
-use std::collections::BTreeMap;
-
 use crate::{
     object_layout::{HeaderList, ObjectLayout},
     AppState,
 };
-use axum::{
-    http::{header, HeaderMap, HeaderName, HeaderValue},
-    response::Response,
-};
+use actix_web::http::header::{self, HeaderMap};
+use futures::StreamExt;
 use rand::{rngs::OsRng, RngCore};
 use rkyv::{self, rancor::Error};
+use rpc_client_common::nss_rpc_retry;
 use s3_error::S3Error;
-use signature::checksum::add_checksum_response_headers;
+use std::collections::BTreeMap;
+
+/// Helper function to buffer a streaming payload into Bytes
+pub async fn buffer_payload(
+    payload: actix_web::dev::Payload,
+) -> Result<actix_web::web::Bytes, S3Error> {
+    buffer_payload_with_capacity(payload, None).await
+}
+
+/// Helper function to buffer a streaming payload into Bytes with optional pre-allocation
+pub async fn buffer_payload_with_capacity(
+    mut payload: actix_web::dev::Payload,
+    expected_size: Option<usize>,
+) -> Result<actix_web::web::Bytes, S3Error> {
+    // Pre-allocate based on content-length to avoid reallocations
+    let mut body = if let Some(size) = expected_size {
+        tracing::debug!("Pre-allocating buffer for {} bytes", size);
+        actix_web::web::BytesMut::with_capacity(size)
+    } else {
+        actix_web::web::BytesMut::new()
+    };
+
+    while let Some(chunk) = payload.next().await {
+        let chunk = chunk.map_err(|e| {
+            tracing::error!("Error reading payload: {}", e);
+            S3Error::InternalError
+        })?;
+        body.extend_from_slice(&chunk);
+    }
+
+    Ok(body.freeze())
+}
 
 pub async fn get_raw_object(
     app: &AppState,
@@ -113,7 +140,7 @@ pub fn mpu_parse_part_number(mpu_key: &str) -> Result<u32, S3Error> {
         + 1)
 }
 
-pub fn extract_metadata_headers(headers: &HeaderMap<HeaderValue>) -> Result<HeaderList, S3Error> {
+pub fn extract_metadata_headers(headers: &HeaderMap) -> Result<HeaderList, S3Error> {
     let mut ret = Vec::new();
 
     // Preserve standard headers
@@ -155,18 +182,14 @@ pub fn extract_metadata_headers(headers: &HeaderMap<HeaderValue>) -> Result<Head
 }
 
 pub fn object_headers(
-    resp: &mut Response,
+    resp: &mut actix_web::HttpResponseBuilder,
     object: &ObjectLayout,
     checksum_mode_enabled: bool,
 ) -> Result<(), S3Error> {
     let etag = object.etag()?;
     let last_modified = time::format_http_date(object.timestamp);
-    resp.headers_mut().insert(
-        header::LAST_MODIFIED,
-        HeaderValue::from_str(&last_modified)?,
-    );
-    resp.headers_mut()
-        .insert(header::ETAG, HeaderValue::from_str(&etag)?);
+    resp.insert_header((header::LAST_MODIFIED, last_modified));
+    resp.insert_header((header::ETAG, etag));
 
     // When metadata is retrieved through the REST API, Amazon S3 combines headers that
     // have the same name (ignoring case) into a comma-delimited list.
@@ -181,16 +204,13 @@ pub fn object_headers(
     }
 
     for (name, values) in headers_by_name {
-        resp.headers_mut().insert(
-            HeaderName::try_from(name).unwrap(),
-            HeaderValue::from_str(&values.join(","))?,
-        );
+        resp.insert_header((name, values.join(",")));
     }
 
     if checksum_mode_enabled {
         let checksum = object.checksum()?;
         tracing::debug!("checksum_mode enabled, adding checksum: {:?}", checksum);
-        add_checksum_response_headers(&checksum, resp)?;
+        signature::checksum::add_checksum_response_headers_actix(&checksum, resp)?;
     }
 
     Ok(())

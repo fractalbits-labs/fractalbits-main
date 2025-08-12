@@ -1,10 +1,10 @@
-use axum::{body::Body, response::Response};
+use actix_web::HttpResponse;
 
 use super::resolve_bucket;
 use crate::handler::{common::s3_error::S3Error, BucketRequestContext};
 use tracing::error;
 
-pub async fn head_bucket_handler(ctx: BucketRequestContext) -> Result<Response, S3Error> {
+pub async fn head_bucket_handler(ctx: BucketRequestContext) -> Result<HttpResponse, S3Error> {
     match ctx.api_key.data.authorized_buckets.get(&ctx.bucket_name) {
         None => {
             error!(
@@ -30,5 +30,5 @@ pub async fn head_bucket_handler(ctx: BucketRequestContext) -> Result<Response, 
             error!("head_bucket failed due to bucket resolving: {e}");
             e
         })?;
-    Ok(Response::new(Body::empty()))
+    Ok(HttpResponse::Ok().finish())
 }

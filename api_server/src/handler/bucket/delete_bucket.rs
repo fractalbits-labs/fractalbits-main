@@ -1,10 +1,10 @@
-use axum::{body::Body, response::Response};
+use actix_web::HttpResponse;
 use rpc_client_common::RpcError;
 use tracing::info;
 
 use crate::handler::{common::s3_error::S3Error, BucketRequestContext};
 
-pub async fn delete_bucket_handler(ctx: BucketRequestContext) -> Result<Response, S3Error> {
+pub async fn delete_bucket_handler(ctx: BucketRequestContext) -> Result<HttpResponse, S3Error> {
     let bucket = ctx.resolve_bucket().await?;
     info!("handling delete_bucket request: {}", bucket.bucket_name);
 
@@ -27,7 +27,17 @@ pub async fn delete_bucket_handler(ctx: BucketRequestContext) -> Result<Response
     match result {
         Ok(_) => {
             info!("Successfully deleted bucket: {}", bucket.bucket_name);
-            Ok(Response::new(Body::empty()))
+            // Invalidate both bucket and API key cache
+            ctx.app
+                .cache
+                .invalidate(&format!("bucket:{}", bucket.bucket_name))
+                .await;
+            ctx.app
+                .cache
+                .invalidate(&format!("api_key:{api_key_id}"))
+                .await;
+
+            Ok(HttpResponse::NoContent().finish())
         }
         Err(e) => {
             tracing::error!("Failed to delete bucket {}: {}", bucket.bucket_name, e);

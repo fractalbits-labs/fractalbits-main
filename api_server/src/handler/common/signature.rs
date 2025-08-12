@@ -1,36 +1,20 @@
 use std::fmt::Write;
-use std::sync::Arc;
 
 use arrayvec::ArrayString;
-use body::ReqBody;
 use chrono::{DateTime, Utc};
-use data_types::{ApiKey, Versioned};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
-use crate::AppState;
-
-use super::data::{sha256sum, Hash};
-use super::request::extract::Authentication;
-use axum::body::Body;
-use axum::http::{request::Request, HeaderName};
-use rpc_client_common::RpcError;
-use sync_wrapper::SyncWrapper;
+use super::data::Hash;
 
 pub use error::*;
 
-pub mod body;
 pub mod checksum;
 pub mod error;
 pub mod payload;
-pub mod streaming;
 
 pub const SHORT_DATE: &str = "%Y%m%d";
 pub const LONG_DATETIME: &str = "%Y%m%dT%H%M%SZ";
-
-/// Result of `sha256("")`
-pub(crate) const EMPTY_STRING_HEX_DIGEST: &str =
-    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 // Signature calculation algorithm
 pub const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
@@ -54,42 +38,6 @@ pub enum ContentSha256Header {
 }
 
 // ---- top-level functions ----
-
-pub struct VerifiedRequest {
-    pub request: Request<ReqBody>,
-    pub api_key: Versioned<ApiKey>,
-    pub content_sha256_header: ContentSha256Header,
-}
-
-pub async fn verify_request(
-    app: Arc<AppState>,
-    mut req: Request<Body>,
-    auth: &Authentication,
-) -> Result<VerifiedRequest, Error> {
-    let checked_signature =
-        match payload::check_payload_signature(app.clone(), auth, &mut req).await {
-            Ok(cs) => cs,
-            Err(e) => {
-                return Err(Error::SignatureError(
-                    Box::new(e),
-                    Box::new(SyncWrapper::new(req)),
-                ))
-            }
-        };
-
-    let request =
-        streaming::parse_streaming_body(req, &checked_signature, &app.config.region, "s3")?;
-
-    let api_key = checked_signature
-        .key
-        .ok_or(Error::RpcError(RpcError::NotFound))?;
-
-    Ok(VerifiedRequest {
-        request,
-        api_key,
-        content_sha256_header: checked_signature.content_sha256_header,
-    })
-}
 
 pub fn signing_hmac(
     datetime: &DateTime<Utc>,

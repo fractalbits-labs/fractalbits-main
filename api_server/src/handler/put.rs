@@ -3,6 +3,7 @@ mod copy_object;
 mod put_object;
 mod rename_folder;
 mod rename_object;
+mod s3_streaming;
 mod upload_part;
 
 pub use copy_object::copy_object_handler;

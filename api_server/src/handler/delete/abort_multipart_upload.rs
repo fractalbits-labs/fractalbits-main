@@ -1,18 +1,26 @@
+use crate::handler::{common::s3_error::S3Error, ObjectRequestContext};
+use actix_web::HttpResponse;
 use bytes::Bytes;
-use rpc_client_common::nss_rpc_retry;
-
-use axum::{body::Body, response::Response};
+use nss_codec::get_inode_response;
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
-
-use crate::{
-    handler::{common::s3_error::S3Error, ObjectRequestContext},
-    object_layout::{MpuState, ObjectLayout, ObjectState},
-};
+use rpc_client_common::nss_rpc_retry;
 
 pub async fn abort_multipart_upload_handler(
     ctx: ObjectRequestContext,
-    _upload_id: String,
-) -> Result<Response, S3Error> {
+    upload_id: String,
+) -> Result<HttpResponse, S3Error> {
+    tracing::info!(
+        "Aborting multipart upload {} for {}/{}",
+        upload_id,
+        ctx.bucket_name,
+        ctx.key
+    );
+
+    // Basic upload_id validation - check it's a valid UUID format
+    if uuid::Uuid::parse_str(&upload_id).is_err() {
+        return Err(S3Error::NoSuchUpload);
+    }
+
     let bucket = ctx.resolve_bucket().await?;
     let rpc_timeout = ctx.app.config.rpc_timeout();
     let resp = nss_rpc_retry!(
@@ -22,19 +30,23 @@ pub async fn abort_multipart_upload_handler(
     .await?;
 
     let object_bytes = match resp.result.unwrap() {
-        nss_codec::get_inode_response::Result::Ok(res) => res,
-        nss_codec::get_inode_response::Result::ErrNotFound(()) => {
-            return Err(S3Error::NoSuchKey);
+        get_inode_response::Result::Ok(res) => res,
+        get_inode_response::Result::ErrNotFound(()) => {
+            return Err(S3Error::NoSuchUpload);
         }
-        nss_codec::get_inode_response::Result::ErrOthers(e) => {
+        get_inode_response::Result::ErrOthers(e) => {
             tracing::error!(e);
             return Err(S3Error::InternalError);
         }
     };
 
-    // TODO: check upload_id and also do more clean ups and checks
-    let mut object = rkyv::from_bytes::<ObjectLayout, Error>(&object_bytes)?;
-    object.state = ObjectState::Mpu(MpuState::Aborted);
+    // Verify upload_id matches and mark as aborted
+    let mut object = rkyv::from_bytes::<crate::object_layout::ObjectLayout, Error>(&object_bytes)?;
+    if object.version_id.simple().to_string() != upload_id {
+        return Err(S3Error::NoSuchUpload);
+    }
+
+    object.state = crate::object_layout::ObjectState::Mpu(crate::object_layout::MpuState::Aborted);
     let new_object_bytes: Bytes = to_bytes_in::<_, Error>(&object, Vec::new())?.into();
 
     let resp = nss_rpc_retry!(
@@ -47,6 +59,7 @@ pub async fn abort_multipart_upload_handler(
         )
     )
     .await?;
+
     match resp.result.unwrap() {
         nss_codec::put_inode_response::Result::Ok(_) => {}
         nss_codec::put_inode_response::Result::Err(e) => {
@@ -55,5 +68,5 @@ pub async fn abort_multipart_upload_handler(
         }
     };
 
-    Ok(Response::new(Body::empty()))
+    Ok(HttpResponse::NoContent().finish())
 }

@@ -69,8 +69,6 @@ pub fn build_rust_servers(mode: BuildMode) -> CmdResult {
                 info "Building rust-based servers in debug mode ...";
                 BUILD_INFO=$build_info cargo build --workspace
                     // --exclude ebs-failover
-                    --exclude rss_admin
-                    --exclude xtask_tools
                     --exclude fractalbits-bootstrap
                     --exclude rewrk*;
             }

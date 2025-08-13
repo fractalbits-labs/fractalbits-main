@@ -72,7 +72,7 @@ enum Cmd {
         action: ServiceAction,
 
         #[clap(
-            long_help = "all/api_server/bss/nss/minio/ddb_local",
+            long_help = "all/api_server/bss/nss/nss_role_agent_a/nss_role_agent_b/minio/ddb_local",
             default_value = "all"
         )]
         service: ServiceName,
@@ -151,7 +151,8 @@ pub enum ServiceName {
     All,
     Minio,
     DdbLocal,
-    NssRoleAgent,
+    NssRoleAgentA,
+    NssRoleAgentB,
 }
 
 #[derive(AsRefStr, EnumString, Copy, Clone)]
@@ -195,7 +196,12 @@ fn main() -> CmdResult {
         Cmd::TestLeaderElection => {
             // Initialize DDB local with leader election table and run tests
             cmd_service::init_service(ServiceName::DdbLocal, BuildMode::Debug)?;
-            cmd_service::start_services(ServiceName::DdbLocal, BuildMode::Debug, false, DataBlobStorage::Hybrid)?;
+            cmd_service::start_services(
+                ServiceName::DdbLocal,
+                BuildMode::Debug,
+                false,
+                DataBlobStorage::Hybrid,
+            )?;
 
             run_cmd! {
                 info "Running root_server leader election tests...";

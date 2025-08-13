@@ -80,7 +80,12 @@ fn run_art_tests() -> CmdResult {
 
 fn run_s3_api_tests() -> CmdResult {
     cmd_service::init_service(ServiceName::All, BuildMode::Debug)?;
-    cmd_service::start_services(ServiceName::All, BuildMode::Debug, false, DataBlobStorage::Hybrid)?;
+    cmd_service::start_services(
+        ServiceName::All,
+        BuildMode::Debug,
+        false,
+        DataBlobStorage::Hybrid,
+    )?;
     run_cmd! {
         info "Run cargo tests (s3 api tests)";
         cargo test --package api_server -- --test-threads 1;
@@ -93,7 +98,12 @@ fn run_s3_api_tests() -> CmdResult {
 fn run_leader_election_tests() -> CmdResult {
     // Ensure DDB local is initialized with leader election table
     cmd_service::init_service(ServiceName::DdbLocal, BuildMode::Debug)?;
-    cmd_service::start_services(ServiceName::DdbLocal, BuildMode::Debug, false, DataBlobStorage::Hybrid)?;
+    cmd_service::start_services(
+        ServiceName::DdbLocal,
+        BuildMode::Debug,
+        false,
+        DataBlobStorage::Hybrid,
+    )?;
 
     run_cmd! {
         info "Running root_server leader election tests";

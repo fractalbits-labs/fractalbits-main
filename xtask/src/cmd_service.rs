@@ -112,7 +112,8 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
         ServiceName::Bss => init_bss()?,
         ServiceName::Rss => init_rss()?,
         ServiceName::Nss => init_nss()?,
-        ServiceName::NssRoleAgent => init_nss_role_agent()?,
+        ServiceName::NssRoleAgentA => init_nss_role_agent()?,
+        ServiceName::NssRoleAgentB => init_nss_role_agent()?,
         ServiceName::All => {
             init_rss()?;
             init_bss()?;
@@ -126,8 +127,8 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
     let services: Vec<String> = match service {
         ServiceName::All => vec![
             ServiceName::ApiServer.as_ref().to_owned(),
-            ServiceName::Nss.as_ref().to_owned(),
-            ServiceName::NssRoleAgent.as_ref().to_owned(),
+            ServiceName::NssRoleAgentA.as_ref().to_owned(),
+            ServiceName::NssRoleAgentB.as_ref().to_owned(),
             ServiceName::Bss.as_ref().to_owned(),
             ServiceName::Rss.as_ref().to_owned(),
             ServiceName::Minio.as_ref().to_owned(),
@@ -162,7 +163,8 @@ pub fn start_services(
     match service {
         ServiceName::Bss => start_bss_service(build_mode, data_blob_storage)?,
         ServiceName::Nss => start_nss_service(build_mode, false)?,
-        ServiceName::NssRoleAgent => start_nss_role_agent_service(build_mode)?,
+        ServiceName::NssRoleAgentA => start_nss_role_agent_service(build_mode, "A")?,
+        ServiceName::NssRoleAgentB => start_nss_role_agent_service(build_mode, "B")?,
         ServiceName::Rss => start_rss_service(build_mode)?,
         ServiceName::ApiServer => start_api_server(build_mode, for_gui)?,
         ServiceName::All => start_all_services(build_mode, for_gui, data_blob_storage)?,
@@ -218,15 +220,26 @@ pub fn start_nss_service(build_mode: BuildMode, data_on_local: bool) -> CmdResul
     Ok(())
 }
 
-pub fn start_nss_role_agent_service(build_mode: BuildMode) -> CmdResult {
-    create_systemd_unit_file(ServiceName::NssRoleAgent, build_mode, None)?;
+pub fn start_nss_role_agent_service(build_mode: BuildMode, agent_id: &str) -> CmdResult {
+    let service_name = match agent_id {
+        "A" => ServiceName::NssRoleAgentA,
+        "B" => ServiceName::NssRoleAgentB,
+        _ => panic!("Invalid agent_id: {agent_id}"),
+    };
 
-    run_cmd!(systemctl --user start nss_role_agent.service)?;
-    wait_for_service_ready(ServiceName::NssRoleAgent, 15)?;
+    create_systemd_unit_file(service_name, build_mode, None)?;
 
-    let server_pid = run_fun!(pidof nss_role_agent)?;
-    check_pids(ServiceName::NssRoleAgent, &server_pid)?;
-    info!("nss_role_agent server (pid={server_pid}) started");
+    let service_file = format!("nss_role_agent_{}.service", agent_id.to_lowercase());
+    run_cmd!(systemctl --user start $service_file)?;
+    wait_for_service_ready(service_name, 15)?;
+
+    // For role agents, get the PID from systemd instead of pidof to avoid conflicts
+    let pid_output = run_fun!(systemctl --user show --property=MainPID --value $service_file)?;
+    let server_pid = pid_output.trim();
+    info!(
+        "nss_role_agent_{} server (pid={server_pid}) started",
+        agent_id.to_lowercase()
+    );
     Ok(())
 }
 
@@ -385,12 +398,8 @@ pub fn start_all_services(
         }
     }
 
-    let nss_config_file = match build_mode {
-        BuildMode::Debug => None,
-        BuildMode::Release => Some(format!("{pwd}/etc/{NSS_SERVER_BENCH_CONFIG}")),
-    };
-    create_systemd_unit_file(ServiceName::Nss, build_mode, nss_config_file)?;
-    create_systemd_unit_file(ServiceName::NssRoleAgent, build_mode, None)?;
+    create_systemd_unit_file(ServiceName::NssRoleAgentA, build_mode, None)?;
+    create_systemd_unit_file(ServiceName::NssRoleAgentB, build_mode, None)?;
     create_systemd_unit_file(ServiceName::ApiServer, build_mode, api_config_file)?;
 
     // Start supporting services first
@@ -404,24 +413,24 @@ pub fn start_all_services(
     match data_blob_storage {
         DataBlobStorage::Hybrid => {
             info!("Starting all main services (systemd will handle dependency ordering)");
-            run_cmd!(systemctl --user start rss.service bss.service nss.service nss_role_agent.service api_server.service)?;
+            run_cmd!(systemctl --user start rss.service bss.service nss_role_agent_a.service nss_role_agent_b.service api_server.service)?;
 
             // Wait for all services to be ready in dependency order
             wait_for_service_ready(ServiceName::Rss, 15)?;
             wait_for_service_ready(ServiceName::Bss, 15)?;
-            wait_for_service_ready(ServiceName::Nss, 15)?;
-            wait_for_service_ready(ServiceName::NssRoleAgent, 15)?;
+            wait_for_service_ready(ServiceName::NssRoleAgentA, 15)?;
+            wait_for_service_ready(ServiceName::NssRoleAgentB, 15)?;
             wait_for_service_ready(ServiceName::ApiServer, 15)?;
         }
         DataBlobStorage::S3Express => {
             info!("Starting main services (skipping BSS in s3_express mode)");
-            run_cmd!(systemctl --user start rss.service nss.service nss_role_agent.service api_server.service)?;
+            run_cmd!(systemctl --user start rss.service nss_role_agent_a.service nss_role_agent_b.service api_server.service)?;
 
             // Wait for all services to be ready in dependency order (excluding BSS)
             wait_for_service_ready(ServiceName::Rss, 15)?;
             info!("Skipping BSS service readiness check in s3_express mode");
-            wait_for_service_ready(ServiceName::Nss, 15)?;
-            wait_for_service_ready(ServiceName::NssRoleAgent, 15)?;
+            wait_for_service_ready(ServiceName::NssRoleAgentA, 15)?;
+            wait_for_service_ready(ServiceName::NssRoleAgentB, 15)?;
             wait_for_service_ready(ServiceName::ApiServer, 15)?;
         }
     }
@@ -459,8 +468,18 @@ Environment="RUST_LOG=warn""##
                 format!("{pwd}/zig-out/bin/nss_server serve -c {pwd}/etc/{NSS_SERVER_BENCH_CONFIG}")
             }
         },
-        ServiceName::NssRoleAgent => {
+        ServiceName::NssRoleAgentA => {
             env_settings += env_rust_log(build_mode);
+            env_settings += r##"
+Environment="APP_AGENT_ID=A"
+Environment="APP_SERVICE_TYPE=nss""##;
+            format!("{pwd}/target/{build}/nss_role_agent")
+        }
+        ServiceName::NssRoleAgentB => {
+            env_settings += env_rust_log(build_mode);
+            env_settings += r##"
+Environment="APP_AGENT_ID=B"
+Environment="APP_SERVICE_TYPE=mirrord""##;
             format!("{pwd}/target/{build}/nss_role_agent")
         }
         ServiceName::Rss => {
@@ -508,7 +527,11 @@ ExecStart={exec_start}
 WantedBy=multi-user.target
 "##
     );
-    let service_file = format!("{service_name}.service");
+    let service_file = match service {
+        ServiceName::NssRoleAgentA => "nss_role_agent_a.service".to_string(),
+        ServiceName::NssRoleAgentB => "nss_role_agent_b.service".to_string(),
+        _ => format!("{service_name}.service"),
+    };
 
     run_cmd! {
         mkdir -p $pwd/data;
@@ -576,7 +599,8 @@ fn wait_for_service_ready(service: ServiceName, timeout_secs: u32) -> CmdResult 
                 ServiceName::Bss => check_port_ready(8088),
                 ServiceName::Nss => check_port_ready(8087),
                 ServiceName::ApiServer => check_port_ready(8080),
-                ServiceName::NssRoleAgent => true, // No network port for this service
+                ServiceName::NssRoleAgentA => true, // No network port for this service
+                ServiceName::NssRoleAgentB => true, // No network port for this service
                 ServiceName::All => unreachable!("Should not check readiness for All"),
             };
 

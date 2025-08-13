@@ -1,11 +1,48 @@
+use serde::Deserialize;
 use std::{net::SocketAddr, time::Duration};
+
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BlobStorageBackend {
+    BssOnly,
+    S3Express,
+    #[default]
+    Hybrid,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct BlobStorageConfig {
+    #[serde(default)]
+    pub backend: BlobStorageBackend,
+
+    pub bss: Option<BssConfig>,
+    pub s3_cache: Option<S3CacheConfig>,
+    pub s3_express: Option<S3ExpressConfig>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct BssConfig {
+    pub addr: SocketAddr,
+    pub conn_num: u16,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct S3ExpressConfig {
+    pub bucket: String,
+    pub region: String,
+    pub az: String,
+    #[serde(default = "default_express_session_auth")]
+    pub express_session_auth: bool,
+}
+
+fn default_express_session_auth() -> bool {
+    true
+}
 
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct Config {
-    pub bss_addr: SocketAddr,
     pub nss_addr: SocketAddr,
     pub rss_addr: SocketAddr,
-    pub bss_conn_num: u16,
     pub nss_conn_num: u16,
     pub rss_conn_num: u16,
 
@@ -16,7 +53,7 @@ pub struct Config {
     pub http_request_timeout_seconds: u64,
     pub rpc_timeout_seconds: u64,
 
-    pub s3_cache: S3CacheConfig,
+    pub blob_storage: BlobStorageConfig,
     pub allow_missing_or_bad_signature: bool,
     pub web_root: Option<String>,
 }
@@ -53,19 +90,25 @@ impl Default for S3CacheConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            bss_addr: "127.0.0.1:8088".parse().unwrap(),
             nss_addr: "127.0.0.1:8087".parse().unwrap(),
             rss_addr: "127.0.0.1:8086".parse().unwrap(),
-            bss_conn_num: 2,
             nss_conn_num: 2,
             rss_conn_num: 1,
             port: 8080,
             region: "us-west-1".into(),
             root_domain: ".localhost".into(),
-            s3_cache: S3CacheConfig::default(),
             with_metrics: true,
             http_request_timeout_seconds: 5,
             rpc_timeout_seconds: 4,
+            blob_storage: BlobStorageConfig {
+                backend: BlobStorageBackend::Hybrid,
+                bss: Some(BssConfig {
+                    addr: "127.0.0.1:8088".parse().unwrap(),
+                    conn_num: 2,
+                }),
+                s3_cache: Some(S3CacheConfig::default()),
+                s3_express: None,
+            },
             allow_missing_or_bad_signature: false,
             web_root: None,
         }

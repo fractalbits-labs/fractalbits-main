@@ -1,5 +1,6 @@
 use std::{convert::From, str::Utf8Error};
 
+use crate::blob_storage::BlobStorageError;
 use axum::{
     extract::rejection::QueryRejection,
     http::{
@@ -875,5 +876,17 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for S3Error {
     fn from(err: Box<dyn std::error::Error + Send + Sync>) -> Self {
         tracing::error!("box error: {}", err);
         S3Error::InternalError
+    }
+}
+
+impl From<BlobStorageError> for S3Error {
+    fn from(err: BlobStorageError) -> Self {
+        tracing::error!("blob storage error: {}", err);
+        match err {
+            BlobStorageError::BssRpc(e) => S3Error::from(e),
+            BlobStorageError::S3(_) => S3Error::InternalError,
+            BlobStorageError::Config(_) => S3Error::InternalError,
+            BlobStorageError::Internal(_) => S3Error::InternalError,
+        }
     }
 }

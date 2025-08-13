@@ -1,24 +1,20 @@
+mod blob_storage;
 mod config;
 pub mod handler;
 mod object_layout;
 
-use aws_sdk_s3::{
-    config::{BehaviorVersion, Credentials, Region},
-    Client as S3Client, Config as S3Config,
+use blob_storage::{
+    BlobStorage, BlobStorageError, BlobStorageImpl, BssOnlyStorage, HybridStorage, S3ExpressStorage,
 };
-
 use bucket_tables::{table::KvClientProvider, Versioned};
 use bytes::Bytes;
-pub use config::{Config, S3CacheConfig};
+pub use config::{BlobStorageBackend, BlobStorageConfig, Config, S3CacheConfig};
 use futures::stream::{self, StreamExt};
 use metrics::histogram;
 use moka::future::Cache;
-use object_layout::ObjectLayout;
-use rpc_client_bss::{RpcClientBss, RpcErrorBss};
 use rpc_client_nss::RpcClientNss;
 use rpc_client_rss::{RpcClientRss, RpcErrorRss};
 
-use rpc_client_common::{bss_rpc_retry, rpc_retry};
 use slotmap_conn_pool::{ConnPool, Poolable};
 use std::{
     net::SocketAddr,
@@ -71,14 +67,9 @@ impl AppState {
 
         let (tx, rx) = mpsc::channel(1024 * 1024);
         let blob_client = Arc::new(
-            BlobClient::new(
-                config.bss_addr,
-                config.bss_conn_num,
-                &config.s3_cache,
-                rx,
-                config.rpc_timeout(),
-            )
-            .await,
+            BlobClient::new(&config.blob_storage, rx, config.rpc_timeout())
+                .await
+                .expect("Failed to initialize blob client"),
         );
 
         let cache = Arc::new(
@@ -167,108 +158,90 @@ impl AppState {
 }
 
 pub struct BlobClient {
-    rpc_clients_bss: ConnPool<Arc<RpcClientBss>, SocketAddr>,
-    client_s3: S3Client,
-    s3_cache_bucket: String,
+    storage: Arc<BlobStorageImpl>,
     #[allow(dead_code)]
     blob_deletion_task_handle: JoinHandle<()>,
-    bss_addr: SocketAddr,
-    rpc_timeout: Duration,
 }
 
 impl BlobClient {
     pub async fn new(
-        bss_addr: SocketAddr,
-        bss_conn_num: u16,
-        config: &S3CacheConfig,
+        blob_storage_config: &BlobStorageConfig,
         rx: Receiver<(BlobId, usize)>,
         rpc_timeout: Duration,
-    ) -> Self {
-        let clients_bss = ConnPool::new();
-
-        // Use the Poolable trait's retry logic
-        for i in 0..bss_conn_num as usize {
-            info!(
-                "Connecting to BSS server at {bss_addr} (connection {}/{})",
-                i + 1,
-                bss_conn_num
-            );
-            let client = Arc::new(
-                <RpcClientBss as slotmap_conn_pool::Poolable>::new(bss_addr)
-                    .await
-                    .unwrap(),
-            );
-            clients_bss.pooled(bss_addr, client);
-        }
-
-        info!("BSS RPC client pool initialized with {bss_conn_num} connections.");
-
-        let client_s3 = if config.s3_host.ends_with("amazonaws.com") {
-            let aws_config = aws_config::defaults(BehaviorVersion::latest())
-                .region(Region::new(config.s3_region.clone()))
-                .load()
-                .await;
-            S3Client::new(&aws_config)
-        } else {
-            let credentials = Credentials::new("minioadmin", "minioadmin", None, None, "s3_cache");
-            let s3_config = S3Config::builder()
-                .endpoint_url(format!("{}:{}", config.s3_host, config.s3_port))
-                .region(Region::new(config.s3_region.clone()))
-                .credentials_provider(credentials)
-                .behavior_version(BehaviorVersion::latest())
-                .build();
-
-            S3Client::from_conf(s3_config)
+    ) -> Result<Self, BlobStorageError> {
+        let storage = match &blob_storage_config.backend {
+            BlobStorageBackend::BssOnly => {
+                let bss_config = blob_storage_config.bss.as_ref().ok_or_else(|| {
+                    BlobStorageError::Config(
+                        "BSS configuration required for BssOnly backend".into(),
+                    )
+                })?;
+                BlobStorageImpl::BssOnly(
+                    BssOnlyStorage::new(bss_config.addr, bss_config.conn_num, rpc_timeout).await,
+                )
+            }
+            BlobStorageBackend::Hybrid => {
+                let bss_config = blob_storage_config.bss.as_ref().ok_or_else(|| {
+                    BlobStorageError::Config("BSS configuration required for Hybrid backend".into())
+                })?;
+                let s3_cache_config = blob_storage_config.s3_cache.as_ref().ok_or_else(|| {
+                    BlobStorageError::Config(
+                        "S3 cache configuration required for Hybrid backend".into(),
+                    )
+                })?;
+                BlobStorageImpl::Hybrid(
+                    HybridStorage::new(
+                        bss_config.addr,
+                        bss_config.conn_num,
+                        s3_cache_config,
+                        rpc_timeout,
+                    )
+                    .await,
+                )
+            }
+            BlobStorageBackend::S3Express => {
+                let s3_express_config =
+                    blob_storage_config.s3_express.as_ref().ok_or_else(|| {
+                        BlobStorageError::Config(
+                            "S3 Express configuration required for S3Express backend".into(),
+                        )
+                    })?;
+                let express_config = blob_storage::S3ExpressConfig {
+                    bucket: s3_express_config.bucket.clone(),
+                    region: s3_express_config.region.clone(),
+                    az: s3_express_config.az.clone(),
+                    express_session_auth: s3_express_config.express_session_auth,
+                };
+                BlobStorageImpl::S3Express(S3ExpressStorage::new(&express_config).await?)
+            }
         };
+        let storage = Arc::new(storage);
 
         let blob_deletion_task_handle = tokio::spawn({
-            let clients_bss = clients_bss.clone();
+            let storage = storage.clone();
             async move {
-                if let Err(e) =
-                    Self::blob_deletion_task(clients_bss, rx, bss_addr, rpc_timeout).await
-                {
+                if let Err(e) = Self::blob_deletion_task(storage, rx).await {
                     tracing::error!("FATAL: blob deletion task error: {e}");
                 }
             }
         });
 
-        Self {
-            rpc_clients_bss: clients_bss,
-            client_s3,
-            s3_cache_bucket: config.s3_bucket.clone(),
+        Ok(Self {
+            storage,
             blob_deletion_task_handle,
-            bss_addr,
-            rpc_timeout,
-        }
-    }
-
-    pub async fn checkout_rpc_client_bss(
-        &self,
-    ) -> Result<Arc<RpcClientBss>, <RpcClientBss as Poolable>::Error> {
-        let start = Instant::now();
-        let res = self.rpc_clients_bss.checkout(self.bss_addr).await?;
-        histogram!("checkout_rpc_client_nanos", "type" => "bss")
-            .record(start.elapsed().as_nanos() as f64);
-        Ok(res)
+        })
     }
 
     async fn blob_deletion_task(
-        clients_bss: ConnPool<Arc<RpcClientBss>, SocketAddr>,
+        storage: Arc<BlobStorageImpl>,
         mut input: Receiver<(BlobId, usize)>,
-        bss_addr: SocketAddr,
-        timeout: Duration,
-    ) -> Result<(), RpcErrorBss> {
+    ) -> Result<(), BlobStorageError> {
         while let Some((blob_id, block_numbers)) = input.recv().await {
             let deleted = stream::iter(0..block_numbers)
                 .map(|block_number| {
-                    let clients_bss = clients_bss.clone();
+                    let storage = storage.clone();
                     async move {
-                        let res = rpc_retry!(
-                            clients_bss,
-                            checkout(bss_addr),
-                            delete_blob(blob_id, block_number as u32, Some(timeout))
-                        )
-                        .await;
+                        let res = storage.delete_blob(blob_id, block_number as u32).await;
                         match res {
                             Ok(()) => 1,
                             Err(e) => {
@@ -294,35 +267,8 @@ impl BlobClient {
         blob_id: Uuid,
         block_number: u32,
         body: Bytes,
-    ) -> Result<(), RpcErrorBss> {
-        histogram!("blob_size", "operation" => "put").record(body.len() as f64);
-        let start = Instant::now();
-        if block_number == 0 && body.len() < ObjectLayout::DEFAULT_BLOCK_SIZE as usize {
-            let res = bss_rpc_retry!(
-                self,
-                put_blob(blob_id, block_number, body.clone(), Some(self.rpc_timeout))
-            )
-            .await;
-            return res;
-        }
-
-        let s3_key = format!("{blob_id}-{block_number}");
-        let (res_s3, res_bss) = tokio::join!(
-            self.client_s3
-                .put_object()
-                .bucket(&self.s3_cache_bucket)
-                .key(&s3_key)
-                .body(body.clone().into())
-                .send(),
-            bss_rpc_retry!(
-                self,
-                put_blob(blob_id, block_number, body.clone(), Some(self.rpc_timeout))
-            )
-        );
-        histogram!("rpc_duration_nanos", "type"  => "bss_s3_join",  "name" => "put_blob_join_with_s3")
-            .record(start.elapsed().as_nanos() as f64);
-        assert!(res_s3.is_ok());
-        res_bss
+    ) -> Result<(), BlobStorageError> {
+        self.storage.put_blob(blob_id, block_number, body).await
     }
 
     pub async fn get_blob(
@@ -330,35 +276,15 @@ impl BlobClient {
         blob_id: Uuid,
         block_number: u32,
         body: &mut Bytes,
-    ) -> Result<(), RpcErrorBss> {
-        let res = bss_rpc_retry!(
-            self,
-            get_blob(blob_id, block_number, body, Some(self.rpc_timeout))
-        )
-        .await;
-        if res.is_ok() {
-            histogram!("blob_size", "operation" => "get").record(body.len() as f64);
-        }
-        res
+    ) -> Result<(), BlobStorageError> {
+        self.storage.get_blob(blob_id, block_number, body).await
     }
 
-    pub async fn delete_blob(&self, blob_id: Uuid, block_number: u32) -> Result<(), RpcErrorBss> {
-        let s3_key = format!("{blob_id}-{block_number}");
-        let (res_s3, res_bss) = tokio::join!(
-            self.client_s3
-                .delete_object()
-                .bucket(&self.s3_cache_bucket)
-                .key(&s3_key)
-                .send(),
-            bss_rpc_retry!(
-                self,
-                delete_blob(blob_id, block_number, Some(self.rpc_timeout))
-            )
-        );
-        if let Err(e) = res_s3 {
-            // note this blob may not be uploaded to s3 yet
-            tracing::warn!("delete {s3_key} failed: {e}");
-        }
-        res_bss
+    pub async fn delete_blob(
+        &self,
+        blob_id: Uuid,
+        block_number: u32,
+    ) -> Result<(), BlobStorageError> {
+        self.storage.delete_blob(blob_id, block_number).await
     }
 }

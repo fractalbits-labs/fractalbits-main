@@ -160,6 +160,7 @@ fn main() -> CmdResult {
     let opts = Opts::parse();
     let for_bench = opts.common.for_bench;
     let command = opts.command.as_ref().to_owned();
+    common_setup()?;
     match opts.command {
         Command::ApiServer {
             bucket,

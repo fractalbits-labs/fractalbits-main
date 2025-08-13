@@ -12,12 +12,17 @@ pub const BENCH_SERVER_BENCH_START_SCRIPT: &str = "bench_start.sh";
 pub const BOOTSTRAP_DONE_FILE: &str = "/opt/fractalbits/.bootstrap_done";
 pub const STATS_LOGROTATE_CONFIG: &str = "/etc/logrotate.d/stats_logs";
 pub const DDB_SERVICE_DISCOVERY_TABLE: &str = "fractalbits-service-discovery";
-
+pub const NETWORK_TUNING_SYS_CONFIG: &str = "99-network-tuning.conf";
 #[allow(dead_code)]
 pub const CLOUDWATCH_AGENT_CONFIG: &str = "cloudwatch_agent_config.json";
 pub const TEST_BUCKET_ROOT_BLOB_NAME: &str = "947ef2be-44b2-4ac2-969b-2574eb85662b";
 pub const CLOUD_INIT_LOG: &str = "/var/log/cloud-init-output.log";
 pub const EXT4_MKFS_OPTS: [&str; 4] = ["-O", "bigalloc", "-C", "16384"];
+
+pub fn common_setup() -> CmdResult {
+    create_network_tuning_sysctl_file()?;
+    Ok(())
+}
 
 pub fn download_binaries(file_list: &[&str]) -> CmdResult {
     for file_name in file_list {
@@ -416,7 +421,7 @@ echo "Done" >&2
 pub fn get_service_ips(service_id: &str, expected_min_count: usize) -> Vec<String> {
     info!("Waiting for {expected_min_count} {service_id} service(s)");
     let start_time = Instant::now();
-    let timeout = Duration::from_secs(120);
+    let timeout = Duration::from_secs(300);
     loop {
         if start_time.elapsed() > timeout {
             cmd_die!("Timeout waiting for {service_id} service(s)");
@@ -441,4 +446,29 @@ pub fn get_service_ips(service_id: &str, expected_min_count: usize) -> Vec<Strin
             _ => std::thread::sleep(std::time::Duration::from_secs(1)),
         }
     }
+}
+
+fn create_network_tuning_sysctl_file() -> CmdResult {
+    let content = r##"# Should be a symlink file in /etc/sysctl.d
+# allow TCP with buffers up to 128MB
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+# increase TCP autotuning buffer limits.
+net.ipv4.tcp_rmem = 4096 87380 67108864
+net.ipv4.tcp_wmem = 4096 65536 67108864
+# recommended for hosts with jumbo frames enabled
+net.ipv4.tcp_mtu_probing=1
+# recommended to enable 'fair queueing'
+net.core.default_qdisc = fq
+"##;
+
+    run_cmd! {
+        info "Applying network tunning configs";
+        mkdir -p $ETC_PATH;
+        echo $content > $ETC_PATH/$NETWORK_TUNING_SYS_CONFIG;
+        ln -nsf $ETC_PATH/$NETWORK_TUNING_SYS_CONFIG /etc/sysctl.d/;
+        sysctl --system --quiet;
+
+    }?;
+    Ok(())
 }

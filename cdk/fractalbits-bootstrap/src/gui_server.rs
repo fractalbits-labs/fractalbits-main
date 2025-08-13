@@ -24,7 +24,6 @@ pub fn bootstrap(bucket_name: &str, nss_ip: &str, rss_ip: &str) -> CmdResult {
     }
 
     create_config(bucket_name, &bss_ip, nss_ip, rss_ip)?;
-
     // setup_cloudwatch_agent()?;
     create_systemd_unit_file("api_server", true)?;
 

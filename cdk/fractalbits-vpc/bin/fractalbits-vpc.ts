@@ -11,7 +11,7 @@ const app = new cdk.App();
 const numApiServers = app.node.tryGetContext('numApiServers') ?? 1;
 const numBenchClients = app.node.tryGetContext('numBenchClients') ?? 1;
 const benchType = app.node.tryGetContext('benchType') ?? null;
-const availabilityZone = app.node.tryGetContext('availabilityZone') ?? app.node.tryGetContext('az') ?? undefined;
+const availabilityZone = app.node.tryGetContext('availabilityZone') ?? app.node.tryGetContext('az') ?? 'us-west-2d';
 const bssInstanceTypes = app.node.tryGetContext('bssInstanceTypes') ?? "i8g.xlarge,i8g.2xlarge,i8g.4xlarge";
 const browserIp = app.node.tryGetContext('browserIp') ?? null;
 

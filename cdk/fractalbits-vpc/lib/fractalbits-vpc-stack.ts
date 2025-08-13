@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import {Construct} from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as s3express from 'aws-cdk-lib/aws-s3express';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as autoscaling from 'aws-cdk-lib/aws-autoscaling';
@@ -25,7 +26,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: FractalbitsVpcStackProps) {
     super(scope, id, props);
     const forBenchFlag = props.benchType ? ' --for_bench' : '';
-    const dataBlobStorage = props.dataBlobStorage ?? 'hybrid';
+    const dataBlobStorage = props.dataBlobStorage ?? 's3Express';
 
     // === VPC Configuration ===
     const az = props.availabilityZone ?? this.availabilityZones[this.availabilityZones.length - 1];
@@ -72,13 +73,30 @@ export class FractalbitsVpcStack extends cdk.Stack {
     });
 
     // Create S3 Express One Zone bucket for high-performance blob storage when in s3Express mode
-    let dataBlobBucket: s3.Bucket | undefined;
+    let dataBlobBucket: s3express.CfnDirectoryBucket | undefined;
     if (dataBlobStorage === 's3Express') {
-      dataBlobBucket = new s3.Bucket(this, 'DataBlobExpressBucket', {
-        // S3 Express One Zone bucket configuration
-        bucketName: `${this.stackName.toLowerCase()}-data-blobs-express--${az}--x-s3`,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-        autoDeleteObjects: true,
+      // For S3 Express, derive zone ID from availability zone
+      // Map us-west-2[a-d] to usw2-az[1-4] using CloudFormation mappings
+      const azMappings = new cdk.CfnMapping(this, 'AZToZoneIdMapping', {
+        mapping: {
+          'us-west-2a': { zoneId: 'usw2-az2' },
+          'us-west-2b': { zoneId: 'usw2-az1' },
+          'us-west-2c': { zoneId: 'usw2-az3' },
+          'us-west-2d': { zoneId: 'usw2-az4' },
+        },
+        lazy: true,
+      });
+
+      const zoneId = azMappings.findInMap(az, 'zoneId');
+      const bucketName = cdk.Fn.sub('fractalbits-express--${ZoneId}--x-s3', {
+        ZoneId: zoneId
+      });
+
+      dataBlobBucket = new s3express.CfnDirectoryBucket(this, 'DataBlobExpressBucket', {
+        bucketName: bucketName,
+        dataRedundancy: 'SingleAvailabilityZone',
+        locationName: zoneId,
+        // Note: CfnDirectoryBucket doesn't support removalPolicy/autoDeleteObjects like regular buckets
       });
     }
 
@@ -177,7 +195,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
     }
 
     // Create api_server(s) in a ASG group
-    const dataBlobBucketName = dataBlobStorage === 's3Express' ? dataBlobBucket!.bucketName : bucket.bucketName;
+    const dataBlobBucketName = dataBlobStorage === 's3Express' ? dataBlobBucket!.bucketName! : bucket.bucketName;
     const apiServerBootstrapOptions = `${forBenchFlag} api_server --bucket=${dataBlobBucketName} --nss_ip=${instances["nss_server_primary"].instancePrivateIp} --rss_ip=${instances["root_server"].instancePrivateIp}`;
     const apiServerAsg = createEc2Asg(
       this,
@@ -282,7 +300,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
     if (dataBlobBucket) {
       new cdk.CfnOutput(this, 'DataBlobExpressBucketName', {
-        value: dataBlobBucket.bucketName,
+        value: dataBlobBucket.bucketName!,
         description: 'S3 Express One Zone bucket for data blobs',
       });
     }

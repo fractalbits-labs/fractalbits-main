@@ -316,7 +316,7 @@ WorkingDirectory={pwd}/data
     let minio_url = "http://localhost:9000";
     let bucket_name = match data_blob_storage {
         DataBlobStorage::Hybrid => "fractalbits-bucket",
-        DataBlobStorage::S3Express => "fractalbits-bucket--usw2-az1--x-s3",
+        DataBlobStorage::S3Express => "fractalbits-bucket", // Use regular name for local minio testing
     };
     let my_bucket = format!("s3://{bucket_name}");
     run_cmd! {

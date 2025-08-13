@@ -1,6 +1,6 @@
-use super::{blob_key, BlobStorage, BlobStorageError};
+use super::{blob_key, create_s3_client, BlobStorage, BlobStorageError};
 use aws_config::BehaviorVersion;
-use aws_sdk_s3::{config::Region, types::StorageClass, Client as S3Client};
+use aws_sdk_s3::{config::Region, types::StorageClass, Client as S3Client, Config as S3Config};
 use bytes::Bytes;
 use metrics::histogram;
 use std::time::Instant;
@@ -9,8 +9,10 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct S3ExpressConfig {
-    pub bucket: String,
-    pub region: String,
+    pub s3_host: String,
+    pub s3_port: u16,
+    pub s3_region: String,
+    pub s3_bucket: String,
     pub az: String,
     pub express_session_auth: bool,
 }
@@ -24,35 +26,42 @@ impl S3ExpressStorage {
     pub async fn new(config: &S3ExpressConfig) -> Result<Self, BlobStorageError> {
         info!(
             "Initializing S3 Express One Zone storage for bucket: {} in AZ: {}",
-            config.bucket, config.az
+            config.s3_bucket, config.az
         );
 
-        let aws_config = aws_config::defaults(BehaviorVersion::latest())
-            .region(Region::new(config.region.clone()))
-            .load()
-            .await;
-
         let client_s3 = if config.express_session_auth {
-            S3Client::new(&aws_config)
+            // For real AWS S3 Express with session auth
+            create_s3_client(&config.s3_host, config.s3_port, &config.s3_region, false).await
         } else {
-            // For S3 Express with disabled session auth
-            let s3_config = {
-                let mut builder = aws_sdk_s3::Config::builder();
-                builder.set_behavior_version(Some(BehaviorVersion::latest()));
-                builder.set_disable_s3_express_session_auth(Some(true));
-                builder.build()
-            };
+            // For local minio testing - need to disable S3 Express session auth
+            let endpoint_url = format!("{}:{}", config.s3_host, config.s3_port);
+            let s3_config = S3Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .disable_s3_express_session_auth(true)
+                .endpoint_url(&endpoint_url)
+                .region(Region::new(config.s3_region.clone()))
+                .force_path_style(true)
+                .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                    "minioadmin",
+                    "minioadmin",
+                    None,
+                    None,
+                    "minio",
+                ))
+                .build();
+
             S3Client::from_conf(s3_config)
         };
 
+        let endpoint_url = format!("{}:{}", config.s3_host, config.s3_port);
         info!(
-            "S3 Express One Zone client initialized with session auth: {}",
-            config.express_session_auth
+            "S3 Express One Zone client initialized with endpoint: {} and session auth: {}",
+            endpoint_url, config.express_session_auth
         );
 
         Ok(Self {
             client_s3,
-            bucket: config.bucket.clone(),
+            bucket: config.s3_bucket.clone(),
         })
     }
 }
@@ -70,14 +79,19 @@ impl BlobStorage for S3ExpressStorage {
 
         let s3_key = blob_key(blob_id, block_number);
 
-        self.client_s3
+        let mut request = self
+            .client_s3
             .put_object()
             .bucket(&self.bucket)
             .key(&s3_key)
-            .body(body.into())
-            .storage_class(StorageClass::ExpressOnezone)
-            .send()
-            .await?;
+            .body(body.into());
+
+        // Only set storage class for real S3 Express (not for local minio testing)
+        if self.bucket.ends_with("--x-s3") {
+            request = request.storage_class(StorageClass::ExpressOnezone);
+        }
+
+        request.send().await?;
 
         histogram!("rpc_duration_nanos", "type" => "s3_express", "name" => "put_blob")
             .record(start.elapsed().as_nanos() as f64);

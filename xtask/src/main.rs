@@ -86,7 +86,7 @@ enum Cmd {
         #[clap(
             long,
             long_help = "Data blob storage mode: hybrid or s3_express",
-            default_value = "hybrid"
+            default_value = "s3_express"
         )]
         data_blob_storage: DataBlobStorage,
     },
@@ -200,7 +200,7 @@ fn main() -> CmdResult {
                 ServiceName::DdbLocal,
                 BuildMode::Debug,
                 false,
-                DataBlobStorage::Hybrid,
+                DataBlobStorage::S3Express,
             )?;
 
             run_cmd! {
@@ -246,7 +246,7 @@ fn main() -> CmdResult {
                     ServiceAction::Stop,
                     BuildMode::Release,
                     false,
-                    DataBlobStorage::Hybrid,
+                    DataBlobStorage::S3Express,
                 )
                 .unwrap();
             })?;

@@ -143,6 +143,10 @@ pub fn get_current_aws_region() -> FunResult {
     run_fun!(ec2-metadata --region | awk r"{print $2}")
 }
 
+pub fn get_current_aws_az() -> FunResult {
+    run_fun!(ec2-metadata --availability-zone | awk r"{print $2}")
+}
+
 // https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/storage-twp.html
 pub fn format_local_nvme_disks(support_storage_twp: bool) -> CmdResult {
     let nvme_disks = run_fun! {

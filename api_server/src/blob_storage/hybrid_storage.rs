@@ -1,10 +1,6 @@
-use super::{blob_key, BlobStorage, BlobStorageError};
+use super::{blob_key, create_s3_client, BlobStorage, BlobStorageError};
 use crate::{config::S3CacheConfig, object_layout::ObjectLayout};
-use aws_config::BehaviorVersion;
-use aws_sdk_s3::{
-    config::{Credentials, Region},
-    Client as S3Client, Config as S3Config,
-};
+use aws_sdk_s3::Client as S3Client;
 use bytes::Bytes;
 use metrics::histogram;
 use rpc_client_bss::RpcClientBss;
@@ -51,26 +47,13 @@ impl HybridStorage {
 
         info!("BSS RPC client pool initialized with {bss_conn_num} connections.");
 
-        let client_s3 = if s3_cache_config.s3_host.ends_with("amazonaws.com") {
-            let aws_config = aws_config::defaults(BehaviorVersion::latest())
-                .region(Region::new(s3_cache_config.s3_region.clone()))
-                .load()
-                .await;
-            S3Client::new(&aws_config)
-        } else {
-            let credentials = Credentials::new("minioadmin", "minioadmin", None, None, "s3_cache");
-            let s3_config = S3Config::builder()
-                .endpoint_url(format!(
-                    "{}:{}",
-                    s3_cache_config.s3_host, s3_cache_config.s3_port
-                ))
-                .region(Region::new(s3_cache_config.s3_region.clone()))
-                .credentials_provider(credentials)
-                .behavior_version(BehaviorVersion::latest())
-                .build();
-
-            S3Client::from_conf(s3_config)
-        };
+        let client_s3 = create_s3_client(
+            &s3_cache_config.s3_host,
+            s3_cache_config.s3_port,
+            &s3_cache_config.s3_region,
+            false, // force_path_style not needed for hybrid storage
+        )
+        .await;
 
         Self {
             rpc_clients_bss: clients_bss,

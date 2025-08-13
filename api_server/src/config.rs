@@ -5,8 +5,8 @@ use std::{net::SocketAddr, time::Duration};
 #[serde(rename_all = "snake_case")]
 pub enum BlobStorageBackend {
     BssOnly,
-    S3Express,
     #[default]
+    S3Express,
     Hybrid,
 }
 
@@ -28,15 +28,30 @@ pub struct BssConfig {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct S3ExpressConfig {
-    pub bucket: String,
-    pub region: String,
+    pub s3_host: String,
+    pub s3_port: u16,
+    pub s3_region: String,
+    pub s3_bucket: String,
     pub az: String,
     #[serde(default = "default_express_session_auth")]
     pub express_session_auth: bool,
 }
 
 fn default_express_session_auth() -> bool {
-    true
+    false // Default to false for local testing with minio
+}
+
+impl Default for S3ExpressConfig {
+    fn default() -> Self {
+        Self {
+            s3_host: "http://127.0.0.1".into(),
+            s3_port: 9000, // local minio port
+            s3_region: "us-west-1".into(),
+            s3_bucket: "fractalbits-bucket".into(),
+            az: "us-west-1a".into(),
+            express_session_auth: false,
+        }
+    }
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]
@@ -101,13 +116,10 @@ impl Default for Config {
             http_request_timeout_seconds: 5,
             rpc_timeout_seconds: 4,
             blob_storage: BlobStorageConfig {
-                backend: BlobStorageBackend::Hybrid,
-                bss: Some(BssConfig {
-                    addr: "127.0.0.1:8088".parse().unwrap(),
-                    conn_num: 2,
-                }),
-                s3_cache: Some(S3CacheConfig::default()),
-                s3_express: None,
+                backend: BlobStorageBackend::S3Express,
+                bss: None,
+                s3_cache: None,
+                s3_express: Some(S3ExpressConfig::default()),
             },
             allow_missing_or_bad_signature: false,
             web_root: None,

@@ -81,6 +81,16 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
     createServiceDiscoveryTable(this);
 
+    new dynamodb.Table(this, 'LeaderElectionTable', {
+      partitionKey: {
+        name: 'key',
+        type: dynamodb.AttributeType.STRING,
+      },
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // Delete table on stack delete
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      tableName: 'fractalbits-leader-election',
+    });
+
     // new dynamodb.Table(this, 'EBSFailoverStateTable', {
     //   partitionKey: {
     //     name: 'VolumeId',

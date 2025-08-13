@@ -166,7 +166,37 @@ fencing_timeout_seconds = 300                  # Max time to wait for instance t
 }
 
 fn create_rss_config() -> CmdResult {
-    let config_content = r##"server_port = 8088"##.to_string();
+    let config_content = r##"# Root Server Configuration
+
+# Server port
+server_port = 8088
+
+# Server health port
+health_port = 18088
+
+# Leader Election Configuration
+[leader_election]
+# DynamoDB table name for leader election
+table_name = "fractalbits-leader-election"
+
+# Key used in DynamoDB table to identify this leader election group
+leader_key = "root-server-leader"
+
+# How long a leader holds the lease before it expires (in seconds)
+# Should be significantly longer than heartbeat_interval_secs
+lease_duration_secs = 30
+
+# How often to send heartbeats and check leadership status (in seconds)
+# Should be less than lease_duration_secs / 2 to ensure reliable renewal
+heartbeat_interval_secs = 10
+
+# Maximum number of retry attempts for DynamoDB operations
+max_retry_attempts = 5
+
+# Enable monitoring and metrics collection
+enable_monitoring = false
+"##
+    .to_string();
     run_cmd! {
         mkdir -p $ETC_PATH;
         echo $config_content > $ETC_PATH/$ROOT_SERVER_CONFIG;

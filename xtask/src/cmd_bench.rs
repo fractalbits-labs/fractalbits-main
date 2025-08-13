@@ -41,6 +41,7 @@ pub fn run_cmd_bench(
                 ServiceAction::Restart,
                 BuildMode::Release,
                 false,
+                DataBlobStorage::Hybrid,
             )?;
             uri = "http://mybucket.localhost:8080";
             bench_exe = "./target/release/rewrk";
@@ -75,7 +76,7 @@ pub fn run_cmd_bench(
         BenchService::BssRpc => {
             *service_name = ServiceName::Bss;
             build_rewrk_rpc()?;
-            start_bss_service(build_mode)?;
+            start_bss_service(build_mode, DataBlobStorage::Hybrid)?;
             uri = "127.0.0.1:8088";
             bench_exe = "./target/release/rewrk_rpc";
             bench_opts.extend_from_slice(&[
@@ -129,6 +130,7 @@ pub fn run_cmd_bench(
         ServiceAction::Stop,
         BuildMode::Release,
         false,
+        DataBlobStorage::Hybrid,
     )?;
 
     Ok(())

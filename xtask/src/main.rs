@@ -82,6 +82,13 @@ enum Cmd {
 
         #[clap(long, long_help = "start service for gui")]
         for_gui: bool,
+
+        #[clap(
+            long,
+            long_help = "Data blob storage mode: hybrid or s3_express",
+            default_value = "hybrid"
+        )]
+        data_blob_storage: DataBlobStorage,
     },
 
     #[clap(about = "Run tool related commands (gen_uuids only for now)")]
@@ -147,6 +154,13 @@ pub enum ServiceName {
     NssRoleAgent,
 }
 
+#[derive(AsRefStr, EnumString, Copy, Clone)]
+#[strum(serialize_all = "snake_case")]
+pub enum DataBlobStorage {
+    Hybrid,
+    S3Express,
+}
+
 #[derive(Parser, Clone)]
 #[clap(rename_all = "snake_case")]
 enum ToolKind {
@@ -181,7 +195,7 @@ fn main() -> CmdResult {
         Cmd::TestLeaderElection => {
             // Initialize DDB local with leader election table and run tests
             cmd_service::init_service(ServiceName::DdbLocal, BuildMode::Debug)?;
-            cmd_service::start_services(ServiceName::DdbLocal, BuildMode::Debug, false)?;
+            cmd_service::start_services(ServiceName::DdbLocal, BuildMode::Debug, false, DataBlobStorage::Hybrid)?;
 
             run_cmd! {
                 info "Running root_server leader election tests...";
@@ -226,6 +240,7 @@ fn main() -> CmdResult {
                     ServiceAction::Stop,
                     BuildMode::Release,
                     false,
+                    DataBlobStorage::Hybrid,
                 )
                 .unwrap();
             })?;
@@ -235,7 +250,14 @@ fn main() -> CmdResult {
             service,
             release,
             for_gui,
-        } => cmd_service::run_cmd_service(service, action, build_mode(release), for_gui)?,
+            data_blob_storage,
+        } => cmd_service::run_cmd_service(
+            service,
+            action,
+            build_mode(release),
+            for_gui,
+            data_blob_storage,
+        )?,
         Cmd::Tool(tool_kind) => cmd_tool::run_cmd_tool(tool_kind)?,
         Cmd::Deploy {
             use_s3_backend,

@@ -5,14 +5,15 @@ pub fn run_cmd_service(
     action: ServiceAction,
     build_mode: BuildMode,
     for_gui: bool,
+    data_blob_storage: DataBlobStorage,
 ) -> CmdResult {
     match action {
         ServiceAction::Init => init_service(service, build_mode),
         ServiceAction::Stop => stop_service(service),
-        ServiceAction::Start => start_services(service, build_mode, for_gui),
+        ServiceAction::Start => start_services(service, build_mode, for_gui, data_blob_storage),
         ServiceAction::Restart => {
             stop_service(service)?;
-            start_services(service, build_mode, for_gui)
+            start_services(service, build_mode, for_gui, data_blob_storage)
         }
     }
 }
@@ -152,21 +153,36 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
     Ok(())
 }
 
-pub fn start_services(service: ServiceName, build_mode: BuildMode, for_gui: bool) -> CmdResult {
+pub fn start_services(
+    service: ServiceName,
+    build_mode: BuildMode,
+    for_gui: bool,
+    data_blob_storage: DataBlobStorage,
+) -> CmdResult {
     match service {
-        ServiceName::Bss => start_bss_service(build_mode)?,
+        ServiceName::Bss => start_bss_service(build_mode, data_blob_storage)?,
         ServiceName::Nss => start_nss_service(build_mode, false)?,
         ServiceName::NssRoleAgent => start_nss_role_agent_service(build_mode)?,
         ServiceName::Rss => start_rss_service(build_mode)?,
         ServiceName::ApiServer => start_api_server(build_mode, for_gui)?,
-        ServiceName::All => start_all_services(build_mode, for_gui)?,
-        ServiceName::Minio => start_minio_service()?,
+        ServiceName::All => start_all_services(build_mode, for_gui, data_blob_storage)?,
+        ServiceName::Minio => start_minio_service(data_blob_storage)?,
         ServiceName::DdbLocal => start_ddb_local_service()?,
     }
     Ok(())
 }
 
-pub fn start_bss_service(build_mode: BuildMode) -> CmdResult {
+pub fn start_bss_service(build_mode: BuildMode, data_blob_storage: DataBlobStorage) -> CmdResult {
+    match data_blob_storage {
+        DataBlobStorage::S3Express => {
+            info!("Skipping bss_server in s3_express mode");
+            return Ok(());
+        }
+        DataBlobStorage::Hybrid => {
+            // Continue with normal BSS server startup
+        }
+    }
+
     create_systemd_unit_file(ServiceName::Bss, build_mode, None)?;
 
     run_cmd!(systemctl --user start bss.service)?;
@@ -182,7 +198,7 @@ pub fn start_nss_service(build_mode: BuildMode, data_on_local: bool) -> CmdResul
     if !data_on_local {
         // Start minio to simulate local s3 service
         if run_cmd!(systemctl --user is-active --quiet minio.service).is_err() {
-            start_minio_service()?;
+            start_minio_service(DataBlobStorage::Hybrid)?;
         }
     }
 
@@ -267,7 +283,7 @@ WorkingDirectory={working_dir}
     Ok(())
 }
 
-pub fn start_minio_service() -> CmdResult {
+pub fn start_minio_service(data_blob_storage: DataBlobStorage) -> CmdResult {
     let pwd = run_fun!(pwd)?;
     let service_file = "etc/minio.service";
     let service_file_content = format!(
@@ -285,7 +301,10 @@ WorkingDirectory={pwd}/data
 "##
     );
     let minio_url = "http://localhost:9000";
-    let bucket_name = "fractalbits-bucket";
+    let bucket_name = match data_blob_storage {
+        DataBlobStorage::Hybrid => "fractalbits-bucket",
+        DataBlobStorage::S3Express => "fractalbits-bucket--usw2-az1--x-s3",
+    };
     let my_bucket = format!("s3://{bucket_name}");
     run_cmd! {
         mkdir -p etc;
@@ -340,7 +359,11 @@ pub fn start_api_server(build_mode: BuildMode, for_gui: bool) -> CmdResult {
     Ok(())
 }
 
-pub fn start_all_services(build_mode: BuildMode, for_gui: bool) -> CmdResult {
+pub fn start_all_services(
+    build_mode: BuildMode,
+    for_gui: bool,
+    data_blob_storage: DataBlobStorage,
+) -> CmdResult {
     info!("Starting all services with systemd dependency management");
 
     // Create all systemd unit files first
@@ -351,7 +374,16 @@ pub fn start_all_services(build_mode: BuildMode, for_gui: bool) -> CmdResult {
     };
 
     create_systemd_unit_file(ServiceName::Rss, build_mode, None)?;
-    create_systemd_unit_file(ServiceName::Bss, build_mode, None)?;
+
+    // Only create BSS systemd unit file if we're in hybrid mode
+    match data_blob_storage {
+        DataBlobStorage::Hybrid => {
+            create_systemd_unit_file(ServiceName::Bss, build_mode, None)?;
+        }
+        DataBlobStorage::S3Express => {
+            info!("Skipping BSS systemd unit file creation in s3_express mode");
+        }
+    }
 
     let nss_config_file = match build_mode {
         BuildMode::Debug => None,
@@ -369,15 +401,30 @@ pub fn start_all_services(build_mode: BuildMode, for_gui: bool) -> CmdResult {
     wait_for_service_ready(ServiceName::Minio, 10)?;
 
     // Start all main services - systemd dependencies will handle ordering
-    info!("Starting all main services (systemd will handle dependency ordering)");
-    run_cmd!(systemctl --user start rss.service bss.service nss.service nss_role_agent.service api_server.service)?;
+    match data_blob_storage {
+        DataBlobStorage::Hybrid => {
+            info!("Starting all main services (systemd will handle dependency ordering)");
+            run_cmd!(systemctl --user start rss.service bss.service nss.service nss_role_agent.service api_server.service)?;
 
-    // Wait for all services to be ready in dependency order
-    wait_for_service_ready(ServiceName::Rss, 15)?;
-    wait_for_service_ready(ServiceName::Bss, 15)?;
-    wait_for_service_ready(ServiceName::Nss, 15)?;
-    wait_for_service_ready(ServiceName::NssRoleAgent, 15)?;
-    wait_for_service_ready(ServiceName::ApiServer, 15)?;
+            // Wait for all services to be ready in dependency order
+            wait_for_service_ready(ServiceName::Rss, 15)?;
+            wait_for_service_ready(ServiceName::Bss, 15)?;
+            wait_for_service_ready(ServiceName::Nss, 15)?;
+            wait_for_service_ready(ServiceName::NssRoleAgent, 15)?;
+            wait_for_service_ready(ServiceName::ApiServer, 15)?;
+        }
+        DataBlobStorage::S3Express => {
+            info!("Starting main services (skipping BSS in s3_express mode)");
+            run_cmd!(systemctl --user start rss.service nss.service nss_role_agent.service api_server.service)?;
+
+            // Wait for all services to be ready in dependency order (excluding BSS)
+            wait_for_service_ready(ServiceName::Rss, 15)?;
+            info!("Skipping BSS service readiness check in s3_express mode");
+            wait_for_service_ready(ServiceName::Nss, 15)?;
+            wait_for_service_ready(ServiceName::NssRoleAgent, 15)?;
+            wait_for_service_ready(ServiceName::ApiServer, 15)?;
+        }
+    }
 
     info!("All services started successfully!");
     Ok(())

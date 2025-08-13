@@ -11,7 +11,7 @@ pub fn run_cmd_precheckin(s3_api_only: bool) -> CmdResult {
     }
 
     cmd_service::init_service(ServiceName::All, BuildMode::Debug)?;
-    cmd_service::start_minio_service()?;
+    cmd_service::start_minio_service(DataBlobStorage::Hybrid)?;
     run_cmd! {
         info "Formatting nss_server";
         $working_dir/zig-out/bin/nss_server format;
@@ -41,7 +41,7 @@ fn run_art_tests() -> CmdResult {
     let ts = ["ts", "-m", TS_FMT];
     let working_dir = run_fun!(pwd)?;
 
-    cmd_service::start_minio_service()?;
+    cmd_service::start_minio_service(DataBlobStorage::Hybrid)?;
     run_cmd! {
         info "Running art tests (random) with log $rand_log";
         $working_dir/zig-out/bin/nss_server format |& $[ts] >$format_log;
@@ -80,7 +80,7 @@ fn run_art_tests() -> CmdResult {
 
 fn run_s3_api_tests() -> CmdResult {
     cmd_service::init_service(ServiceName::All, BuildMode::Debug)?;
-    cmd_service::start_services(ServiceName::All, BuildMode::Debug, false)?;
+    cmd_service::start_services(ServiceName::All, BuildMode::Debug, false, DataBlobStorage::Hybrid)?;
     run_cmd! {
         info "Run cargo tests (s3 api tests)";
         cargo test --package api_server -- --test-threads 1;
@@ -93,7 +93,7 @@ fn run_s3_api_tests() -> CmdResult {
 fn run_leader_election_tests() -> CmdResult {
     // Ensure DDB local is initialized with leader election table
     cmd_service::init_service(ServiceName::DdbLocal, BuildMode::Debug)?;
-    cmd_service::start_services(ServiceName::DdbLocal, BuildMode::Debug, false)?;
+    cmd_service::start_services(ServiceName::DdbLocal, BuildMode::Debug, false, DataBlobStorage::Hybrid)?;
 
     run_cmd! {
         info "Running root_server leader election tests";

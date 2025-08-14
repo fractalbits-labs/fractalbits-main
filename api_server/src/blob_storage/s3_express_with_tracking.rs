@@ -1,8 +1,8 @@
 use super::{blob_key, create_s3_client, BlobStorage, BlobStorageError};
-use crate::data_blob_tracking::{DataBlobTracker, DataBlobTrackingError};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::{config::Region, types::StorageClass, Client as S3Client, Config as S3Config};
 use bytes::Bytes;
+use data_blob_tracking::{DataBlobTracker, DataBlobTrackingError};
 use metrics::{counter, histogram};
 use rpc_client_nss::RpcClientNss;
 use rpc_client_rss::RpcClientRss;

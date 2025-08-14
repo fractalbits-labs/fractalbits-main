@@ -6,6 +6,8 @@ members = [
     "api_server/bucket_tables",
     "api_server/kv_client_traits",
     "cdk/fractalbits-bootstrap",
+    "data_blob_tracking",
+    "data_blob_resync_server",
     "nss_role_agent",
     "root_server",
     "root_server/admin",
@@ -23,6 +25,7 @@ resolver = "2"
 [workspace.dependencies]
 bucket_tables = { path = "api_server/bucket_tables" }
 kv_client_traits = { path = "api_server/kv_client_traits" }
+data_blob_tracking = { path = "data_blob_tracking" }
 rpc_client_common = { path = "rpc_clients/common" }
 rpc_client_bss = { path = "rpc_clients/bss" }
 rpc_client_nss = { path = "rpc_clients/nss" }

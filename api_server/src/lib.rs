@@ -1,6 +1,5 @@
 mod blob_storage;
 mod config;
-mod data_blob_tracking;
 pub mod handler;
 mod object_layout;
 

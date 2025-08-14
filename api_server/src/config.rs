@@ -7,6 +7,7 @@ pub enum BlobStorageBackend {
     BssOnly,
     #[default]
     S3Express,
+    S3ExpressWithTracking,
     Hybrid,
 }
 

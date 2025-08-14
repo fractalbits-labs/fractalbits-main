@@ -1,14 +1,17 @@
 mod blob_storage;
 mod config;
+mod data_blob_tracking;
 pub mod handler;
 mod object_layout;
 
 use blob_storage::{
-    BlobStorage, BlobStorageError, BlobStorageImpl, BssOnlyStorage, HybridStorage, S3ExpressStorage,
+    BlobStorage, BlobStorageError, BlobStorageImpl, BssOnlyStorage, HybridStorage,
+    S3ExpressStorage, S3ExpressWithTracking, S3ExpressWithTrackingConfig,
 };
 use bucket_tables::{table::KvClientProvider, Versioned};
 use bytes::Bytes;
 pub use config::{BlobStorageBackend, BlobStorageConfig, Config, S3CacheConfig};
+pub use data_blob_tracking::{DataBlobTracker, DataBlobTrackingError};
 use futures::stream::{self, StreamExt};
 use metrics::histogram;
 use moka::future::Cache;
@@ -39,6 +42,7 @@ pub struct AppState {
 
     blob_client: Arc<BlobClient>,
     blob_deletion: Sender<(BlobId, usize)>,
+    pub data_blob_tracker: Arc<DataBlobTracker>,
 }
 
 impl KvClientProvider for AppState {
@@ -66,10 +70,39 @@ impl AppState {
             Self::new_rpc_clients_pool_nss(config.nss_addr, config.nss_conn_num).await;
 
         let (tx, rx) = mpsc::channel(1024 * 1024);
+        let data_blob_tracker = Arc::new(DataBlobTracker::new());
+
+        // Get clients for tracking backend if needed
+        let (rss_client_for_blob, nss_client_for_blob) = if matches!(
+            config.blob_storage.backend,
+            BlobStorageBackend::S3ExpressWithTracking
+        ) {
+            let rss_client = Arc::new(
+                <RpcClientRss as slotmap_conn_pool::Poolable>::new(config.rss_addr)
+                    .await
+                    .expect("Failed to create RSS client for blob storage"),
+            );
+            let nss_client = Arc::new(
+                <RpcClientNss as slotmap_conn_pool::Poolable>::new(config.nss_addr)
+                    .await
+                    .expect("Failed to create NSS client for blob storage"),
+            );
+            (Some(rss_client), Some(nss_client))
+        } else {
+            (None, None)
+        };
+
         let blob_client = Arc::new(
-            BlobClient::new(&config.blob_storage, rx, config.rpc_timeout())
-                .await
-                .expect("Failed to initialize blob client"),
+            BlobClient::new(
+                &config.blob_storage,
+                rx,
+                config.rpc_timeout(),
+                Some(data_blob_tracker.clone()),
+                rss_client_for_blob,
+                nss_client_for_blob,
+            )
+            .await
+            .expect("Failed to initialize blob client"),
         );
 
         let cache = Arc::new(
@@ -85,6 +118,7 @@ impl AppState {
             blob_deletion: tx,
             rpc_clients_rss,
             cache,
+            data_blob_tracker,
         }
     }
 
@@ -148,6 +182,16 @@ impl AppState {
         Ok(res)
     }
 
+    pub async fn checkout_rpc_client_rss_direct(
+        &self,
+    ) -> Result<Arc<RpcClientRss>, <RpcClientRss as Poolable>::Error> {
+        let start = Instant::now();
+        let res = self.rpc_clients_rss.checkout(self.config.rss_addr).await?;
+        histogram!("checkout_rpc_client_nanos", "type" => "rss")
+            .record(start.elapsed().as_nanos() as f64);
+        Ok(res)
+    }
+
     pub fn get_blob_client(&self) -> Arc<BlobClient> {
         self.blob_client.clone()
     }
@@ -168,6 +212,9 @@ impl BlobClient {
         blob_storage_config: &BlobStorageConfig,
         rx: Receiver<(BlobId, usize)>,
         rpc_timeout: Duration,
+        data_blob_tracker: Option<Arc<DataBlobTracker>>,
+        rss_client: Option<Arc<RpcClientRss>>,
+        nss_client: Option<Arc<RpcClientNss>>,
     ) -> Result<Self, BlobStorageError> {
         let storage = match &blob_storage_config.backend {
             BlobStorageBackend::BssOnly => {
@@ -216,6 +263,48 @@ impl BlobClient {
                     express_session_auth: s3_express_config.express_session_auth,
                 };
                 BlobStorageImpl::S3Express(S3ExpressStorage::new(&express_config).await?)
+            }
+            BlobStorageBackend::S3ExpressWithTracking => {
+                let s3_express_config =
+                    blob_storage_config.s3_express.as_ref().ok_or_else(|| {
+                        BlobStorageError::Config(
+                            "S3 Express configuration required for S3ExpressWithTracking backend"
+                                .into(),
+                        )
+                    })?;
+                let data_blob_tracker = data_blob_tracker.ok_or_else(|| {
+                    BlobStorageError::Config(
+                        "DataBlobTracker required for S3ExpressWithTracking backend".into(),
+                    )
+                })?;
+                let rss_client = rss_client.ok_or_else(|| {
+                    BlobStorageError::Config(
+                        "RSS client required for S3ExpressWithTracking backend".into(),
+                    )
+                })?;
+                let nss_client = nss_client.ok_or_else(|| {
+                    BlobStorageError::Config(
+                        "NSS client required for S3ExpressWithTracking backend".into(),
+                    )
+                })?;
+                let express_config = S3ExpressWithTrackingConfig {
+                    s3_host: s3_express_config.s3_host.clone(),
+                    s3_port: s3_express_config.s3_port,
+                    s3_region: s3_express_config.s3_region.clone(),
+                    local_az_bucket: s3_express_config.local_az_bucket.clone(),
+                    remote_az_bucket: s3_express_config.remote_az_bucket.clone(),
+                    az: s3_express_config.az.clone(),
+                    express_session_auth: s3_express_config.express_session_auth,
+                };
+                BlobStorageImpl::S3ExpressWithTracking(
+                    S3ExpressWithTracking::new(
+                        &express_config,
+                        data_blob_tracker,
+                        rss_client,
+                        nss_client,
+                    )
+                    .await?,
+                )
             }
         };
         let storage = Arc::new(storage);

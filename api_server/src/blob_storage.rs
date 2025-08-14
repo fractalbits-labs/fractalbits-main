@@ -1,15 +1,18 @@
 mod bss_only_storage;
 mod hybrid_storage;
 mod s3_express_storage;
+mod s3_express_with_tracking;
 
 pub use bss_only_storage::BssOnlyStorage;
 pub use hybrid_storage::HybridStorage;
 pub use s3_express_storage::{S3ExpressConfig, S3ExpressStorage};
+pub use s3_express_with_tracking::{S3ExpressWithTracking, S3ExpressWithTrackingConfig};
 
 pub enum BlobStorageImpl {
     BssOnly(BssOnlyStorage),
     Hybrid(HybridStorage),
     S3Express(S3ExpressStorage),
+    S3ExpressWithTracking(S3ExpressWithTracking),
 }
 
 use aws_config::BehaviorVersion;
@@ -128,6 +131,9 @@ impl BlobStorage for BlobStorageImpl {
             BlobStorageImpl::S3Express(storage) => {
                 storage.put_blob(blob_id, block_number, body).await
             }
+            BlobStorageImpl::S3ExpressWithTracking(storage) => {
+                storage.put_blob(blob_id, block_number, body).await
+            }
         }
     }
 
@@ -145,6 +151,9 @@ impl BlobStorage for BlobStorageImpl {
             BlobStorageImpl::S3Express(storage) => {
                 storage.get_blob(blob_id, block_number, body).await
             }
+            BlobStorageImpl::S3ExpressWithTracking(storage) => {
+                storage.get_blob(blob_id, block_number, body).await
+            }
         }
     }
 
@@ -153,6 +162,9 @@ impl BlobStorage for BlobStorageImpl {
             BlobStorageImpl::BssOnly(storage) => storage.delete_blob(blob_id, block_number).await,
             BlobStorageImpl::Hybrid(storage) => storage.delete_blob(blob_id, block_number).await,
             BlobStorageImpl::S3Express(storage) => storage.delete_blob(blob_id, block_number).await,
+            BlobStorageImpl::S3ExpressWithTracking(storage) => {
+                storage.delete_blob(blob_id, block_number).await
+            }
         }
     }
 }

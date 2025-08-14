@@ -321,7 +321,7 @@ async fn test_deleteobject() {
 
     // add content without data
     for i in 0..5 {
-        let k = format!("k-{}", i);
+        let k = format!("k-{i}");
         ctx.client
             .put_object()
             .bucket(&bucket)
@@ -336,7 +336,7 @@ async fn test_deleteobject() {
 
     // add content with data
     for i in 0..5 {
-        let k = format!("l-{}", i);
+        let k = format!("l-{i}");
         let data = ByteStream::from_static(BODY);
         ctx.client
             .put_object()

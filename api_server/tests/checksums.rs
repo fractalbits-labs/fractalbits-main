@@ -62,9 +62,7 @@ async fn test_checksum(
             assert_eq!(
                 HeaderValue::from_str(&expected_encoded_content_length.to_string()).unwrap(),
                 content_length,
-                "content-length was expected to be {} but was {} instead",
-                expected_encoded_content_length,
-                content_length
+                "content-length was expected to be {expected_encoded_content_length} but was {content_length} instead"
             );
         })
         .send()

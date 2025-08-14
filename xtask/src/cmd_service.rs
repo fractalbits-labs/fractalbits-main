@@ -80,8 +80,8 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
     };
     let init_nss = || -> CmdResult {
         let pwd = run_fun!(pwd)?;
-        let format_log = "data/format.log";
-        let fbs_log = "data/fbs.log";
+        let format_log = "data/logs/format.log";
+        let fbs_log = "data/logs/fbs.log";
         create_dirs_for_nss_server()?;
         match build_mode {
             BuildMode::Debug => run_cmd! {
@@ -557,7 +557,7 @@ WantedBy=multi-user.target
     };
 
     run_cmd! {
-        mkdir -p $pwd/data;
+        mkdir -p $pwd/data/logs;
         mkdir -p etc;
         echo $systemd_unit_content > etc/$service_file;
         info "Linking ./etc/$service_file into ~/.config/systemd/user";
@@ -578,6 +578,7 @@ fn check_pids(service: ServiceName, pids: &str) -> CmdResult {
 fn create_dirs_for_nss_server() -> CmdResult {
     info!("Creating necessary directories for nss_server");
     run_cmd! {
+        mkdir -p data/logs;
         mkdir -p data/nss-active/ebs;
         mkdir -p data/nss-active/local/stats;
         mkdir -p data/nss-active/local/meta_cache/blobs;

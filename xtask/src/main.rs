@@ -146,13 +146,14 @@ pub enum ServiceAction {
 pub enum ServiceName {
     ApiServer,
     Bss,
+    NssRoleAgentA,
     Nss,
+    NssRoleAgentB,
+    Mirrord,
     Rss,
     All,
     Minio,
     DdbLocal,
-    NssRoleAgentA,
-    NssRoleAgentB,
 }
 
 #[derive(AsRefStr, EnumString, Copy, Clone)]

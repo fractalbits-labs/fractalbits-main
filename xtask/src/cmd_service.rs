@@ -104,6 +104,7 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
     let init_nss_role_agent = || -> CmdResult { Ok(()) };
     let init_minio = || run_cmd!(mkdir -p data/s3);
     let init_bss = || create_dirs_for_bss_server();
+    let init_mirrord = || run_cmd!(mkdir -p data/nss-standby);
 
     match service {
         ServiceName::ApiServer => {}
@@ -114,10 +115,12 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
         ServiceName::Nss => init_nss()?,
         ServiceName::NssRoleAgentA => init_nss_role_agent()?,
         ServiceName::NssRoleAgentB => init_nss_role_agent()?,
+        ServiceName::Mirrord => init_mirrord()?,
         ServiceName::All => {
             init_rss()?;
             init_bss()?;
             init_nss()?;
+            init_mirrord()?;
         }
     }
     Ok(())
@@ -133,6 +136,8 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
             ServiceName::Rss.as_ref().to_owned(),
             ServiceName::Minio.as_ref().to_owned(),
             ServiceName::DdbLocal.as_ref().to_owned(),
+            ServiceName::Mirrord.as_ref().to_owned(),
+            ServiceName::Nss.as_ref().to_owned(),
         ],
         single_service => vec![single_service.as_ref().to_owned()],
     };
@@ -170,6 +175,7 @@ pub fn start_services(
         ServiceName::All => start_all_services(build_mode, for_gui, data_blob_storage)?,
         ServiceName::Minio => start_minio_service(data_blob_storage)?,
         ServiceName::DdbLocal => start_ddb_local_service()?,
+        ServiceName::Mirrord => start_mirrord_service(build_mode)?,
     }
     Ok(())
 }
@@ -217,6 +223,18 @@ pub fn start_nss_service(build_mode: BuildMode, data_on_local: bool) -> CmdResul
     let nss_server_pid = run_fun!(pidof nss_server)?;
     check_pids(ServiceName::Nss, &nss_server_pid)?;
     info!("nss server (pid={nss_server_pid}) started");
+    Ok(())
+}
+
+pub fn start_mirrord_service(build_mode: BuildMode) -> CmdResult {
+    create_systemd_unit_file(ServiceName::Mirrord, build_mode, None)?;
+
+    run_cmd!(systemctl --user start mirrord.service)?;
+    wait_for_service_ready(ServiceName::Mirrord, 15)?;
+
+    let mirrord_pid = run_fun!(pidof mirrord)?;
+    check_pids(ServiceName::Mirrord, &mirrord_pid)?;
+    info!("nss server (pid={mirrord_pid}) started");
     Ok(())
 }
 
@@ -399,7 +417,11 @@ pub fn start_all_services(
     }
 
     create_systemd_unit_file(ServiceName::NssRoleAgentA, build_mode, None)?;
+    create_systemd_unit_file(ServiceName::Nss, build_mode, None)?;
+
     create_systemd_unit_file(ServiceName::NssRoleAgentB, build_mode, None)?;
+    create_systemd_unit_file(ServiceName::Mirrord, build_mode, None)?;
+
     create_systemd_unit_file(ServiceName::ApiServer, build_mode, api_config_file)?;
 
     // Start supporting services first
@@ -468,6 +490,7 @@ Environment="RUST_LOG=warn""##
                 format!("{pwd}/zig-out/bin/nss_server serve -c {pwd}/etc/{NSS_SERVER_BENCH_CONFIG}")
             }
         },
+        ServiceName::Mirrord => format!("{pwd}/zig-out/bin/mirrord"),
         ServiceName::NssRoleAgentA => {
             env_settings += env_rust_log(build_mode);
             env_settings += r##"
@@ -555,12 +578,12 @@ fn check_pids(service: ServiceName, pids: &str) -> CmdResult {
 fn create_dirs_for_nss_server() -> CmdResult {
     info!("Creating necessary directories for nss_server");
     run_cmd! {
-        mkdir -p data/ebs;
-        mkdir -p data/local/stats;
-        mkdir -p data/local/meta_cache/blobs;
+        mkdir -p data/nss-active/ebs;
+        mkdir -p data/nss-active/local/stats;
+        mkdir -p data/nss-active/local/meta_cache/blobs;
     }?;
     for i in 0..256 {
-        run_cmd!(mkdir -p data/local/meta_cache/blobs/dir$i)?;
+        run_cmd!(mkdir -p data/nss-active/local/meta_cache/blobs/dir$i)?;
     }
 
     Ok(())
@@ -569,11 +592,11 @@ fn create_dirs_for_nss_server() -> CmdResult {
 fn create_dirs_for_bss_server() -> CmdResult {
     info!("Creating necessary directories for bss_server");
     run_cmd! {
-        mkdir -p data/local/stats;
-        mkdir -p data/local/blobs;
+        mkdir -p data/bss/local/stats;
+        mkdir -p data/bss/local/blobs;
     }?;
     for i in 0..256 {
-        run_cmd!(mkdir -p data/local/blobs/dir$i)?;
+        run_cmd!(mkdir -p data/bss/local/blobs/dir$i)?;
     }
 
     Ok(())
@@ -598,6 +621,7 @@ fn wait_for_service_ready(service: ServiceName, timeout_secs: u32) -> CmdResult 
                 ServiceName::Rss => check_port_ready(8086),
                 ServiceName::Bss => check_port_ready(8088),
                 ServiceName::Nss => check_port_ready(8087),
+                ServiceName::Mirrord => check_port_ready(9999),
                 ServiceName::ApiServer => check_port_ready(8080),
                 ServiceName::NssRoleAgentA => true, // No network port for this service
                 ServiceName::NssRoleAgentB => true, // No network port for this service

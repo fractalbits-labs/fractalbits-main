@@ -253,8 +253,8 @@ impl BlobClient {
                         )
                     })?;
                 let express_config = blob_storage::S3ExpressConfig {
-                    s3_host: s3_express_config.s3_host.clone(),
-                    s3_port: s3_express_config.s3_port,
+                    local_az_host: s3_express_config.local_az_host.clone(),
+                    local_az_port: s3_express_config.local_az_port,
                     s3_region: s3_express_config.s3_region.clone(),
                     local_az_bucket: s3_express_config.local_az_bucket.clone(),
                     remote_az_bucket: s3_express_config.remote_az_bucket.clone(),
@@ -287,8 +287,8 @@ impl BlobClient {
                     )
                 })?;
                 let express_config = S3ExpressWithTrackingConfig {
-                    s3_host: s3_express_config.s3_host.clone(),
-                    s3_port: s3_express_config.s3_port,
+                    local_az_host: s3_express_config.local_az_host.clone(),
+                    local_az_port: s3_express_config.local_az_port,
                     s3_region: s3_express_config.s3_region.clone(),
                     local_az_bucket: s3_express_config.local_az_bucket.clone(),
                     remote_az_bucket: s3_express_config.remote_az_bucket.clone(),

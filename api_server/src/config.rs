@@ -29,8 +29,8 @@ pub struct BssConfig {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct S3ExpressConfig {
-    pub s3_host: String,
-    pub s3_port: u16,
+    pub local_az_host: String,
+    pub local_az_port: u16,
     pub s3_region: String,
     pub local_az_bucket: String,
     pub remote_az_bucket: String,
@@ -48,8 +48,8 @@ fn default_express_session_auth() -> bool {
 impl Default for S3ExpressConfig {
     fn default() -> Self {
         Self {
-            s3_host: "http://127.0.0.1".into(),
-            s3_port: 9000, // local minio port
+            local_az_host: "http://127.0.0.1".into(),
+            local_az_port: 9001, // local AZ minio port
             s3_region: "us-west-1".into(),
             local_az_bucket: "fractalbits-local-az-data-bucket".into(),
             remote_az_bucket: "fractalbits-remote-az-data-bucket".into(),

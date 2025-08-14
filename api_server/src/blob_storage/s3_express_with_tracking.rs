@@ -13,14 +13,16 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct S3ExpressWithTrackingConfig {
-    pub s3_host: String,
-    pub s3_port: u16,
     pub s3_region: String,
+    pub az: String,
+    pub local_az_host: String,
+    pub local_az_port: u16,
     pub local_az_bucket: String,
     pub remote_az_bucket: String,
+    #[allow(dead_code)] // Will be used for separate remote AZ client
     pub remote_az_host: Option<String>,
+    #[allow(dead_code)] // Will be used for separate remote AZ client
     pub remote_az_port: Option<u16>,
-    pub az: String,
     pub express_session_auth: bool,
 }
 
@@ -63,11 +65,17 @@ impl S3ExpressWithTracking {
 
         let client_s3 = if config.express_session_auth {
             // For real AWS S3 Express with session auth - use standard client
-            create_s3_client(&config.s3_host, config.s3_port, &config.s3_region, false).await
+            create_s3_client(
+                &config.local_az_host,
+                config.local_az_port,
+                &config.s3_region,
+                false,
+            )
+            .await
         } else {
             // For local minio testing - need to disable S3 Express session auth
             // The standard create_s3_client doesn't support this option, so use custom config
-            let endpoint_url = format!("{}:{}", config.s3_host, config.s3_port);
+            let endpoint_url = format!("{}:{}", config.local_az_host, config.local_az_port);
             let s3_config = S3Config::builder()
                 .behavior_version(BehaviorVersion::latest())
                 .disable_s3_express_session_auth(true)
@@ -86,7 +94,7 @@ impl S3ExpressWithTracking {
             S3Client::from_conf(s3_config)
         };
 
-        let endpoint_url = format!("{}:{}", config.s3_host, config.s3_port);
+        let endpoint_url = format!("{}:{}", config.local_az_host, config.local_az_port);
         info!(
             "S3 Express One Zone client with tracking initialized with endpoint: {} and session auth: {}",
             endpoint_url, config.express_session_auth

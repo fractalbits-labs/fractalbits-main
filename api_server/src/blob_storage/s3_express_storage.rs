@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct S3ExpressConfig {
-    pub s3_host: String,
-    pub s3_port: u16,
+    pub local_az_host: String,
+    pub local_az_port: u16,
     pub s3_region: String,
     pub local_az_bucket: String,
     pub remote_az_bucket: String,
@@ -33,10 +33,16 @@ impl S3ExpressStorage {
 
         let client_s3 = if config.express_session_auth {
             // For real AWS S3 Express with session auth
-            create_s3_client(&config.s3_host, config.s3_port, &config.s3_region, false).await
+            create_s3_client(
+                &config.local_az_host,
+                config.local_az_port,
+                &config.s3_region,
+                false,
+            )
+            .await
         } else {
             // For local minio testing - need to disable S3 Express session auth
-            let endpoint_url = format!("{}:{}", config.s3_host, config.s3_port);
+            let endpoint_url = format!("{}:{}", config.local_az_host, config.local_az_port);
             let s3_config = S3Config::builder()
                 .behavior_version(BehaviorVersion::latest())
                 .disable_s3_express_session_auth(true)
@@ -55,7 +61,7 @@ impl S3ExpressStorage {
             S3Client::from_conf(s3_config)
         };
 
-        let endpoint_url = format!("{}:{}", config.s3_host, config.s3_port);
+        let endpoint_url = format!("{}:{}", config.local_az_host, config.local_az_port);
         info!(
             "S3 Express One Zone client initialized with endpoint: {} and session auth: {}",
             endpoint_url, config.express_session_auth

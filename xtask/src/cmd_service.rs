@@ -103,6 +103,8 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
     };
     let init_nss_role_agent = || -> CmdResult { Ok(()) };
     let init_minio = || run_cmd!(mkdir -p data/s3);
+    let init_minio_local_az = || run_cmd!(mkdir -p data/s3-local-az);
+    let init_minio_remote_az = || run_cmd!(mkdir -p data/s3-remote-az);
     let init_bss = || create_dirs_for_bss_server();
     let init_mirrord = || run_cmd!(mkdir -p data/nss-standby);
 
@@ -110,18 +112,22 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
         ServiceName::ApiServer => {}
         ServiceName::DdbLocal => init_ddb_local()?,
         ServiceName::Minio => init_minio()?,
+        ServiceName::MinioLocalAz => init_minio_local_az()?,
+        ServiceName::MinioRemoteAz => init_minio_remote_az()?,
         ServiceName::Bss => init_bss()?,
         ServiceName::Rss => init_rss()?,
         ServiceName::Nss => init_nss()?,
         ServiceName::NssRoleAgentA => init_nss_role_agent()?,
         ServiceName::NssRoleAgentB => init_nss_role_agent()?,
         ServiceName::Mirrord => init_mirrord()?,
-        ServiceName::DataBlobResyncServer => {},
+        ServiceName::DataBlobResyncServer => {}
         ServiceName::All => {
             init_rss()?;
             init_bss()?;
             init_nss()?;
             init_mirrord()?;
+            init_minio_local_az()?;
+            init_minio_remote_az()?;
         }
     }
     Ok(())
@@ -136,6 +142,8 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
             ServiceName::Bss.as_ref().to_owned(),
             ServiceName::Rss.as_ref().to_owned(),
             ServiceName::Minio.as_ref().to_owned(),
+            ServiceName::MinioLocalAz.as_ref().to_owned(),
+            ServiceName::MinioRemoteAz.as_ref().to_owned(),
             ServiceName::DdbLocal.as_ref().to_owned(),
             ServiceName::Mirrord.as_ref().to_owned(),
             ServiceName::Nss.as_ref().to_owned(),
@@ -176,9 +184,11 @@ pub fn start_services(
         ServiceName::ApiServer => start_api_server(build_mode, for_gui)?,
         ServiceName::DataBlobResyncServer => {
             info!("DataBlobResyncServer is a standalone CLI tool, not a service. Use 'cargo run -p data_blob_resync_server' instead.");
-        },
+        }
         ServiceName::All => start_all_services(build_mode, for_gui, data_blob_storage)?,
         ServiceName::Minio => start_minio_service(data_blob_storage)?,
+        ServiceName::MinioLocalAz => start_minio_local_az_service()?,
+        ServiceName::MinioRemoteAz => start_minio_remote_az_service()?,
         ServiceName::DdbLocal => start_ddb_local_service()?,
         ServiceName::Mirrord => start_mirrord_service(build_mode)?,
     }
@@ -392,6 +402,124 @@ WorkingDirectory={pwd}/data
     Ok(())
 }
 
+pub fn start_minio_local_az_service() -> CmdResult {
+    let pwd = run_fun!(pwd)?;
+    let service_file = "etc/minio_local_az.service";
+    let service_file_content = format!(
+        r##"[Unit]
+Description=Local AZ S3 service (minio)
+
+[Install]
+WantedBy=default.target
+
+[Service]
+Type=simple
+ExecStart=/home/linuxbrew/.linuxbrew/opt/minio/bin/minio server --address :9001 s3-local-az/
+Restart=always
+WorkingDirectory={pwd}/data
+"##
+    );
+    let minio_url = "http://localhost:9001";
+    let bucket_name = "fractalbits-local-az-data-bucket";
+    let bucket = format!("s3://{bucket_name}");
+
+    run_cmd! {
+        mkdir -p etc;
+        echo $service_file_content > $service_file;
+        info "Linking $service_file into ~/.config/systemd/user";
+        systemctl --user link $service_file --force --quiet;
+        systemctl --user start minio_local_az.service;
+    }?;
+    wait_for_service_ready(ServiceName::MinioLocalAz, 10)?;
+
+    run_cmd! {
+        info "Creating local AZ bucket (\"$bucket_name\") ...";
+        ignore AWS_ENDPOINT_URL_S3=$minio_url AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin
+            aws s3 mb $bucket &>/dev/null;
+    }?;
+
+    let mut wait_new_bucket_secs = 0;
+    const TIMEOUT_SECS: i32 = 5;
+    loop {
+        let bucket_ready = run_cmd! (
+            AWS_ENDPOINT_URL_S3=$minio_url AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin
+            aws s3api head-bucket --bucket $bucket_name &>/dev/null
+        ).is_ok();
+
+        if bucket_ready {
+            break;
+        }
+
+        wait_new_bucket_secs += 1;
+        if wait_new_bucket_secs >= TIMEOUT_SECS {
+            cmd_die!("timeout waiting for newly created bucket {bucket_name}");
+        }
+
+        info!("waiting for newly created bucket {bucket_name}: {wait_new_bucket_secs}s");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    Ok(())
+}
+
+pub fn start_minio_remote_az_service() -> CmdResult {
+    let pwd = run_fun!(pwd)?;
+    let service_file = "etc/minio_remote_az.service";
+    let service_file_content = format!(
+        r##"[Unit]
+Description=Remote AZ S3 service (minio)
+
+[Install]
+WantedBy=default.target
+
+[Service]
+Type=simple
+ExecStart=/home/linuxbrew/.linuxbrew/opt/minio/bin/minio server --address :9002 s3-remote-az/
+Restart=always
+WorkingDirectory={pwd}/data
+"##
+    );
+    let minio_url = "http://localhost:9002";
+    let bucket_name = "fractalbits-remote-az-data-bucket";
+    let bucket = format!("s3://{bucket_name}");
+
+    run_cmd! {
+        mkdir -p etc;
+        echo $service_file_content > $service_file;
+        info "Linking $service_file into ~/.config/systemd/user";
+        systemctl --user link $service_file --force --quiet;
+        systemctl --user start minio_remote_az.service;
+    }?;
+    wait_for_service_ready(ServiceName::MinioRemoteAz, 10)?;
+
+    run_cmd! {
+        info "Creating remote AZ bucket (\"$bucket_name\") ...";
+        ignore AWS_ENDPOINT_URL_S3=$minio_url AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin
+            aws s3 mb $bucket &>/dev/null;
+    }?;
+
+    let mut wait_new_bucket_secs = 0;
+    const TIMEOUT_SECS: i32 = 5;
+    loop {
+        let bucket_ready = run_cmd! (
+            AWS_ENDPOINT_URL_S3=$minio_url AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin
+            aws s3api head-bucket --bucket $bucket_name &>/dev/null
+        ).is_ok();
+
+        if bucket_ready {
+            break;
+        }
+
+        wait_new_bucket_secs += 1;
+        if wait_new_bucket_secs >= TIMEOUT_SECS {
+            cmd_die!("timeout waiting for newly created bucket {bucket_name}");
+        }
+
+        info!("waiting for newly created bucket {bucket_name}: {wait_new_bucket_secs}s");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    Ok(())
+}
+
 pub fn start_api_server(build_mode: BuildMode, for_gui: bool) -> CmdResult {
     let pwd = run_fun!(pwd)?;
     let config_file = match for_gui {
@@ -444,9 +572,11 @@ pub fn start_all_services(
     create_systemd_unit_file(ServiceName::ApiServer, build_mode, api_config_file)?;
 
     // Start supporting services first
-    info!("Starting supporting services (ddb_local, minio)");
+    info!("Starting supporting services (ddb_local, minio instances)");
     start_ddb_local_service()?;
-    start_minio_service(data_blob_storage)?;
+    start_minio_service(data_blob_storage)?; // Original minio for NSS metadata (port 9000)
+    start_minio_local_az_service()?; // Local AZ data blobs (port 9001)
+    start_minio_remote_az_service()?; // Remote AZ data blobs (port 9002)
 
     wait_for_service_ready(ServiceName::DdbLocal, 10)?;
 
@@ -638,6 +768,8 @@ fn wait_for_service_ready(service: ServiceName, timeout_secs: u32) -> CmdResult 
             let port_ready = match service {
                 ServiceName::DdbLocal => check_port_ready(8000),
                 ServiceName::Minio => check_port_ready(9000),
+                ServiceName::MinioLocalAz => check_port_ready(9001),
+                ServiceName::MinioRemoteAz => check_port_ready(9002),
                 ServiceName::Rss => check_port_ready(8086),
                 ServiceName::Bss => check_port_ready(8088),
                 ServiceName::Nss => check_port_ready(8087),

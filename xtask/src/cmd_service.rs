@@ -116,6 +116,7 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
         ServiceName::NssRoleAgentA => init_nss_role_agent()?,
         ServiceName::NssRoleAgentB => init_nss_role_agent()?,
         ServiceName::Mirrord => init_mirrord()?,
+        ServiceName::DataBlobResyncServer => {},
         ServiceName::All => {
             init_rss()?;
             init_bss()?;
@@ -138,6 +139,7 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
             ServiceName::DdbLocal.as_ref().to_owned(),
             ServiceName::Mirrord.as_ref().to_owned(),
             ServiceName::Nss.as_ref().to_owned(),
+            ServiceName::DataBlobResyncServer.as_ref().to_owned(),
         ],
         single_service => vec![single_service.as_ref().to_owned()],
     };
@@ -172,6 +174,9 @@ pub fn start_services(
         ServiceName::NssRoleAgentB => start_nss_role_agent_service(build_mode, "B")?,
         ServiceName::Rss => start_rss_service(build_mode)?,
         ServiceName::ApiServer => start_api_server(build_mode, for_gui)?,
+        ServiceName::DataBlobResyncServer => {
+            info!("DataBlobResyncServer is a standalone CLI tool, not a service. Use 'cargo run -p data_blob_resync_server' instead.");
+        },
         ServiceName::All => start_all_services(build_mode, for_gui, data_blob_storage)?,
         ServiceName::Minio => start_minio_service(data_blob_storage)?,
         ServiceName::DdbLocal => start_ddb_local_service()?,
@@ -640,6 +645,7 @@ fn wait_for_service_ready(service: ServiceName, timeout_secs: u32) -> CmdResult 
                 ServiceName::ApiServer => check_port_ready(8080),
                 ServiceName::NssRoleAgentA => true, // No network port for this service
                 ServiceName::NssRoleAgentB => true, // No network port for this service
+                ServiceName::DataBlobResyncServer => true, // CLI tool, not a service
                 ServiceName::All => unreachable!("Should not check readiness for All"),
             };
 

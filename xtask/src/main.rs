@@ -151,6 +151,7 @@ pub enum ServiceName {
     NssRoleAgentB,
     Mirrord,
     Rss,
+    DataBlobResyncServer,
     All,
     Minio,
     DdbLocal,

@@ -63,7 +63,7 @@ pub fn create_systemd_unit_file_with_extra_start_opts(
     let exec_start = match service_name {
         "api_server" => {
             env_settings = r##"
-Environment="RUST_LOG=warn""##
+Environment="RUST_LOG=info""##
                 .to_string();
             format!("{BIN_PATH}{service_name} -c {ETC_PATH}{API_SERVER_CONFIG} {extra_start_opts}")
         }
@@ -73,7 +73,7 @@ Environment="RUST_LOG=warn""##
         }
         "root_server" => {
             env_settings = r##"
-Environment="RUST_LOG=warn""##
+Environment="RUST_LOG=info""##
                 .to_string();
             format!("{BIN_PATH}{service_name} -r {aws_region} -c {ETC_PATH}{ROOT_SERVER_CONFIG}")
         }
@@ -86,7 +86,7 @@ Environment="RUST_LOG=warn""##
         }
         // "ebs-failover" => {
         //     env_settings = r##"
-        // Environment="RUST_LOG=warn""##
+        // Environment="RUST_LOG=info""##
         //         .to_string();
         //     format!("{BIN_PATH}{service_name} -r {aws_region}")
         // }

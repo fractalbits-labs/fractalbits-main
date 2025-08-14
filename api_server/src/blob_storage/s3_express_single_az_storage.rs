@@ -3,7 +3,7 @@ use aws_sdk_s3::{types::StorageClass, Client as S3Client};
 use bytes::Bytes;
 use metrics::{counter, histogram};
 use std::time::Instant;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -85,6 +85,7 @@ impl BlobStorage for S3ExpressSingleAzStorage {
                 Ok(())
             }
             Err(e) => {
+                error!(bucket = %self.s3_bucket, %blob_id, %block_number, error = %e, "put blob error");
                 counter!("blob_put_error", "storage" => "s3_express_single_az").increment(1);
                 Err(e.into())
             }
@@ -120,6 +121,7 @@ impl BlobStorage for S3ExpressSingleAzStorage {
                 Ok(())
             }
             Err(e) => {
+                error!(bucket = %self.s3_bucket, %blob_id, %block_number, error = %e, "get blob error");
                 counter!("blob_get_error", "storage" => "s3_express_single_az").increment(1);
                 Err(e.into())
             }
@@ -147,6 +149,7 @@ impl BlobStorage for S3ExpressSingleAzStorage {
                 Ok(())
             }
             Err(e) => {
+                error!(bucket = %self.s3_bucket, %blob_id, %block_number, error = %e, "delete blob error");
                 counter!("blob_delete_error", "storage" => "s3_express_single_az").increment(1);
                 Err(e.into())
             }

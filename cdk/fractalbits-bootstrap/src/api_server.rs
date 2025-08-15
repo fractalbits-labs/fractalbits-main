@@ -47,12 +47,6 @@ pub fn bootstrap(
         download_binaries(&["rewrk_rpc", "fbs", "test_art"])?;
         // Testing data for bss-rpc
         xtask_tools::gen_uuids(1_000_000, "/data/uuids.data")?;
-        // Testing data for bss-rpc
-        run_cmd! {
-            cd /data;
-            info "Generating random 10_000_000 keys for nss-rpc";
-            /opt/fractalbits/bin/test_art --gen --size 10000000;
-        }?;
     }
 
     // setup_cloudwatch_agent()?;

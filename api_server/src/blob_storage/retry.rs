@@ -16,10 +16,10 @@ pub struct RetryConfig {
 impl Default for RetryConfig {
     fn default() -> Self {
         Self {
-            max_attempts: 10,
-            initial_backoff_ms: 5,
-            max_backoff_ms: 5000,
-            backoff_multiplier: 2.0,
+            max_attempts: 8,
+            initial_backoff_ms: 15,
+            max_backoff_ms: 2000,
+            backoff_multiplier: 1.8,
         }
     }
 }
@@ -219,7 +219,7 @@ where
                     )
                     .record(total_backoff_ms as f64);
 
-                    warn!(
+                    debug!(
                         "S3 {} operation succeeded after {} attempts ({:.2}ms total, {:.2}ms in backoff)",
                         operation_name,
                         attempt,

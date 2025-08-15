@@ -34,6 +34,22 @@ impl RetryConfig {
             backoff_multiplier: 1.0, // no exponential growth
         }
     }
+
+    /// Configuration for disabled retries (single attempt only)
+    pub fn disabled() -> Self {
+        Self {
+            max_attempts: 1,
+            initial_backoff_us: 0,
+            max_backoff_us: 0,
+            backoff_multiplier: 1.0,
+        }
+    }
+
+    /// Set the maximum number of attempts
+    pub fn with_max_attempts(mut self, max_attempts: u32) -> Self {
+        self.max_attempts = max_attempts;
+        self
+    }
 }
 
 /// Determines if an error is retryable

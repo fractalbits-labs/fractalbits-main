@@ -62,6 +62,7 @@ pub fn blob_key(blob_id: Uuid, block_number: u32) -> String {
 /// Rate limiting configuration for S3 operations
 #[derive(Clone, Debug)]
 pub struct S3RateLimitConfig {
+    pub enabled: bool,
     pub put_qps: u32,
     pub get_qps: u32,
     pub delete_qps: u32,
@@ -70,9 +71,90 @@ pub struct S3RateLimitConfig {
 impl Default for S3RateLimitConfig {
     fn default() -> Self {
         Self {
+            enabled: false,   // Default to disabled for local testing
             put_qps: 7000,    // Based on initial testing results
             get_qps: 10000,   // Higher for reads
             delete_qps: 5000, // Lower for deletes
+        }
+    }
+}
+
+/// Retry mode configuration
+#[derive(Clone, Debug)]
+pub enum RetryMode {
+    Standard,
+    Adaptive,
+    Disabled,
+}
+
+impl From<&str> for RetryMode {
+    fn from(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "standard" => RetryMode::Standard,
+            "adaptive" => RetryMode::Adaptive,
+            "disabled" => RetryMode::Disabled,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<&crate::config::RetryConfig> for S3RateLimitConfig {
+    fn from(_config: &crate::config::RetryConfig) -> Self {
+        Self {
+            enabled: false, // Rate limiting is separate from retry config
+            put_qps: 7000,
+            get_qps: 10000,
+            delete_qps: 5000,
+        }
+    }
+}
+
+impl From<&crate::config::RatelimitConfig> for S3RateLimitConfig {
+    fn from(config: &crate::config::RatelimitConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            put_qps: config.put_qps,
+            get_qps: config.get_qps,
+            delete_qps: config.delete_qps,
+        }
+    }
+}
+
+/// S3 client wrapper that can be either rate-limited or direct
+#[derive(Clone)]
+pub enum S3ClientWrapper {
+    RateLimited(RateLimitedS3Client),
+    Direct(S3Client),
+}
+
+impl S3ClientWrapper {
+    /// Rate-limited or direct put_object operation
+    pub async fn put_object(
+        &self,
+    ) -> aws_sdk_s3::operation::put_object::builders::PutObjectFluentBuilder {
+        match self {
+            S3ClientWrapper::RateLimited(client) => client.put_object().await,
+            S3ClientWrapper::Direct(client) => client.put_object(),
+        }
+    }
+
+    /// Rate-limited or direct get_object operation
+    pub async fn get_object(
+        &self,
+    ) -> aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder {
+        match self {
+            S3ClientWrapper::RateLimited(client) => client.get_object().await,
+            S3ClientWrapper::Direct(client) => client.get_object(),
+        }
+    }
+
+    /// Rate-limited or direct delete_object operation
+    pub async fn delete_object(
+        &self,
+    ) -> aws_sdk_s3::operation::delete_object::builders::DeleteObjectFluentBuilder {
+        match self {
+            S3ClientWrapper::RateLimited(client) => client.delete_object().await,
+            S3ClientWrapper::Direct(client) => client.delete_object(),
         }
     }
 }
@@ -131,16 +213,21 @@ impl RateLimitedS3Client {
     }
 }
 
-/// Create a rate-limited S3 client configured for either AWS S3 or local minio
-pub async fn create_rate_limited_s3_client(
+/// Create an S3 client wrapper (rate-limited or direct) based on configuration
+pub async fn create_s3_client_wrapper(
     s3_host: &str,
     s3_port: u16,
     s3_region: &str,
     force_path_style: bool,
     rate_limit_config: &S3RateLimitConfig,
-) -> RateLimitedS3Client {
+) -> S3ClientWrapper {
     let s3_client = create_s3_client(s3_host, s3_port, s3_region, force_path_style).await;
-    RateLimitedS3Client::new(s3_client, rate_limit_config)
+
+    if rate_limit_config.enabled {
+        S3ClientWrapper::RateLimited(RateLimitedS3Client::new(s3_client, rate_limit_config))
+    } else {
+        S3ClientWrapper::Direct(s3_client)
+    }
 }
 
 /// Create an S3 client configured for either AWS S3 or local minio

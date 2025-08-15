@@ -1,6 +1,6 @@
 use super::{
-    blob_key, create_rate_limited_s3_client, retry, BlobStorage, BlobStorageError,
-    RateLimitedS3Client, S3RateLimitConfig,
+    blob_key, create_s3_client_wrapper, retry, BlobStorage, BlobStorageError, RetryMode,
+    S3ClientWrapper, S3RateLimitConfig,
 };
 use crate::s3_retry;
 use bytes::Bytes;
@@ -18,22 +18,25 @@ pub struct S3ExpressSingleAzConfig {
     pub az: String,
     pub force_path_style: bool,
     pub rate_limit_config: S3RateLimitConfig,
+    pub retry_mode: RetryMode,
+    pub max_attempts: u32,
 }
 
 pub struct S3ExpressSingleAzStorage {
-    client_s3: RateLimitedS3Client,
+    client_s3: S3ClientWrapper,
     s3_bucket: String,
     retry_config: retry::RetryConfig,
+    retry_mode: RetryMode,
 }
 
 impl S3ExpressSingleAzStorage {
     pub async fn new(config: &S3ExpressSingleAzConfig) -> Result<Self, BlobStorageError> {
         info!(
-            "Initializing S3 Express Single AZ storage for bucket: {} in AZ: {}",
-            config.s3_bucket, config.az
+            "Initializing S3 Express Single AZ storage for bucket: {} in AZ: {} (rate_limit_enabled: {}, retry_mode: {:?})",
+            config.s3_bucket, config.az, config.rate_limit_config.enabled, config.retry_mode
         );
 
-        let client_s3 = create_rate_limited_s3_client(
+        let client_s3 = create_s3_client_wrapper(
             &config.s3_host,
             config.s3_port,
             &config.s3_region,
@@ -48,10 +51,16 @@ impl S3ExpressSingleAzStorage {
             endpoint_url
         );
 
+        let retry_config = match config.retry_mode {
+            RetryMode::Disabled => retry::RetryConfig::disabled(),
+            _ => retry::RetryConfig::rate_limited().with_max_attempts(config.max_attempts),
+        };
+
         Ok(Self {
             client_s3,
             s3_bucket: config.s3_bucket.clone(),
-            retry_config: retry::RetryConfig::rate_limited(),
+            retry_config,
+            retry_mode: config.retry_mode.clone(),
         })
     }
 }
@@ -69,20 +78,35 @@ impl BlobStorage for S3ExpressSingleAzStorage {
         let start = Instant::now();
         let s3_key = blob_key(blob_id, block_number);
 
-        // Use retry macro for put operation
-        let result = s3_retry!(
-            "put_blob",
-            "s3_express_single_az",
-            &self.s3_bucket,
-            &self.retry_config,
-            self.client_s3
-                .put_object()
-                .await
-                .bucket(&self.s3_bucket)
-                .key(&s3_key)
-                .body(body.clone().into())
-                .send()
-        );
+        let result = match self.retry_mode {
+            RetryMode::Disabled => {
+                // Direct call without retry
+                self.client_s3
+                    .put_object()
+                    .await
+                    .bucket(&self.s3_bucket)
+                    .key(&s3_key)
+                    .body(body.clone().into())
+                    .send()
+                    .await
+            }
+            _ => {
+                // Use retry macro for put operation
+                s3_retry!(
+                    "put_blob",
+                    "s3_express_single_az",
+                    &self.s3_bucket,
+                    &self.retry_config,
+                    self.client_s3
+                        .put_object()
+                        .await
+                        .bucket(&self.s3_bucket)
+                        .key(&s3_key)
+                        .body(body.clone().into())
+                        .send()
+                )
+            }
+        };
 
         match result {
             Ok(_) => {
@@ -108,19 +132,33 @@ impl BlobStorage for S3ExpressSingleAzStorage {
         let start = Instant::now();
         let s3_key = blob_key(blob_id, block_number);
 
-        // Use retry macro for get operation
-        let result = s3_retry!(
-            "get_blob",
-            "s3_express_single_az",
-            &self.s3_bucket,
-            &self.retry_config,
-            self.client_s3
-                .get_object()
-                .await
-                .bucket(&self.s3_bucket)
-                .key(&s3_key)
-                .send()
-        );
+        let result = match self.retry_mode {
+            RetryMode::Disabled => {
+                // Direct call without retry
+                self.client_s3
+                    .get_object()
+                    .await
+                    .bucket(&self.s3_bucket)
+                    .key(&s3_key)
+                    .send()
+                    .await
+            }
+            _ => {
+                // Use retry macro for get operation
+                s3_retry!(
+                    "get_blob",
+                    "s3_express_single_az",
+                    &self.s3_bucket,
+                    &self.retry_config,
+                    self.client_s3
+                        .get_object()
+                        .await
+                        .bucket(&self.s3_bucket)
+                        .key(&s3_key)
+                        .send()
+                )
+            }
+        };
 
         match result {
             Ok(response) => {
@@ -144,19 +182,33 @@ impl BlobStorage for S3ExpressSingleAzStorage {
         let start = Instant::now();
         let s3_key = blob_key(blob_id, block_number);
 
-        // Use retry macro for delete operation
-        let result = s3_retry!(
-            "delete_blob",
-            "s3_express_single_az",
-            &self.s3_bucket,
-            &self.retry_config,
-            self.client_s3
-                .delete_object()
-                .await
-                .bucket(&self.s3_bucket)
-                .key(&s3_key)
-                .send()
-        );
+        let result = match self.retry_mode {
+            RetryMode::Disabled => {
+                // Direct call without retry
+                self.client_s3
+                    .delete_object()
+                    .await
+                    .bucket(&self.s3_bucket)
+                    .key(&s3_key)
+                    .send()
+                    .await
+            }
+            _ => {
+                // Use retry macro for delete operation
+                s3_retry!(
+                    "delete_blob",
+                    "s3_express_single_az",
+                    &self.s3_bucket,
+                    &self.retry_config,
+                    self.client_s3
+                        .delete_object()
+                        .await
+                        .bucket(&self.s3_bucket)
+                        .key(&s3_key)
+                        .send()
+                )
+            }
+        };
 
         match result {
             Ok(_) => {

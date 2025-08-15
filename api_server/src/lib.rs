@@ -267,7 +267,13 @@ impl BlobClient {
                     remote_az_bucket: s3_express_config.remote_az_bucket.clone(),
                     az: s3_express_config.az.clone(),
                     express_session_auth: s3_express_config.express_session_auth,
-                    rate_limit_config: blob_storage::S3RateLimitConfig::default(),
+                    rate_limit_config: blob_storage::S3RateLimitConfig::from(
+                        &s3_express_config.ratelimit,
+                    ),
+                    retry_mode: blob_storage::RetryMode::from(
+                        s3_express_config.retry.retry_mode.as_str(),
+                    ),
+                    max_attempts: s3_express_config.retry.max_attempts,
                 };
                 BlobStorageImpl::S3ExpressMultiAz(
                     S3ExpressMultiAzStorage::new(&express_config).await?,
@@ -308,7 +314,13 @@ impl BlobClient {
                     remote_az_port: s3_express_config.remote_az_port,
                     az: s3_express_config.az.clone(),
                     express_session_auth: s3_express_config.express_session_auth,
-                    rate_limit_config: blob_storage::S3RateLimitConfig::default(),
+                    rate_limit_config: blob_storage::S3RateLimitConfig::from(
+                        &s3_express_config.ratelimit,
+                    ),
+                    retry_mode: blob_storage::RetryMode::from(
+                        s3_express_config.retry.retry_mode.as_str(),
+                    ),
+                    max_attempts: s3_express_config.retry.max_attempts,
                 };
                 BlobStorageImpl::S3ExpressMultiAzWithTracking(
                     S3ExpressMultiAzWithTracking::new(
@@ -337,7 +349,13 @@ impl BlobClient {
                     s3_bucket: s3_express_single_az_config.s3_bucket.clone(),
                     az: s3_express_single_az_config.az.clone(),
                     force_path_style: s3_express_single_az_config.force_path_style,
-                    rate_limit_config: blob_storage::S3RateLimitConfig::default(),
+                    rate_limit_config: blob_storage::S3RateLimitConfig::from(
+                        &s3_express_single_az_config.ratelimit,
+                    ),
+                    retry_mode: blob_storage::RetryMode::from(
+                        s3_express_single_az_config.retry.retry_mode.as_str(),
+                    ),
+                    max_attempts: s3_express_single_az_config.retry.max_attempts,
                 };
                 BlobStorageImpl::S3ExpressSingleAz(
                     S3ExpressSingleAzStorage::new(&single_az_config).await?,

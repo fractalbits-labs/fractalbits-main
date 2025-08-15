@@ -1,6 +1,6 @@
 use super::{
-    blob_key, create_rate_limited_s3_client, retry, BlobStorage, BlobStorageError,
-    RateLimitedS3Client, S3RateLimitConfig,
+    blob_key, create_s3_client_wrapper, retry, BlobStorage, BlobStorageError, RetryMode,
+    S3ClientWrapper, S3RateLimitConfig,
 };
 use crate::s3_retry;
 use bytes::Bytes;
@@ -27,10 +27,12 @@ pub struct S3ExpressWithTrackingConfig {
     pub remote_az_port: Option<u16>,
     pub express_session_auth: bool,
     pub rate_limit_config: S3RateLimitConfig,
+    pub retry_mode: RetryMode,
+    pub max_attempts: u32,
 }
 
 pub struct S3ExpressMultiAzWithTracking {
-    client_s3: RateLimitedS3Client,
+    client_s3: S3ClientWrapper,
     local_az_bucket: String,
     remote_az_bucket: String,
     data_blob_tracker: Arc<DataBlobTracker>,
@@ -39,6 +41,8 @@ pub struct S3ExpressMultiAzWithTracking {
     /// Key for storing AZ availability status in RSS
     az_status_key: String,
     retry_config: retry::RetryConfig,
+    #[allow(dead_code)]
+    retry_mode: RetryMode,
 }
 
 #[derive(Debug, Clone)]
@@ -63,13 +67,13 @@ impl S3ExpressMultiAzWithTracking {
         nss_client: Arc<RpcClientNss>,
     ) -> Result<Self, BlobStorageError> {
         info!(
-            "Initializing S3 Express One Zone storage with tracking for buckets: {} (local) and {} (remote) in AZ: {}",
-            config.local_az_bucket, config.remote_az_bucket, config.az
+            "Initializing S3 Express One Zone storage with tracking for buckets: {} (local) and {} (remote) in AZ: {} (rate_limit_enabled: {}, retry_mode: {:?})",
+            config.local_az_bucket, config.remote_az_bucket, config.az, config.rate_limit_config.enabled, config.retry_mode
         );
 
         let client_s3 = if config.express_session_auth {
             // For real AWS S3 Express with session auth
-            create_rate_limited_s3_client(
+            create_s3_client_wrapper(
                 &config.local_az_host,
                 config.local_az_port,
                 &config.s3_region,
@@ -79,7 +83,7 @@ impl S3ExpressMultiAzWithTracking {
             .await
         } else {
             // For local minio testing - use common client creation with force_path_style=true
-            create_rate_limited_s3_client(
+            create_s3_client_wrapper(
                 &config.local_az_host,
                 config.local_az_port,
                 &config.s3_region,
@@ -95,6 +99,11 @@ impl S3ExpressMultiAzWithTracking {
             endpoint_url, config.express_session_auth
         );
 
+        let retry_config = match config.retry_mode {
+            RetryMode::Disabled => retry::RetryConfig::disabled(),
+            _ => retry::RetryConfig::rate_limited().with_max_attempts(config.max_attempts),
+        };
+
         Ok(Self {
             client_s3,
             local_az_bucket: config.local_az_bucket.clone(),
@@ -103,8 +112,123 @@ impl S3ExpressMultiAzWithTracking {
             rss_client,
             nss_client,
             az_status_key: format!("az_status/{}", config.az),
-            retry_config: retry::RetryConfig::rate_limited(),
+            retry_config,
+            retry_mode: config.retry_mode.clone(),
         })
+    }
+
+    // Helper method to perform put operation with retry mode handling
+    #[allow(dead_code)]
+    async fn put_object_with_retry(
+        &self,
+        bucket: &str,
+        key: &str,
+        body: Bytes,
+    ) -> Result<
+        aws_sdk_s3::operation::put_object::PutObjectOutput,
+        aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::put_object::PutObjectError>,
+    > {
+        match self.retry_mode {
+            RetryMode::Disabled => {
+                self.client_s3
+                    .put_object()
+                    .await
+                    .bucket(bucket)
+                    .key(key)
+                    .body(body.into())
+                    .send()
+                    .await
+            }
+            _ => {
+                s3_retry!(
+                    "put_blob",
+                    "s3_express_multi_az_with_tracking",
+                    bucket,
+                    &self.retry_config,
+                    self.client_s3
+                        .put_object()
+                        .await
+                        .bucket(bucket)
+                        .key(key)
+                        .body(body.clone().into())
+                        .send()
+                )
+            }
+        }
+    }
+
+    // Helper method to perform get operation with retry mode handling
+    #[allow(dead_code)]
+    async fn get_object_with_retry(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<
+        aws_sdk_s3::operation::get_object::GetObjectOutput,
+        aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::get_object::GetObjectError>,
+    > {
+        match self.retry_mode {
+            RetryMode::Disabled => {
+                self.client_s3
+                    .get_object()
+                    .await
+                    .bucket(bucket)
+                    .key(key)
+                    .send()
+                    .await
+            }
+            _ => {
+                s3_retry!(
+                    "get_blob",
+                    "s3_express_multi_az_with_tracking",
+                    bucket,
+                    &self.retry_config,
+                    self.client_s3
+                        .get_object()
+                        .await
+                        .bucket(bucket)
+                        .key(key)
+                        .send()
+                )
+            }
+        }
+    }
+
+    // Helper method to perform delete operation with retry mode handling
+    #[allow(dead_code)]
+    async fn delete_object_with_retry(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<
+        aws_sdk_s3::operation::delete_object::DeleteObjectOutput,
+        aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::delete_object::DeleteObjectError>,
+    > {
+        match self.retry_mode {
+            RetryMode::Disabled => {
+                self.client_s3
+                    .delete_object()
+                    .await
+                    .bucket(bucket)
+                    .key(key)
+                    .send()
+                    .await
+            }
+            _ => {
+                s3_retry!(
+                    "delete_blob",
+                    "s3_express_multi_az_with_tracking",
+                    bucket,
+                    &self.retry_config,
+                    self.client_s3
+                        .delete_object()
+                        .await
+                        .bucket(bucket)
+                        .key(key)
+                        .send()
+                )
+            }
+        }
     }
 
     /// Check current AZ status from RSS

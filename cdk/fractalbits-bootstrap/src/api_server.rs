@@ -118,6 +118,16 @@ local_az_bucket = "{bucket_name}"
 remote_az_bucket = "{remote_bucket}"
 az = "{aws_az}"
 force_path_style = false
+
+[blob_storage.s3_express_multi_az.ratelimit]
+enabled = false
+put_qps = 7000
+get_qps = 10000
+delete_qps = 5000
+
+[blob_storage.s3_express_multi_az.retry]
+retry_mode = "standard"
+max_attempts = 15
 "##
         )
     } else if is_s3_express {
@@ -150,6 +160,16 @@ s3_region = "{aws_region}"
 s3_bucket = "{bucket_name}"
 az = "{aws_az}"
 force_path_style = false
+
+[blob_storage.s3_express_single_az.ratelimit]
+enabled = false
+put_qps = 7000
+get_qps = 10000
+delete_qps = 5000
+
+[blob_storage.s3_express_single_az.retry]
+retry_mode = "standard"
+max_attempts = 15
 "##
         )
     } else {
@@ -181,6 +201,16 @@ s3_host = "http://s3.{aws_region}.amazonaws.com"
 s3_port = 80
 s3_region = "{aws_region}"
 s3_bucket = "{bucket_name}"
+
+[blob_storage.s3_hybrid.ratelimit]
+enabled = false
+put_qps = 7000
+get_qps = 10000
+delete_qps = 5000
+
+[blob_storage.s3_hybrid.retry]
+retry_mode = "standard"
+max_attempts = 15
 "##
         )
     };

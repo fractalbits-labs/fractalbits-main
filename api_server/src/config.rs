@@ -29,6 +29,40 @@ pub struct BssConfig {
 }
 
 #[derive(Deserialize, Debug, Clone)]
+pub struct RatelimitConfig {
+    pub enabled: bool,
+    pub put_qps: u32,
+    pub get_qps: u32,
+    pub delete_qps: u32,
+}
+
+impl Default for RatelimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false, // Default to disabled for local testing
+            put_qps: 7000,
+            get_qps: 10000,
+            delete_qps: 5000,
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct RetryConfig {
+    pub retry_mode: String, // "standard" | "adaptive" | "disabled"
+    pub max_attempts: u32,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            retry_mode: "disabled".to_string(), // Default to disabled for local testing
+            max_attempts: 3,
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct S3ExpressMultiAzConfig {
     pub local_az_host: String,
     pub local_az_port: u16,
@@ -40,6 +74,10 @@ pub struct S3ExpressMultiAzConfig {
     pub az: String,
     #[serde(default = "default_express_session_auth")]
     pub express_session_auth: bool,
+    #[serde(default)]
+    pub ratelimit: RatelimitConfig,
+    #[serde(default)]
+    pub retry: RetryConfig,
 }
 
 fn default_express_session_auth() -> bool {
@@ -55,6 +93,10 @@ pub struct S3ExpressSingleAzConfig {
     pub az: String,
     #[serde(default = "default_force_path_style")]
     pub force_path_style: bool,
+    #[serde(default)]
+    pub ratelimit: RatelimitConfig,
+    #[serde(default)]
+    pub retry: RetryConfig,
 }
 
 fn default_force_path_style() -> bool {
@@ -70,6 +112,8 @@ impl Default for S3ExpressSingleAzConfig {
             s3_bucket: "fractalbits-bucket".into(),
             az: "us-west-1a".into(),
             force_path_style: true,
+            ratelimit: RatelimitConfig::default(),
+            retry: RetryConfig::default(),
         }
     }
 }
@@ -108,6 +152,10 @@ pub struct S3HybridConfig {
     pub s3_port: u16,
     pub s3_region: String,
     pub s3_bucket: String,
+    #[serde(default)]
+    pub ratelimit: RatelimitConfig,
+    #[serde(default)]
+    pub retry: RetryConfig,
 }
 
 impl Default for Config {

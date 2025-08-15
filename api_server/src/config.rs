@@ -72,16 +72,10 @@ pub struct S3ExpressMultiAzConfig {
     pub remote_az_host: Option<String>,
     pub remote_az_port: Option<u16>,
     pub az: String,
-    #[serde(default = "default_express_session_auth")]
-    pub express_session_auth: bool,
     #[serde(default)]
     pub ratelimit: RatelimitConfig,
     #[serde(default)]
     pub retry: RetryConfig,
-}
-
-fn default_express_session_auth() -> bool {
-    false // Default to false for local testing with minio
 }
 
 #[derive(Deserialize, Debug, Clone)]

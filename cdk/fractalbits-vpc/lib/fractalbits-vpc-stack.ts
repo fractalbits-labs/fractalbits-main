@@ -221,13 +221,13 @@ export class FractalbitsVpcStack extends cdk.Stack {
     // Create api_server(s) in a ASG group
     const dataBlobBucketName = dataBlobOnS3Express ? dataBlobBucket!.ref : bucket.bucketName;
     const dataBlobBucketName2 = dataBlobStorage === 's3ExpressMultiAz' && dataBlobBucket2 ? dataBlobBucket2.ref : '';
-    const remoteBucketParam = dataBlobBucketName2 ? `--remote_bucket = ${dataBlobBucketName2}` : '';
+    const remoteBucketParam = dataBlobBucketName2 ? `--remote_bucket=${dataBlobBucketName2}` : '';
     // Reusable function to create bootstrap options for api_server and gui_server
     const createBootstrapOptions = (serviceName: string) =>
       `${forBenchFlag} ${serviceName} ` +
-      `--bucket = ${dataBlobBucketName} ` +
-      `--nss_ip = ${instances["nss_server_primary"].instancePrivateIp} ` +
-      `--rss_ip = ${instances["root_server"].instancePrivateIp} ` +
+      `--bucket=${dataBlobBucketName} ` +
+      `--nss_ip=${instances["nss_server_primary"].instancePrivateIp} ` +
+      `--rss_ip=${instances["root_server"].instancePrivateIp} ` +
       remoteBucketParam;
     const apiServerBootstrapOptions = createBootstrapOptions('api_server');
     const apiServerAsg = createEc2Asg(
@@ -269,21 +269,21 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const instanceBootstrapOptions = [
       {
         id: 'root_server',
-        bootstrapOptions: `${forBenchFlag} root_server--primary_instance_id = ${primaryNss} --secondary_instance_id=${secondaryNss} --volume_id=${ebsVolumeId} `
+        bootstrapOptions: `${forBenchFlag} root_server --primary_instance_id=${primaryNss} --secondary_instance_id=${secondaryNss} --volume_id=${ebsVolumeId} `
       },
       {
         id: 'nss_server_primary',
-        bootstrapOptions: `${forBenchFlag} nss_server--bucket = ${bucketName} --volume_id=${ebsVolumeId} --iam_role=${ec2Role.roleName} `
+        bootstrapOptions: `${forBenchFlag} nss_server --bucket=${bucketName} --volume_id=${ebsVolumeId} --iam_role=${ec2Role.roleName} `
       },
       {
         id: 'nss_server_secondary',
-        bootstrapOptions: `${forBenchFlag} nss_server--bucket = ${bucketName} --volume_id=${ebsVolumeId} --iam_role=${ec2Role.roleName} `
+        bootstrapOptions: `${forBenchFlag} nss_server --bucket=${bucketName} --volume_id=${ebsVolumeId} --iam_role=${ec2Role.roleName} `
       },
     ];
     if (props.benchType === "external") {
       instanceBootstrapOptions.push({
         id: 'bench_server',
-        bootstrapOptions: `bench_server--api_server_num = ${props.numApiServers} --bench_client_num=${props.numBenchClients} `,
+        bootstrapOptions: `bench_server --api_server_num=${props.numApiServers} --bench_client_num=${props.numBenchClients} `,
       });
     }
     if (props.browserIp) {

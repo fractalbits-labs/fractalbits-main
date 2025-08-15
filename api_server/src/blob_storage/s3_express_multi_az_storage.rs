@@ -17,7 +17,6 @@ pub struct S3ExpressMultiAzConfig {
     pub local_az_bucket: String,
     pub remote_az_bucket: String,
     pub az: String,
-    pub express_session_auth: bool,
     pub rate_limit_config: S3RateLimitConfig,
     pub retry_mode: RetryMode,
     pub max_attempts: u32,
@@ -38,7 +37,7 @@ impl S3ExpressMultiAzStorage {
             config.local_az_bucket, config.remote_az_bucket, config.az, config.rate_limit_config.enabled, config.retry_mode
         );
 
-        let client_s3 = if config.express_session_auth {
+        let client_s3 = if config.local_az_host.ends_with("amazonaws.com") {
             // For real AWS S3 Express with session auth
             create_s3_client_wrapper(
                 &config.local_az_host,
@@ -61,10 +60,7 @@ impl S3ExpressMultiAzStorage {
         };
 
         let endpoint_url = format!("{}:{}", config.local_az_host, config.local_az_port);
-        info!(
-            "S3 Express One Zone client initialized with endpoint: {} and session auth: {}",
-            endpoint_url, config.express_session_auth
-        );
+        info!("S3 client initialized with endpoint: {endpoint_url}");
 
         let retry_config = match config.retry_mode {
             RetryMode::Disabled => retry::RetryConfig::disabled(),

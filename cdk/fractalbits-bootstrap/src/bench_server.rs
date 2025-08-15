@@ -29,8 +29,8 @@ pub fn bootstrap(
     create_bench_start_script(&region, &api_server_ips[0])?;
 
     let api_server_ips_str = api_server_ips.join(",");
-    create_put_workload_config(&warp_client_ips, &region, &api_server_ips_str, "10s")?;
-    create_get_workload_config(&warp_client_ips, &region, &api_server_ips_str, "10s")?;
+    create_put_workload_config(&warp_client_ips, &region, &api_server_ips_str, "10s", 3500)?;
+    create_get_workload_config(&warp_client_ips, &region, &api_server_ips_str, "10s", 7000)?;
     create_mixed_workload_config(&warp_client_ips, &region, &api_server_ips_str, "10s")?;
 
     Ok(())

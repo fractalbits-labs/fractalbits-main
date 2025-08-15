@@ -244,30 +244,10 @@ pub async fn create_s3_client(
         // Real AWS S3
         let aws_config = aws_config::defaults(BehaviorVersion::latest())
             .region(Region::new(s3_region.to_string()))
-            .retry_config(retry_config.clone())
+            .retry_config(retry_config)
             .load()
             .await;
-
-        // For S3 Express endpoints, we need to set the endpoint URL explicitly
-        if s3_host.contains("s3express") {
-            let endpoint_url = format!("{s3_host}:{s3_port}");
-            let mut s3_config_builder = S3Config::builder()
-                .endpoint_url(&endpoint_url)
-                .region(Region::new(s3_region.to_string()))
-                .retry_config(retry_config)
-                .behavior_version(BehaviorVersion::latest())
-                .force_path_style(false); // S3 Express requires virtual-hosted style
-
-            // Use AWS credentials from environment/IAM role
-            let aws_credentials = aws_config.credentials_provider();
-            if let Some(creds) = aws_credentials {
-                s3_config_builder = s3_config_builder.credentials_provider(creds);
-            }
-
-            S3Client::from_conf(s3_config_builder.build())
-        } else {
-            S3Client::new(&aws_config)
-        }
+        S3Client::new(&aws_config)
     } else {
         // Local minio or other S3-compatible service
         let credentials = Credentials::new("minioadmin", "minioadmin", None, None, "minio");

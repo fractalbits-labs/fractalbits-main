@@ -1,10 +1,10 @@
-use super::{blob_key, create_s3_client, BlobStorage, BlobStorageError};
-use aws_config::BehaviorVersion;
-use aws_sdk_s3::{config::Region, types::StorageClass, Client as S3Client, Config as S3Config};
+use super::{blob_key, create_s3_client, retry, BlobStorage, BlobStorageError};
+use crate::s3_retry;
+use aws_sdk_s3::Client as S3Client;
 use bytes::Bytes;
 use metrics::{counter, histogram};
 use std::time::Instant;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -22,6 +22,7 @@ pub struct S3ExpressMultiAzStorage {
     client_s3: S3Client,
     local_az_bucket: String,
     remote_az_bucket: String,
+    retry_config: retry::RetryConfig,
 }
 
 impl S3ExpressMultiAzStorage {
@@ -41,24 +42,14 @@ impl S3ExpressMultiAzStorage {
             )
             .await
         } else {
-            // For local minio testing - need to disable S3 Express session auth
-            let endpoint_url = format!("{}:{}", config.local_az_host, config.local_az_port);
-            let s3_config = S3Config::builder()
-                .behavior_version(BehaviorVersion::latest())
-                .disable_s3_express_session_auth(true)
-                .endpoint_url(&endpoint_url)
-                .region(Region::new(config.s3_region.clone()))
-                .force_path_style(true)
-                .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                    "minioadmin",
-                    "minioadmin",
-                    None,
-                    None,
-                    "minio",
-                ))
-                .build();
-
-            S3Client::from_conf(s3_config)
+            // For local minio testing - use common client creation with force_path_style=true
+            create_s3_client(
+                &config.local_az_host,
+                config.local_az_port,
+                &config.s3_region,
+                true, // force_path_style for minio
+            )
+            .await
         };
 
         let endpoint_url = format!("{}:{}", config.local_az_host, config.local_az_port);
@@ -71,6 +62,7 @@ impl S3ExpressMultiAzStorage {
             client_s3,
             local_az_bucket: config.local_az_bucket.clone(),
             remote_az_bucket: config.remote_az_bucket.clone(),
+            retry_config: retry::RetryConfig::default(),
         })
     }
 }
@@ -98,32 +90,37 @@ impl BlobStorage for S3ExpressMultiAzStorage {
 
         let s3_key = blob_key(blob_id, block_number);
 
-        // Create requests for both buckets
-        let mut local_request = self
-            .client_s3
-            .put_object()
-            .bucket(&self.local_az_bucket)
-            .key(&s3_key)
-            .body(body.clone().into());
+        // Write to local bucket with retry
+        let local_future = s3_retry!(
+            "put_blob",
+            "s3_express_multi_az",
+            &self.local_az_bucket,
+            &self.retry_config,
+            self.client_s3
+                .put_object()
+                .bucket(&self.local_az_bucket)
+                .key(&s3_key)
+                .body(body.clone().into())
+                .send()
+        );
 
-        let mut remote_request = self
-            .client_s3
-            .put_object()
-            .bucket(&self.remote_az_bucket)
-            .key(&s3_key)
-            .body(body.into());
-
-        // Only set storage class for real S3 Express (not for local minio testing)
-        if self.local_az_bucket.ends_with("--x-s3") {
-            local_request = local_request.storage_class(StorageClass::ExpressOnezone);
-        }
-        if self.remote_az_bucket.ends_with("--x-s3") {
-            remote_request = remote_request.storage_class(StorageClass::ExpressOnezone);
-        }
+        // Write to remote bucket with retry
+        let remote_future = s3_retry!(
+            "put_blob",
+            "s3_express_multi_az",
+            &self.remote_az_bucket,
+            &self.retry_config,
+            self.client_s3
+                .put_object()
+                .bucket(&self.remote_az_bucket)
+                .key(&s3_key)
+                .body(body.clone().into())
+                .send()
+        );
 
         // Write to both buckets concurrently
         let (local_result, remote_result) =
-            tokio::join!(local_request.send(), remote_request.send());
+            tokio::join!(async { local_future }, async { remote_future });
 
         // Record bucket-specific metrics
         let local_success = local_result.is_ok();
@@ -143,17 +140,15 @@ impl BlobStorage for S3ExpressMultiAzStorage {
 
         // Log errors but don't fail if one bucket operation fails
         if let Err(e) = &local_result {
-            tracing::warn!(
+            warn!(
                 "Failed to write to local AZ bucket {}: {}",
-                self.local_az_bucket,
-                e
+                self.local_az_bucket, e
             );
         }
         if let Err(e) = &remote_result {
-            tracing::warn!(
+            warn!(
                 "Failed to write to remote AZ bucket {}: {}",
-                self.remote_az_bucket,
-                e
+                self.remote_az_bucket, e
             );
         }
 
@@ -187,57 +182,72 @@ impl BlobStorage for S3ExpressMultiAzStorage {
         let start = Instant::now();
         let s3_key = blob_key(blob_id, block_number);
 
-        // Always read from local AZ bucket for better performance
-        let response_result = self
-            .client_s3
-            .get_object()
-            .bucket(&self.local_az_bucket)
-            .key(&s3_key)
-            .send()
-            .await;
+        // Always read from local AZ bucket for better performance, with retry
+        let response_result = s3_retry!(
+            "get_blob",
+            "s3_express_multi_az",
+            &self.local_az_bucket,
+            &self.retry_config,
+            self.client_s3
+                .get_object()
+                .bucket(&self.local_az_bucket)
+                .key(&s3_key)
+                .send()
+        );
 
         let response = match response_result {
             Ok(resp) => resp,
-            Err(e) => {
-                // Record failure metrics
-                histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "get_blob")
-                    .record(start.elapsed().as_nanos() as f64);
-                histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "get_blob", "bucket_type" => "local_az")
-                    .record(start.elapsed().as_nanos() as f64);
+            Err(local_err) => {
+                // Try remote bucket as fallback with retry
+                warn!(
+                    "Failed to read from local AZ bucket {}, trying remote: {}",
+                    self.local_az_bucket, local_err
+                );
+
                 counter!("s3_express_operations_total", "operation" => "get", "bucket_type" => "local_az", "result" => "failure")
                     .increment(1);
-                return Err(BlobStorageError::from(e));
+
+                let remote_result = s3_retry!(
+                    "get_blob",
+                    "s3_express_multi_az",
+                    &self.remote_az_bucket,
+                    &self.retry_config,
+                    self.client_s3
+                        .get_object()
+                        .bucket(&self.remote_az_bucket)
+                        .key(&s3_key)
+                        .send()
+                );
+
+                match remote_result {
+                    Ok(resp) => {
+                        counter!("s3_express_operations_total", "operation" => "get", "bucket_type" => "remote_az", "result" => "success")
+                            .increment(1);
+                        resp
+                    }
+                    Err(remote_err) => {
+                        counter!("s3_express_operations_total", "operation" => "get", "bucket_type" => "remote_az", "result" => "failure")
+                            .increment(1);
+                        tracing::error!(
+                            "Failed to read from both buckets. Local: {}, Remote: {}",
+                            local_err,
+                            remote_err
+                        );
+                        return Err(BlobStorageError::S3(format!(
+                            "Failed to read from both buckets: {local_err}"
+                        )));
+                    }
+                }
             }
         };
 
-        let data_result = response.body.collect().await;
-        let data = match data_result {
-            Ok(d) => d,
-            Err(e) => {
-                // Record failure metrics
-                histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "get_blob")
-                    .record(start.elapsed().as_nanos() as f64);
-                histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "get_blob", "bucket_type" => "local_az")
-                    .record(start.elapsed().as_nanos() as f64);
-                counter!("s3_express_operations_total", "operation" => "get", "bucket_type" => "local_az", "result" => "failure")
-                    .increment(1);
-                return Err(BlobStorageError::S3(e.to_string()));
-            }
-        };
+        *body = response.body.collect().await.unwrap().into_bytes();
 
-        *body = data.into_bytes();
-
-        // Record overall metrics for backward compatibility
-        histogram!("blob_size", "operation" => "get", "storage" => "s3_express_multi_az")
-            .record(body.len() as f64);
+        // Record metrics
         histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "get_blob")
             .record(start.elapsed().as_nanos() as f64);
-
-        // Record bucket-specific metrics (always reading from local AZ bucket)
-        histogram!("blob_size", "operation" => "get", "storage" => "s3_express_multi_az", "bucket_type" => "local_az")
+        histogram!("blob_size", "operation" => "get", "storage" => "s3_express_multi_az")
             .record(body.len() as f64);
-        histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "get_blob", "bucket_type" => "local_az")
-            .record(start.elapsed().as_nanos() as f64);
         counter!("s3_express_operations_total", "operation" => "get", "bucket_type" => "local_az", "result" => "success")
             .increment(1);
 
@@ -246,17 +256,27 @@ impl BlobStorage for S3ExpressMultiAzStorage {
 
     async fn delete_blob(&self, blob_id: Uuid, block_number: u32) -> Result<(), BlobStorageError> {
         let start = Instant::now();
-        let local_start = Instant::now();
-        let remote_start = Instant::now();
         let s3_key = blob_key(blob_id, block_number);
 
-        // Delete from both buckets concurrently
-        let (local_result, remote_result) = tokio::join!(
+        // Delete from local bucket with retry
+        let local_future = s3_retry!(
+            "delete_blob",
+            "s3_express_multi_az",
+            &self.local_az_bucket,
+            &self.retry_config,
             self.client_s3
                 .delete_object()
                 .bucket(&self.local_az_bucket)
                 .key(&s3_key)
-                .send(),
+                .send()
+        );
+
+        // Delete from remote bucket with retry
+        let remote_future = s3_retry!(
+            "delete_blob",
+            "s3_express_multi_az",
+            &self.remote_az_bucket,
+            &self.retry_config,
             self.client_s3
                 .delete_object()
                 .bucket(&self.remote_az_bucket)
@@ -264,35 +284,21 @@ impl BlobStorage for S3ExpressMultiAzStorage {
                 .send()
         );
 
-        // Record bucket-specific metrics
-        let local_success = local_result.is_ok();
-        let remote_success = remote_result.is_ok();
-
-        // Record duration for each bucket operation
-        histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "delete_blob", "bucket_type" => "local_az")
-            .record(local_start.elapsed().as_nanos() as f64);
-        histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "delete_blob", "bucket_type" => "remote_az")
-            .record(remote_start.elapsed().as_nanos() as f64);
-
-        // Record success/failure counters
-        counter!("s3_express_operations_total", "operation" => "delete", "bucket_type" => "local_az", "result" => if local_success { "success" } else { "failure" })
-            .increment(1);
-        counter!("s3_express_operations_total", "operation" => "delete", "bucket_type" => "remote_az", "result" => if remote_success { "success" } else { "failure" })
-            .increment(1);
+        // Delete from both buckets concurrently
+        let (local_result, remote_result) =
+            tokio::join!(async { local_future }, async { remote_future });
 
         // Log errors but don't fail if one bucket operation fails
         if let Err(e) = &local_result {
-            tracing::warn!(
+            warn!(
                 "Failed to delete from local AZ bucket {}: {}",
-                self.local_az_bucket,
-                e
+                self.local_az_bucket, e
             );
         }
         if let Err(e) = &remote_result {
-            tracing::warn!(
+            warn!(
                 "Failed to delete from remote AZ bucket {}: {}",
-                self.remote_az_bucket,
-                e
+                self.remote_az_bucket, e
             );
         }
 
@@ -309,7 +315,6 @@ impl BlobStorage for S3ExpressMultiAzStorage {
                 )))
             }
             _ => {
-                // Record overall duration for backward compatibility
                 histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "delete_blob")
                     .record(start.elapsed().as_nanos() as f64);
                 Ok(())

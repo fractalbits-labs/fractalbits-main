@@ -1,5 +1,6 @@
-use super::{blob_key, create_s3_client, BlobStorage, BlobStorageError};
-use aws_sdk_s3::{types::StorageClass, Client as S3Client};
+use super::{blob_key, create_s3_client, retry, BlobStorage, BlobStorageError};
+use crate::s3_retry;
+use aws_sdk_s3::Client as S3Client;
 use bytes::Bytes;
 use metrics::{counter, histogram};
 use std::time::Instant;
@@ -19,6 +20,7 @@ pub struct S3ExpressSingleAzConfig {
 pub struct S3ExpressSingleAzStorage {
     client_s3: S3Client,
     s3_bucket: String,
+    retry_config: retry::RetryConfig,
 }
 
 impl S3ExpressSingleAzStorage {
@@ -45,6 +47,7 @@ impl S3ExpressSingleAzStorage {
         Ok(Self {
             client_s3,
             s3_bucket: config.s3_bucket.clone(),
+            retry_config: retry::RetryConfig::default(),
         })
     }
 }
@@ -62,25 +65,24 @@ impl BlobStorage for S3ExpressSingleAzStorage {
         let start = Instant::now();
         let s3_key = blob_key(blob_id, block_number);
 
-        // Put to S3 Express bucket
-        let mut put_request = self
-            .client_s3
-            .put_object()
-            .bucket(&self.s3_bucket)
-            .key(&s3_key)
-            .body(body.into());
+        // Use retry macro for put operation
+        let result = s3_retry!(
+            "put_blob",
+            "s3_express_single_az",
+            &self.s3_bucket,
+            &self.retry_config,
+            self.client_s3
+                .put_object()
+                .bucket(&self.s3_bucket)
+                .key(&s3_key)
+                .body(body.clone().into())
+                .send()
+        );
 
-        // Only set storage class for real S3 Express (not for local minio testing)
-        if self.s3_bucket.ends_with("--x-s3") {
-            put_request = put_request.storage_class(StorageClass::ExpressOnezone);
-        }
-
-        let put_result = put_request.send().await;
-
-        match put_result {
+        match result {
             Ok(_) => {
-                histogram!("blob_put_duration", "storage" => "s3_express_single_az")
-                    .record(start.elapsed().as_secs_f64());
+                histogram!("blob_put_duration_nanos", "storage" => "s3_express_single_az")
+                    .record(start.elapsed().as_nanos() as f64);
                 counter!("blob_put_success", "storage" => "s3_express_single_az").increment(1);
                 Ok(())
             }
@@ -101,20 +103,24 @@ impl BlobStorage for S3ExpressSingleAzStorage {
         let start = Instant::now();
         let s3_key = blob_key(blob_id, block_number);
 
-        // Get from S3 Express bucket
-        let get_result = self
-            .client_s3
-            .get_object()
-            .bucket(&self.s3_bucket)
-            .key(&s3_key)
-            .send()
-            .await;
+        // Use retry macro for get operation
+        let result = s3_retry!(
+            "get_blob",
+            "s3_express_single_az",
+            &self.s3_bucket,
+            &self.retry_config,
+            self.client_s3
+                .get_object()
+                .bucket(&self.s3_bucket)
+                .key(&s3_key)
+                .send()
+        );
 
-        match get_result {
+        match result {
             Ok(response) => {
                 *body = response.body.collect().await.unwrap().into_bytes();
-                histogram!("blob_get_duration", "storage" => "s3_express_single_az")
-                    .record(start.elapsed().as_secs_f64());
+                histogram!("blob_get_duration_nanos", "storage" => "s3_express_single_az")
+                    .record(start.elapsed().as_nanos() as f64);
                 histogram!("blob_size", "operation" => "get", "storage" => "s3_express_single_az")
                     .record(body.len() as f64);
                 counter!("blob_get_success", "storage" => "s3_express_single_az").increment(1);
@@ -132,19 +138,23 @@ impl BlobStorage for S3ExpressSingleAzStorage {
         let start = Instant::now();
         let s3_key = blob_key(blob_id, block_number);
 
-        // Delete from S3 Express bucket
-        let delete_result = self
-            .client_s3
-            .delete_object()
-            .bucket(&self.s3_bucket)
-            .key(&s3_key)
-            .send()
-            .await;
+        // Use retry macro for delete operation
+        let result = s3_retry!(
+            "delete_blob",
+            "s3_express_single_az",
+            &self.s3_bucket,
+            &self.retry_config,
+            self.client_s3
+                .delete_object()
+                .bucket(&self.s3_bucket)
+                .key(&s3_key)
+                .send()
+        );
 
-        match delete_result {
+        match result {
             Ok(_) => {
-                histogram!("blob_delete_duration", "storage" => "s3_express_single_az")
-                    .record(start.elapsed().as_secs_f64());
+                histogram!("blob_delete_duration_nanos", "storage" => "s3_express_single_az")
+                    .record(start.elapsed().as_nanos() as f64);
                 counter!("blob_delete_success", "storage" => "s3_express_single_az").increment(1);
                 Ok(())
             }

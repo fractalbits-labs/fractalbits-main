@@ -1,5 +1,6 @@
 mod bss_only_single_az_storage;
 mod hybrid_single_az_storage;
+mod retry;
 mod s3_express_multi_az_storage;
 mod s3_express_multi_az_with_tracking;
 mod s3_express_single_az_storage;
@@ -20,7 +21,7 @@ pub enum BlobStorageImpl {
     S3ExpressSingleAz(S3ExpressSingleAzStorage),
 }
 
-use aws_config::BehaviorVersion;
+use aws_config::{retry::RetryConfig, BehaviorVersion};
 use aws_sdk_s3::{
     config::{Credentials, Region},
     error::SdkError,
@@ -31,6 +32,22 @@ use aws_sdk_s3::{
 };
 use bytes::Bytes;
 use uuid::Uuid;
+
+/// S3 operation retry macro - similar to rpc_retry but for S3 operations
+#[macro_export]
+macro_rules! s3_retry {
+    ($operation_name:expr, $storage_type:expr, $bucket:expr, $retry_config:expr, $operation:expr) => {{
+        use $crate::blob_storage::retry;
+        retry::retry_s3_operation(
+            $operation_name,
+            $storage_type,
+            $bucket,
+            $retry_config,
+            || async { $operation.await },
+        )
+        .await
+    }};
+}
 
 /// Generate a consistent S3 key format for blob storage
 pub fn blob_key(blob_id: Uuid, block_number: u32) -> String {
@@ -44,10 +61,14 @@ pub async fn create_s3_client(
     s3_region: &str,
     force_path_style: bool,
 ) -> S3Client {
+    // Disable SDK retries - we'll handle retries ourselves for better visibility
+    let retry_config = RetryConfig::standard().with_max_attempts(1); // No retries at SDK level
+
     if s3_host.ends_with("amazonaws.com") {
         // Real AWS S3
         let aws_config = aws_config::defaults(BehaviorVersion::latest())
             .region(Region::new(s3_region.to_string()))
+            .retry_config(retry_config)
             .load()
             .await;
         S3Client::new(&aws_config)
@@ -60,7 +81,9 @@ pub async fn create_s3_client(
             .endpoint_url(&endpoint_url)
             .region(Region::new(s3_region.to_string()))
             .credentials_provider(credentials)
-            .behavior_version(BehaviorVersion::latest());
+            .retry_config(retry_config)
+            .behavior_version(BehaviorVersion::latest())
+            .disable_s3_express_session_auth(true); // Disable for minio compatibility
 
         if force_path_style {
             s3_config_builder = s3_config_builder.force_path_style(true);

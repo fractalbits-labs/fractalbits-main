@@ -79,10 +79,10 @@ export class FractalbitsVpcStack extends cdk.Stack {
       // Map us-west-2[a-d] to usw2-az[1-4] using CloudFormation mappings
       const azMappings = new cdk.CfnMapping(this, 'AZToZoneIdMapping', {
         mapping: {
-          'us-west-2a': { zoneId: 'usw2-az2' },
-          'us-west-2b': { zoneId: 'usw2-az1' },
-          'us-west-2c': { zoneId: 'usw2-az3' },
-          'us-west-2d': { zoneId: 'usw2-az4' },
+          'us-west-2a': {zoneId: 'usw2-az2'},
+          'us-west-2b': {zoneId: 'usw2-az1'},
+          'us-west-2c': {zoneId: 'usw2-az3'},
+          'us-west-2d': {zoneId: 'usw2-az4'},
         },
         lazy: true,
       });

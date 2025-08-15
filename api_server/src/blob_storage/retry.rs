@@ -1,0 +1,326 @@
+use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
+use metrics::{counter, histogram};
+use rand::Rng;
+use std::time::{Duration, Instant};
+use tracing::{debug, warn};
+
+/// Configuration for retry behavior
+#[derive(Clone, Debug)]
+pub struct RetryConfig {
+    pub max_attempts: u32,
+    pub initial_backoff_ms: u64,
+    pub max_backoff_ms: u64,
+    pub backoff_multiplier: f64,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 10,
+            initial_backoff_ms: 5,
+            max_backoff_ms: 5000,
+            backoff_multiplier: 2.0,
+        }
+    }
+}
+
+/// Determines if an error is retryable
+pub fn is_retryable_error<E>(error: &SdkError<E>) -> bool
+where
+    E: ProvideErrorMetadata,
+{
+    // First check SdkError variants for structural error classification
+    match error {
+        // Timeout errors are always retryable
+        SdkError::TimeoutError(_) => return true,
+
+        // Dispatch failures (network issues) are retryable
+        SdkError::DispatchFailure(_) => return true,
+
+        // Service errors need deeper inspection
+        SdkError::ServiceError(service_error) => {
+            let error_metadata = service_error.err();
+
+            // Check HTTP status code if available
+            if let Some(status) = error_metadata.code() {
+                // 5xx server errors are generally retryable
+                if status.starts_with("5") {
+                    return true;
+                }
+                // 408 Request Timeout
+                if status == "408" {
+                    return true;
+                }
+                // 429 Too Many Requests
+                if status == "429" {
+                    return true;
+                }
+                // 503 Service Unavailable
+                if status == "503" {
+                    return true;
+                }
+            }
+
+            // Check specific AWS error codes
+            if let Some(error_code) = error_metadata.code() {
+                match error_code {
+                    "SlowDown" | "Throttling" | "ThrottlingException" => return true,
+                    "RequestTimeout" | "RequestTimeoutException" => return true,
+                    "ServiceUnavailable" | "ServiceUnavailableException" => return true,
+                    "InternalError" | "InternalServerError" => return true,
+                    "TooManyRequests" => return true,
+                    _ => {}
+                }
+            }
+        }
+
+        // Construction and response errors are generally not retryable
+        SdkError::ConstructionFailure(_) | SdkError::ResponseError { .. } => return false,
+
+        // Handle any other variants
+        _ => {}
+    }
+
+    // Fallback to string-based checks for edge cases
+    let error_str = error.to_string();
+
+    // SlowDown errors (throttling)
+    if error_str.contains("SlowDown") || error_str.contains("503") {
+        return true;
+    }
+
+    // RequestTimeout errors
+    if error_str.contains("RequestTimeout") || error_str.contains("408") {
+        return true;
+    }
+
+    // ServiceUnavailable errors
+    if error_str.contains("ServiceUnavailable") {
+        return true;
+    }
+
+    // TooManyRequests errors (429)
+    if error_str.contains("TooManyRequests") || error_str.contains("429") {
+        return true;
+    }
+
+    // Connection errors
+    if error_str.contains("connection") || error_str.contains("timed out") {
+        return true;
+    }
+
+    // Generic service errors (common transient issues)
+    if error_str.contains("service error") {
+        return true;
+    }
+
+    false
+}
+
+/// Extract concise error information for logging
+fn get_error_info<E>(error: &SdkError<E>) -> String
+where
+    E: ProvideErrorMetadata,
+{
+    match error {
+        SdkError::ServiceError(service_error) => {
+            let error_metadata = service_error.err();
+            let error_code = error_metadata.code().unwrap_or("Unknown");
+            let message = error_metadata.message().unwrap_or("No message");
+            format!("ServiceError: Code={error_code}, Message={message}")
+        }
+        SdkError::TimeoutError(_) => "TimeoutError".to_string(),
+        SdkError::DispatchFailure(dispatch_failure) => {
+            format!("DispatchFailure: {dispatch_failure:?}")
+        }
+        SdkError::ConstructionFailure(_) => "ConstructionFailure".to_string(),
+        SdkError::ResponseError { .. } => "ResponseError".to_string(),
+        _ => format!("UnknownError: {error}"),
+    }
+}
+
+/// Calculate backoff with jitter
+pub fn calculate_backoff(attempt: u32, config: &RetryConfig) -> Duration {
+    let base_backoff =
+        config.initial_backoff_ms as f64 * config.backoff_multiplier.powi(attempt as i32 - 1);
+    let capped_backoff = base_backoff.min(config.max_backoff_ms as f64);
+
+    // Add jitter (0.5x to 1.5x the backoff)
+    let jitter = rand::thread_rng().gen_range(0.5..1.5);
+    let final_backoff = (capped_backoff * jitter) as u64;
+
+    Duration::from_millis(final_backoff)
+}
+
+/// Execute an S3 operation with retry logic
+pub async fn retry_s3_operation<F, Fut, T, E>(
+    operation_name: &str,
+    storage_type: &str,
+    bucket: &str,
+    config: &RetryConfig,
+    mut operation: F,
+) -> Result<T, SdkError<E>>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, SdkError<E>>>,
+    E: std::error::Error + Send + Sync + 'static + ProvideErrorMetadata,
+{
+    let start_time = Instant::now();
+    let mut attempt = 0;
+    let mut total_backoff_ms = 0u64;
+
+    // Convert string references to owned strings for use in metrics
+    let operation_name = operation_name.to_string();
+    let storage_type = storage_type.to_string();
+    let bucket = bucket.to_string();
+
+    loop {
+        attempt += 1;
+        let attempt_start = Instant::now();
+
+        debug!(
+            "Attempting {} operation (attempt {}/{})",
+            operation_name, attempt, config.max_attempts
+        );
+
+        match operation().await {
+            Ok(result) => {
+                // Record success metrics
+                if attempt > 1 {
+                    counter!(
+                        "s3_operation_retry_success",
+                        "operation" => operation_name.clone(),
+                        "storage" => storage_type.clone(),
+                        "bucket" => bucket.clone()
+                    )
+                    .increment(1);
+
+                    histogram!(
+                        "s3_operation_retry_attempts",
+                        "operation" => operation_name.clone(),
+                        "storage" => storage_type.clone(),
+                        "bucket" => bucket.clone()
+                    )
+                    .record(attempt as f64);
+
+                    histogram!(
+                        "s3_operation_retry_total_duration_ms",
+                        "operation" => operation_name.clone(),
+                        "storage" => storage_type.clone(),
+                        "bucket" => bucket.clone()
+                    )
+                    .record(start_time.elapsed().as_millis() as f64);
+
+                    histogram!(
+                        "s3_operation_retry_backoff_ms",
+                        "operation" => operation_name.clone(),
+                        "storage" => storage_type.clone(),
+                        "bucket" => bucket.clone()
+                    )
+                    .record(total_backoff_ms as f64);
+
+                    warn!(
+                        "S3 {} operation succeeded after {} attempts ({:.2}ms total, {:.2}ms in backoff)",
+                        operation_name,
+                        attempt,
+                        start_time.elapsed().as_millis(),
+                        total_backoff_ms
+                    );
+                }
+
+                return Ok(result);
+            }
+            Err(err) => {
+                let attempt_duration = attempt_start.elapsed();
+
+                // Record attempt metrics
+                counter!(
+                    "s3_operation_attempt_failed",
+                    "operation" => operation_name.clone(),
+                    "storage" => storage_type.clone(),
+                    "bucket" => bucket.clone(),
+                    "attempt" => attempt.to_string()
+                )
+                .increment(1);
+
+                histogram!(
+                    "s3_operation_attempt_duration_ms",
+                    "operation" => operation_name.clone(),
+                    "storage" => storage_type.clone(),
+                    "bucket" => bucket.clone(),
+                    "attempt" => attempt.to_string()
+                )
+                .record(attempt_duration.as_millis() as f64);
+
+                // Check if error is retryable and we have attempts left
+                if !is_retryable_error(&err) {
+                    let error_info = get_error_info(&err);
+                    warn!(
+                        "S3 {} operation failed with non-retryable error after {} attempts: {}",
+                        operation_name, attempt, error_info
+                    );
+
+                    counter!(
+                        "s3_operation_failed_non_retryable",
+                        "operation" => operation_name.clone(),
+                        "storage" => storage_type.clone(),
+                        "bucket" => bucket.clone()
+                    )
+                    .increment(1);
+
+                    return Err(err);
+                }
+
+                if attempt >= config.max_attempts {
+                    warn!(
+                        "S3 {} operation failed after {} attempts (max reached): {}",
+                        operation_name, attempt, err
+                    );
+
+                    counter!(
+                        "s3_operation_failed_max_attempts",
+                        "operation" => operation_name.clone(),
+                        "storage" => storage_type.clone(),
+                        "bucket" => bucket.clone()
+                    )
+                    .increment(1);
+
+                    histogram!(
+                        "s3_operation_failed_total_duration_ms",
+                        "operation" => operation_name.clone(),
+                        "storage" => storage_type.clone(),
+                        "bucket" => bucket.clone()
+                    )
+                    .record(start_time.elapsed().as_millis() as f64);
+
+                    return Err(err);
+                }
+
+                // Calculate backoff and wait
+                let backoff = calculate_backoff(attempt, config);
+                let backoff_ms = backoff.as_millis() as u64;
+                total_backoff_ms += backoff_ms;
+
+                // Check for specific throttling errors and record them
+                let error_str = err.to_string();
+                if error_str.contains("SlowDown") {
+                    counter!(
+                        "s3_operation_throttled",
+                        "operation" => operation_name.clone(),
+                        "storage" => storage_type.clone(),
+                        "bucket" => bucket.clone()
+                    )
+                    .increment(1);
+                }
+
+                let error_info = get_error_info(&err);
+                debug!(
+                    "S3 {} operation attempt {} failed, retrying after {}ms: {}",
+                    operation_name, attempt, backoff_ms, error_info
+                );
+
+                tokio::time::sleep(backoff).await;
+            }
+        }
+    }
+}

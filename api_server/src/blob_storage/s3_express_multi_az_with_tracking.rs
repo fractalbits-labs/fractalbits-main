@@ -1,6 +1,6 @@
-use super::{blob_key, create_s3_client, BlobStorage, BlobStorageError};
-use aws_config::BehaviorVersion;
-use aws_sdk_s3::{config::Region, types::StorageClass, Client as S3Client, Config as S3Config};
+use super::{blob_key, create_s3_client, retry, BlobStorage, BlobStorageError};
+use crate::s3_retry;
+use aws_sdk_s3::Client as S3Client;
 use bytes::Bytes;
 use data_blob_tracking::{DataBlobTracker, DataBlobTrackingError};
 use metrics::{counter, histogram};
@@ -35,6 +35,7 @@ pub struct S3ExpressMultiAzWithTracking {
     nss_client: Arc<RpcClientNss>,
     /// Key for storing AZ availability status in RSS
     az_status_key: String,
+    retry_config: retry::RetryConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -64,7 +65,7 @@ impl S3ExpressMultiAzWithTracking {
         );
 
         let client_s3 = if config.express_session_auth {
-            // For real AWS S3 Express with session auth - use standard client
+            // For real AWS S3 Express with session auth
             create_s3_client(
                 &config.local_az_host,
                 config.local_az_port,
@@ -73,25 +74,14 @@ impl S3ExpressMultiAzWithTracking {
             )
             .await
         } else {
-            // For local minio testing - need to disable S3 Express session auth
-            // The standard create_s3_client doesn't support this option, so use custom config
-            let endpoint_url = format!("{}:{}", config.local_az_host, config.local_az_port);
-            let s3_config = S3Config::builder()
-                .behavior_version(BehaviorVersion::latest())
-                .disable_s3_express_session_auth(true)
-                .endpoint_url(&endpoint_url)
-                .region(Region::new(config.s3_region.clone()))
-                .force_path_style(true)
-                .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                    "minioadmin",
-                    "minioadmin",
-                    None,
-                    None,
-                    "minio",
-                ))
-                .build();
-
-            S3Client::from_conf(s3_config)
+            // For local minio testing - use common client creation with force_path_style=true
+            create_s3_client(
+                &config.local_az_host,
+                config.local_az_port,
+                &config.s3_region,
+                true, // force_path_style for minio
+            )
+            .await
         };
 
         let endpoint_url = format!("{}:{}", config.local_az_host, config.local_az_port);
@@ -108,6 +98,7 @@ impl S3ExpressMultiAzWithTracking {
             rss_client,
             nss_client,
             az_status_key: format!("az_status/{}", config.az),
+            retry_config: retry::RetryConfig::default(),
         })
     }
 
@@ -205,19 +196,20 @@ impl S3ExpressMultiAzWithTracking {
 
     /// Attempt to write to remote AZ bucket and detect if it's available
     async fn try_remote_write(&self, s3_key: &str, body: Bytes) -> bool {
-        let mut request = self
-            .client_s3
-            .put_object()
-            .bucket(&self.remote_az_bucket)
-            .key(s3_key)
-            .body(body.into());
+        let result = s3_retry!(
+            "try_remote_write",
+            "s3_express_multi_az_tracking",
+            &self.remote_az_bucket,
+            &self.retry_config,
+            self.client_s3
+                .put_object()
+                .bucket(&self.remote_az_bucket)
+                .key(s3_key)
+                .body(body.clone().into())
+                .send()
+        );
 
-        // Only set storage class for real S3 Express (not for local minio testing)
-        if self.remote_az_bucket.ends_with("--x-s3") {
-            request = request.storage_class(StorageClass::ExpressOnezone);
-        }
-
-        match request.send().await {
+        match result {
             Ok(_) => true,
             Err(e) => {
                 warn!("Remote AZ bucket write failed: {}", e);
@@ -257,20 +249,19 @@ impl BlobStorage for S3ExpressMultiAzWithTracking {
         let result: Result<(), BlobStorageError> = match az_status {
             AzStatus::Normal => {
                 // Normal mode: try to write to both buckets
-                let mut local_request = self
-                    .client_s3
-                    .put_object()
-                    .bucket(&self.local_az_bucket)
-                    .key(&s3_key)
-                    .body(body.clone().into());
-
-                // Only set storage class for real S3 Express (not for local minio testing)
-                if self.local_az_bucket.ends_with("--x-s3") {
-                    local_request = local_request.storage_class(StorageClass::ExpressOnezone);
-                }
-
                 // Try local write first
-                let local_result = local_request.send().await;
+                let local_result = s3_retry!(
+                    "put_blob",
+                    "s3_express_multi_az_tracking",
+                    &self.local_az_bucket,
+                    &self.retry_config,
+                    self.client_s3
+                        .put_object()
+                        .bucket(&self.local_az_bucket)
+                        .key(&s3_key)
+                        .body(body.clone().into())
+                        .send()
+                );
 
                 if local_result.is_err() {
                     error!("Local AZ bucket write failed: {:?}", local_result);
@@ -315,18 +306,18 @@ impl BlobStorage for S3ExpressMultiAzWithTracking {
             }
             AzStatus::Degraded => {
                 // Degraded mode: write only to local, record as single-copy
-                let mut local_request = self
-                    .client_s3
-                    .put_object()
-                    .bucket(&self.local_az_bucket)
-                    .key(&s3_key)
-                    .body(body.clone().into());
-
-                if self.local_az_bucket.ends_with("--x-s3") {
-                    local_request = local_request.storage_class(StorageClass::ExpressOnezone);
-                }
-
-                let local_result = local_request.send().await;
+                let local_result = s3_retry!(
+                    "put_blob",
+                    "s3_express_multi_az_tracking",
+                    &self.local_az_bucket,
+                    &self.retry_config,
+                    self.client_s3
+                        .put_object()
+                        .bucket(&self.local_az_bucket)
+                        .key(&s3_key)
+                        .body(body.clone().into())
+                        .send()
+                );
 
                 if let Err(e) = local_result {
                     error!("Local AZ bucket write failed in degraded mode: {}", e);
@@ -362,18 +353,18 @@ impl BlobStorage for S3ExpressMultiAzWithTracking {
                     }
                 );
 
-                let mut local_request = self
-                    .client_s3
-                    .put_object()
-                    .bucket(&self.local_az_bucket)
-                    .key(&s3_key)
-                    .body(body.clone().into());
-
-                if self.local_az_bucket.ends_with("--x-s3") {
-                    local_request = local_request.storage_class(StorageClass::ExpressOnezone);
-                }
-
-                let local_result = local_request.send().await;
+                let local_result = s3_retry!(
+                    "put_blob",
+                    "s3_express_multi_az_tracking",
+                    &self.local_az_bucket,
+                    &self.retry_config,
+                    self.client_s3
+                        .put_object()
+                        .bucket(&self.local_az_bucket)
+                        .key(&s3_key)
+                        .body(body.clone().into())
+                        .send()
+                );
 
                 if let Err(e) = local_result {
                     error!(
@@ -418,13 +409,17 @@ impl BlobStorage for S3ExpressMultiAzWithTracking {
         let s3_key = blob_key(blob_id, block_number);
 
         // Always read from local AZ bucket for better performance
-        let response_result = self
-            .client_s3
-            .get_object()
-            .bucket(&self.local_az_bucket)
-            .key(&s3_key)
-            .send()
-            .await;
+        let response_result = s3_retry!(
+            "get_blob",
+            "s3_express_multi_az_tracking",
+            &self.local_az_bucket,
+            &self.retry_config,
+            self.client_s3
+                .get_object()
+                .bucket(&self.local_az_bucket)
+                .key(&s3_key)
+                .send()
+        );
 
         let response = match response_result {
             Ok(resp) => resp,
@@ -490,18 +485,32 @@ impl BlobStorage for S3ExpressMultiAzWithTracking {
             .await; // Ignore errors - blob may not be in single-copy tracking
 
         // Delete from both buckets concurrently (best effort)
-        let (local_result, remote_result) = tokio::join!(
+        let local_future = s3_retry!(
+            "delete_blob",
+            "s3_express_multi_az_tracking",
+            &self.local_az_bucket,
+            &self.retry_config,
             self.client_s3
                 .delete_object()
                 .bucket(&self.local_az_bucket)
                 .key(&s3_key)
-                .send(),
+                .send()
+        );
+
+        let remote_future = s3_retry!(
+            "delete_blob",
+            "s3_express_multi_az_tracking",
+            &self.remote_az_bucket,
+            &self.retry_config,
             self.client_s3
                 .delete_object()
                 .bucket(&self.remote_az_bucket)
                 .key(&s3_key)
                 .send()
         );
+
+        let (local_result, remote_result) =
+            tokio::join!(async { local_future }, async { remote_future });
 
         // Record bucket-specific metrics
         let local_success = local_result.is_ok();

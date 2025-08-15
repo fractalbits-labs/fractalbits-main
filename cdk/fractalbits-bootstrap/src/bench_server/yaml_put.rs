@@ -173,7 +173,7 @@ pub fn create_put_workload_config(
     http2: false
 
     # Rate limit each instance to this number of requests per second
-    rps-limit:
+    rps-limit: 4000
 
     # Host selection algorithm.
     # Can be 'weighed' or 'roundrobin'

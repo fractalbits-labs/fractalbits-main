@@ -42,6 +42,7 @@ pub fn run_cmd_bench(
                 BuildMode::Release,
                 false,
                 DataBlobStorage::HybridSingleAz,
+                NssRole::Solo,
             )?;
             uri = "http://mybucket.localhost:8080";
             bench_exe = "./target/release/rewrk";
@@ -59,7 +60,7 @@ pub fn run_cmd_bench(
         BenchService::NssRpc => {
             *service_name = ServiceName::Nss;
             build_rewrk_rpc()?;
-            start_nss_service(build_mode, nss_data_on_local)?;
+            start_nss_service(build_mode, nss_data_on_local, NssRole::Solo)?;
             uri = "127.0.0.1:8087";
             bench_exe = "./target/release/rewrk_rpc";
             bench_opts.extend_from_slice(&[
@@ -131,6 +132,7 @@ pub fn run_cmd_bench(
         BuildMode::Release,
         false,
         DataBlobStorage::HybridSingleAz,
+        NssRole::Solo,
     )?;
 
     Ok(())

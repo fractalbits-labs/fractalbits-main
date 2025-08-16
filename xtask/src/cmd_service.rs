@@ -7,14 +7,17 @@ pub fn run_cmd_service(
     build_mode: BuildMode,
     for_gui: bool,
     data_blob_storage: DataBlobStorage,
+    nss_role: NssRole,
 ) -> CmdResult {
     match action {
         ServiceAction::Init => init_service(service, build_mode),
         ServiceAction::Stop => stop_service(service),
-        ServiceAction::Start => start_services(service, build_mode, for_gui, data_blob_storage),
+        ServiceAction::Start => {
+            start_services(service, build_mode, for_gui, data_blob_storage, nss_role)
+        }
         ServiceAction::Restart => {
             stop_service(service)?;
-            start_services(service, build_mode, for_gui, data_blob_storage)
+            start_services(service, build_mode, for_gui, data_blob_storage, nss_role)
         }
         ServiceAction::Status => show_service_status(service, data_blob_storage),
     }
@@ -159,37 +162,45 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
             ServiceName::ApiServer.as_ref().to_owned(),
             ServiceName::NssRoleAgentA.as_ref().to_owned(),
             ServiceName::NssRoleAgentB.as_ref().to_owned(),
+            ServiceName::Nss.as_ref().to_owned(),
+            ServiceName::Mirrord.as_ref().to_owned(),
             ServiceName::Bss.as_ref().to_owned(),
             ServiceName::Rss.as_ref().to_owned(),
+            ServiceName::DdbLocal.as_ref().to_owned(),
+            // Stop minio services last
             ServiceName::Minio.as_ref().to_owned(),
             ServiceName::MinioLocalAz.as_ref().to_owned(),
             ServiceName::MinioRemoteAz.as_ref().to_owned(),
-            ServiceName::DdbLocal.as_ref().to_owned(),
-            ServiceName::Mirrord.as_ref().to_owned(),
-            ServiceName::Nss.as_ref().to_owned(),
-            ServiceName::DataBlobResyncServer.as_ref().to_owned(),
         ],
         single_service => vec![single_service.as_ref().to_owned()],
     };
 
     info!("Killing previous service(s) (if any) ...");
     for service in services {
-        // For nss service, we need to stop the template instance
-        let service_to_stop = if service == "nss" {
-            "nss@active".to_string()
+        // For nss service, we need to stop all template instances
+        if service == "nss" {
+            // Try to stop both nss@active and nss@solo
+            for instance in &["nss@active", "nss@solo"] {
+                if run_cmd!(systemctl --user is-active --quiet $instance.service).is_ok() {
+                    run_cmd!(systemctl --user stop $instance.service)?;
+
+                    // make sure the process is really killed
+                    if run_cmd!(systemctl --user is-active --quiet $instance.service).is_ok() {
+                        cmd_die!("Failed to stop $instance: service is still running");
+                    }
+                }
+            }
         } else {
-            service.clone()
-        };
+            if run_cmd!(systemctl --user is-active --quiet $service.service).is_err() {
+                continue;
+            }
 
-        if run_cmd!(systemctl --user is-active --quiet $service_to_stop.service).is_err() {
-            continue;
-        }
+            run_cmd!(systemctl --user stop $service.service)?;
 
-        run_cmd!(systemctl --user stop $service_to_stop.service)?;
-
-        // make sure the process is really killed
-        if run_cmd!(systemctl --user is-active --quiet $service_to_stop.service).is_ok() {
-            cmd_die!("Failed to stop $service_to_stop: service is still running");
+            // make sure the process is really killed
+            if run_cmd!(systemctl --user is-active --quiet $service.service).is_ok() {
+                cmd_die!("Failed to stop $service: service is still running");
+            }
         }
     }
 
@@ -291,18 +302,19 @@ pub fn start_services(
     build_mode: BuildMode,
     for_gui: bool,
     data_blob_storage: DataBlobStorage,
+    nss_role: NssRole,
 ) -> CmdResult {
     match service {
         ServiceName::Bss => start_bss_service(build_mode, data_blob_storage)?,
-        ServiceName::Nss => start_nss_service(build_mode, false)?,
-        ServiceName::NssRoleAgentA => start_nss_role_agent_service(build_mode, "A")?,
-        ServiceName::NssRoleAgentB => start_nss_role_agent_service(build_mode, "B")?,
+        ServiceName::Nss => start_nss_service(build_mode, false, nss_role)?,
+        ServiceName::NssRoleAgentA => start_nss_role_agent_service(build_mode, "A", nss_role)?,
+        ServiceName::NssRoleAgentB => start_nss_role_agent_service(build_mode, "B", nss_role)?,
         ServiceName::Rss => start_rss_service(build_mode)?,
         ServiceName::ApiServer => start_api_server(build_mode, data_blob_storage, for_gui)?,
         ServiceName::DataBlobResyncServer => {
             info!("DataBlobResyncServer is a standalone CLI tool, not a service. Use 'cargo run -p data_blob_resync_server' instead.");
         }
-        ServiceName::All => start_all_services(build_mode, for_gui, data_blob_storage)?,
+        ServiceName::All => start_all_services(build_mode, for_gui, data_blob_storage, nss_role)?,
         ServiceName::Minio => start_minio_service()?,
         ServiceName::MinioLocalAz => start_minio_local_az_service()?,
         ServiceName::MinioRemoteAz => start_minio_remote_az_service()?,
@@ -338,7 +350,11 @@ pub fn start_bss_service(build_mode: BuildMode, data_blob_storage: DataBlobStora
     Ok(())
 }
 
-pub fn start_nss_service(build_mode: BuildMode, data_on_local: bool) -> CmdResult {
+pub fn start_nss_service(
+    build_mode: BuildMode,
+    data_on_local: bool,
+    nss_role: NssRole,
+) -> CmdResult {
     if !data_on_local {
         // Start minio to simulate local s3 service
         if run_cmd!(systemctl --user is-active --quiet minio.service).is_err() {
@@ -353,8 +369,9 @@ pub fn start_nss_service(build_mode: BuildMode, data_on_local: bool) -> CmdResul
     };
     create_systemd_unit_file(ServiceName::Nss, build_mode, config_file)?;
 
-    run_cmd!(systemctl --user start nss@active.service)?;
-    wait_for_service_ready(ServiceName::Nss, 15)?;
+    let nss_service = format!("nss@{}.service", nss_role.as_ref());
+    run_cmd!(systemctl --user start $nss_service)?;
+    wait_for_service_ready_with_role(ServiceName::Nss, 15, nss_role)?;
 
     let nss_server_pid = run_fun!(pidof nss_server)?;
     check_pids(ServiceName::Nss, &nss_server_pid)?;
@@ -374,18 +391,22 @@ pub fn start_mirrord_service(build_mode: BuildMode) -> CmdResult {
     Ok(())
 }
 
-pub fn start_nss_role_agent_service(build_mode: BuildMode, agent_id: &str) -> CmdResult {
+pub fn start_nss_role_agent_service(
+    build_mode: BuildMode,
+    agent_id: &str,
+    nss_role: NssRole,
+) -> CmdResult {
     let service_name = match agent_id {
         "A" => ServiceName::NssRoleAgentA,
         "B" => ServiceName::NssRoleAgentB,
         _ => panic!("Invalid agent_id: {agent_id}"),
     };
 
-    create_systemd_unit_file(service_name, build_mode, None)?;
+    create_systemd_unit_file_for_agent(service_name, build_mode, None, nss_role)?;
 
     let service_file = format!("nss_role_agent_{}.service", agent_id.to_lowercase());
     run_cmd!(systemctl --user start $service_file)?;
-    wait_for_service_ready(service_name, 15)?;
+    wait_for_service_ready_with_role(service_name, 15, nss_role)?;
 
     // For role agents, get the PID from systemd instead of pidof to avoid conflicts
     let pid_output = run_fun!(systemctl --user show --property=MainPID --value $service_file)?;
@@ -669,6 +690,7 @@ pub fn start_all_services(
     build_mode: BuildMode,
     for_gui: bool,
     data_blob_storage: DataBlobStorage,
+    nss_role: NssRole,
 ) -> CmdResult {
     info!("Starting all services with systemd dependency management");
 
@@ -688,7 +710,7 @@ pub fn start_all_services(
         }
     }
 
-    create_systemd_unit_file(ServiceName::NssRoleAgentA, build_mode, None)?;
+    create_systemd_unit_file_for_agent(ServiceName::NssRoleAgentA, build_mode, None, nss_role)?;
     create_systemd_unit_file(ServiceName::Nss, build_mode, None)?;
 
     create_systemd_unit_file(ServiceName::NssRoleAgentB, build_mode, None)?;
@@ -743,11 +765,36 @@ fn create_systemd_unit_file(
     create_systemd_unit_file_with_extra_start_opts(service, build_mode, config_file, "")
 }
 
+fn create_systemd_unit_file_for_agent(
+    service: ServiceName,
+    build_mode: BuildMode,
+    config_file: Option<String>,
+    nss_role: NssRole,
+) -> CmdResult {
+    create_systemd_unit_file_with_nss_role(service, build_mode, config_file, "", nss_role)
+}
+
 fn create_systemd_unit_file_with_extra_start_opts(
     service: ServiceName,
     build_mode: BuildMode,
     config_file: Option<String>,
     extra_start_opts: &str,
+) -> CmdResult {
+    create_systemd_unit_file_with_nss_role(
+        service,
+        build_mode,
+        config_file,
+        extra_start_opts,
+        NssRole::Active,
+    )
+}
+
+fn create_systemd_unit_file_with_nss_role(
+    service: ServiceName,
+    build_mode: BuildMode,
+    config_file: Option<String>,
+    extra_start_opts: &str,
+    nss_role: NssRole,
 ) -> CmdResult {
     let pwd = run_fun!(pwd)?;
     let build = build_mode.as_ref();
@@ -776,9 +823,13 @@ Environment="RUST_LOG=warn""##
         ServiceName::Mirrord => format!("{pwd}/zig-out/bin/mirrord"),
         ServiceName::NssRoleAgentA => {
             env_settings += env_rust_log(build_mode);
-            env_settings += r##"
+            env_settings += &format!(
+                r##"
 Environment="APP_AGENT_ID=A"
-Environment="APP_SERVICE_TYPE=nss""##;
+Environment="APP_SERVICE_TYPE=nss"
+Environment="APP_NSS_ROLE={}""##,
+                nss_role.as_ref()
+            );
             format!("{pwd}/target/{build}/nss_role_agent")
         }
         ServiceName::NssRoleAgentB => {
@@ -901,6 +952,14 @@ fn create_dirs_for_bss_server() -> CmdResult {
 }
 
 fn wait_for_service_ready(service: ServiceName, timeout_secs: u32) -> CmdResult {
+    wait_for_service_ready_with_role(service, timeout_secs, NssRole::Active)
+}
+
+fn wait_for_service_ready_with_role(
+    service: ServiceName,
+    timeout_secs: u32,
+    nss_role: NssRole,
+) -> CmdResult {
     use std::time::{Duration, Instant};
 
     let start = Instant::now();
@@ -912,7 +971,7 @@ fn wait_for_service_ready(service: ServiceName, timeout_secs: u32) -> CmdResult 
     while start.elapsed() < timeout {
         // Check if systemd reports service as active
         let service_to_check = match service {
-            ServiceName::Nss => "nss@active",
+            ServiceName::Nss => &format!("nss@{}", nss_role.as_ref()),
             _ => service_name,
         };
         if run_cmd!(systemctl --user is-active --quiet $service_to_check.service).is_ok() {

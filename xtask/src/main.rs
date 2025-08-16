@@ -7,7 +7,7 @@ mod cmd_service;
 mod cmd_tool;
 
 use clap::{ArgAction, Parser};
-use cmd_build::{build_mode, BuildMode, BUILD_INFO};
+use cmd_build::{BuildMode, BUILD_INFO};
 use cmd_lib::*;
 use strum::{AsRefStr, EnumString};
 
@@ -89,6 +89,9 @@ enum Cmd {
         )]
         #[arg(default_value_t)]
         data_blob_storage: DataBlobStorage,
+
+        #[clap(long, long_help = "NSS role: active or solo", default_value = "active")]
+        nss_role: NssRole,
     },
 
     #[clap(about = "Run tool related commands (gen_uuids only for now)")]
@@ -175,6 +178,20 @@ impl std::fmt::Display for DataBlobStorage {
     }
 }
 
+#[derive(AsRefStr, EnumString, Copy, Clone, Default)]
+#[strum(serialize_all = "snake_case")]
+pub enum NssRole {
+    #[default]
+    Active,
+    Solo,
+}
+
+impl std::fmt::Display for NssRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())
+    }
+}
+
 #[derive(Parser, Clone)]
 #[clap(rename_all = "snake_case")]
 enum ToolKind {
@@ -197,7 +214,7 @@ fn main() -> CmdResult {
 
     match Cmd::parse() {
         Cmd::Build { release } => {
-            let build_mode = build_mode(release);
+            let build_mode = cmd_build::build_mode(release);
             cmd_build::build_rust_servers(build_mode)?;
             cmd_build::build_zig_servers(build_mode)?;
             if release {
@@ -214,6 +231,7 @@ fn main() -> CmdResult {
                 BuildMode::Debug,
                 false,
                 Default::default(),
+                NssRole::Solo,
             )?;
 
             run_cmd! {
@@ -260,6 +278,7 @@ fn main() -> CmdResult {
                     BuildMode::Release,
                     false,
                     Default::default(),
+                    NssRole::Solo,
                 )
                 .unwrap();
             })?;
@@ -270,12 +289,14 @@ fn main() -> CmdResult {
             release,
             for_gui,
             data_blob_storage,
+            nss_role,
         } => cmd_service::run_cmd_service(
             service,
             action,
-            build_mode(release),
+            cmd_build::build_mode(release),
             for_gui,
             data_blob_storage,
+            nss_role,
         )?,
         Cmd::Tool(tool_kind) => cmd_tool::run_cmd_tool(tool_kind)?,
         Cmd::Deploy {

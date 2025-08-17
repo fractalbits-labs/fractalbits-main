@@ -60,7 +60,7 @@ pub fn run_cmd_bench(
         BenchService::NssRpc => {
             *service_name = ServiceName::Nss;
             build_rewrk_rpc()?;
-            start_nss_service(build_mode, nss_data_on_local, NssRole::Solo)?;
+            start_nss_service(build_mode, nss_data_on_local)?;
             uri = "127.0.0.1:8087";
             bench_exe = "./target/release/rewrk_rpc";
             bench_opts.extend_from_slice(&[

@@ -61,6 +61,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
       allowAllOutbound: true,
     });
     privateSg.addIngressRule(ec2.Peer.ipv4(this.vpc.vpcCidrBlock), ec2.Port.tcp(8088), 'Allow access to port 8088 from within VPC');
+    privateSg.addIngressRule(ec2.Peer.ipv4(this.vpc.vpcCidrBlock), ec2.Port.tcp(9999), 'Allow access to port 9999 from within VPC');
     if (props.benchType == "external") {
       // Allow incoming traffic on port 7761 for bench clients
       privateSg.addIngressRule(ec2.Peer.ipv4(this.vpc.vpcCidrBlock), ec2.Port.tcp(7761), 'Allow access to port 7761 from within VPC');
@@ -226,7 +227,9 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
     // Create PrivateLink setup for NSS and RSS services
     const servicePort = 8088;
+    const mirrordPort = 9999;
     const nssPrivateLink = createPrivateLinkNlb(this, 'Nss', this.vpc, [instances['nss-A'], instances['nss-B']], servicePort);
+    const mirrordPrivateLink = createPrivateLinkNlb(this, 'Mirrord', this.vpc, [instances['nss-A'], instances['nss-B']], mirrordPort);
     const rssPrivateLink = createPrivateLinkNlb(this, 'Rss', this.vpc, [instances['root_server']], servicePort);
 
     // Reusable function to create bootstrap options for api_server and gui_server
@@ -284,11 +287,11 @@ export class FractalbitsVpcStack extends cdk.Stack {
       },
       {
         id: 'nss-A',
-        bootstrapOptions: `${forBenchFlag} nss_server --bucket=${bucketName} --volume_id=${ebsVolumeAId} --iam_role=${ec2Role.roleName} --standby_ip=${instances['nss-B'].instancePrivateIp}`
+        bootstrapOptions: `${forBenchFlag} nss_server --bucket=${bucketName} --volume_id=${ebsVolumeAId} --iam_role=${ec2Role.roleName} --mirrord_endpoint=${mirrordPrivateLink.endpointDns}`
       },
       {
         id: 'nss-B',
-        bootstrapOptions: `${forBenchFlag} nss_server --bucket=${bucketName} --volume_id=${ebsVolumeBId} --iam_role=${ec2Role.roleName} --standby_ip=${instances['nss-A'].instancePrivateIp}`
+        bootstrapOptions: `${forBenchFlag} nss_server --bucket=${bucketName} --volume_id=${ebsVolumeBId} --iam_role=${ec2Role.roleName} --mirrord_endpoint=${mirrordPrivateLink.endpointDns}`
       },
     ];
     if (props.benchType === "external") {
@@ -322,6 +325,11 @@ export class FractalbitsVpcStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'ApiNLBDnsName', {
       value: nlb ? nlb.loadBalancerDnsName : 'NLB not created',
       description: 'DNS name of the API NLB',
+    });
+
+    new cdk.CfnOutput(this, 'MirrordNLBDnsName', {
+      value: mirrordPrivateLink.endpointDns,
+      description: 'DNS name of the Mirrord NLB',
     });
 
     this.nlbLoadBalancerDnsName = nlb ? nlb.loadBalancerDnsName : "";

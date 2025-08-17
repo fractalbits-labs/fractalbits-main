@@ -86,7 +86,6 @@ fn run_s3_api_tests() -> CmdResult {
         BuildMode::Debug,
         false,
         Default::default(),
-        NssRole::Solo,
     )?;
     run_cmd! {
         info "Run cargo tests (s3 api tests)";
@@ -105,7 +104,6 @@ fn run_leader_election_tests() -> CmdResult {
         BuildMode::Debug,
         false,
         DataBlobStorage::HybridSingleAz,
-        NssRole::Active,
     )?;
 
     run_cmd! {

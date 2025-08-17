@@ -89,9 +89,6 @@ enum Cmd {
         )]
         #[arg(default_value_t)]
         data_blob_storage: DataBlobStorage,
-
-        #[clap(long, long_help = "NSS role: active or solo", default_value = "active")]
-        nss_role: NssRole,
     },
 
     #[clap(about = "Run tool related commands (gen_uuids only for now)")]
@@ -231,7 +228,6 @@ fn main() -> CmdResult {
                 BuildMode::Debug,
                 false,
                 Default::default(),
-                NssRole::Solo,
             )?;
 
             run_cmd! {
@@ -289,14 +285,13 @@ fn main() -> CmdResult {
             release,
             for_gui,
             data_blob_storage,
-            nss_role,
         } => cmd_service::run_cmd_service(
             service,
             action,
             cmd_build::build_mode(release),
             for_gui,
             data_blob_storage,
-            nss_role,
+            NssRole::Solo,
         )?,
         Cmd::Tool(tool_kind) => cmd_tool::run_cmd_tool(tool_kind)?,
         Cmd::Deploy {

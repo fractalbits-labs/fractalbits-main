@@ -9,6 +9,7 @@ pub const BSS_SERVER_CONFIG: &str = "bss_server_cloud_config.toml";
 pub const NSS_SERVER_CONFIG: &str = "nss_server_cloud_config.toml";
 pub const MIRRORD_CONFIG: &str = "mirrord_cloud_config.toml";
 pub const ROOT_SERVER_CONFIG: &str = "root_server_cloud_config.toml";
+pub const NSS_ROLE_AGENT_CONFIG: &str = "nss_role_agent_cloud_config.toml";
 pub const BENCH_SERVER_BENCH_START_SCRIPT: &str = "bench_start.sh";
 pub const BOOTSTRAP_DONE_FILE: &str = "/opt/fractalbits/.bootstrap_done";
 pub const STATS_LOGROTATE_CONFIG: &str = "/etc/logrotate.d/stats_logs";
@@ -58,7 +59,6 @@ pub fn create_systemd_unit_file_with_extra_opts(
     enable_now: bool,
 ) -> CmdResult {
     let aws_region = get_current_aws_region()?;
-    let instance_id = get_instance_id()?;
     let working_dir = "/data";
     let mut requires = "";
     let mut env_settings = String::new();
@@ -69,9 +69,9 @@ Environment="RUST_LOG=info""##
                 .to_string();
             format!("{BIN_PATH}{service_name} -c {ETC_PATH}{API_SERVER_CONFIG} {extra_start_opts}")
         }
-        "nss@" => {
+        "nss" => {
             requires = "data-ebs.mount data-local.mount";
-            format!("{BIN_PATH}nss_server serve --nss_role %i -c {ETC_PATH}{NSS_SERVER_CONFIG}")
+            format!("{BIN_PATH}nss_server serve -c {ETC_PATH}{NSS_SERVER_CONFIG}")
         }
         "mirrord" => {
             requires = "data-ebs.mount data-local.mount";
@@ -91,13 +91,10 @@ Environment="RUST_LOG=info""##
             format!("{BIN_PATH}warp client")
         }
         "nss_role_agent" => {
-            env_settings = format!(
-                r##"
-Environment="RUST_LOG=info"
-Environment="APP_AGENT_ID={instance_id}"
-"##
-            );
-            format!("{BIN_PATH}{service_name}")
+            env_settings = r##"
+Environment="RUST_LOG=info""##
+                .to_string();
+            format!("{BIN_PATH}{service_name} -c {ETC_PATH}{NSS_ROLE_AGENT_CONFIG}")
         }
         // "ebs-failover" => {
         //     env_settings = r##"
@@ -138,17 +135,10 @@ WantedBy=multi-user.target
         echo $systemd_unit_content > ${ETC_PATH}${service_file};
     }?;
 
-    if service_name == "nss@" {
-        run_cmd! {
-            info "Linking ${ETC_PATH}${service_file}";
-            systemctl link ${ETC_PATH}${service_file} --force --quiet;
-        }?;
-    } else {
-        run_cmd! {
-            info "Enabling ${ETC_PATH}${service_file} (enable_now=${enable_now})";
-            systemctl enable ${ETC_PATH}${service_file} --force --quiet ${enable_now_opt};
-        }?;
-    }
+    run_cmd! {
+        info "Enabling ${ETC_PATH}${service_file} (enable_now=${enable_now})";
+        systemctl enable ${ETC_PATH}${service_file} --force --quiet ${enable_now_opt};
+    }?;
     Ok(())
 }
 

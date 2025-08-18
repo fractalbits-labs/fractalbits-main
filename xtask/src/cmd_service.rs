@@ -32,7 +32,7 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
         start_ddb_local_service()?;
 
         // Create main keys-and-buckets table
-        const DDB_TABLE_NAME: &str = "fractalbits-keys-and-buckets";
+        const DDB_TABLE_NAME: &str = "fractalbits-api-keys-and-buckets";
         run_cmd! {
             info "Initializing table: $DDB_TABLE_NAME ...";
             AWS_DEFAULT_REGION=fakeRegion
@@ -61,29 +61,33 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
                 --provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=1 >/dev/null;
         }?;
 
-        // Initialize NSS role state in DDB table for nss_role_agent
-        let nss_a_item = r#"{"id":{"S":"nss-A"},"value":{"S":"active"},"version":{"N":"1"}}"#;
-        let nss_b_item = r#"{"id":{"S":"nss-B"},"value":{"S":"standby"},"version":{"N":"1"}}"#;
-
+        // Create service-discovery table for NSS role states
+        const SERVICE_DISCOVERY_TABLE: &str = "fractalbits-service-discovery";
         run_cmd! {
-            info "Initializing NSS role state in $DDB_TABLE_NAME ...";
+            info "Creating service-discovery table: $SERVICE_DISCOVERY_TABLE ...";
             AWS_DEFAULT_REGION=fakeRegion
             AWS_ACCESS_KEY_ID=fakeMyKeyId
             AWS_SECRET_ACCESS_KEY=fakeSecretAccessKey
             AWS_ENDPOINT_URL_DYNAMODB="http://localhost:8000"
-            aws dynamodb put-item
-                --table-name $DDB_TABLE_NAME
-                --item $nss_a_item >/dev/null;
+            aws dynamodb create-table
+                --table-name $SERVICE_DISCOVERY_TABLE
+                --attribute-definitions AttributeName=service_id,AttributeType=S
+                --key-schema AttributeName=service_id,KeyType=HASH
+                --provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=1 >/dev/null;
         }?;
 
+        // Initialize NSS role states in service-discovery table
+        let nss_roles_item = r#"{"service_id":{"S":"nss_roles"},"states":{"M":{"nss-A":{"S":"active"},"nss-B":{"S":"standby"}}}}"#;
+
         run_cmd! {
+            info "Initializing NSS role states in service-discovery table ...";
             AWS_DEFAULT_REGION=fakeRegion
             AWS_ACCESS_KEY_ID=fakeMyKeyId
             AWS_SECRET_ACCESS_KEY=fakeSecretAccessKey
             AWS_ENDPOINT_URL_DYNAMODB="http://localhost:8000"
             aws dynamodb put-item
-                --table-name $DDB_TABLE_NAME
-                --item $nss_b_item >/dev/null;
+                --table-name $SERVICE_DISCOVERY_TABLE
+                --item $nss_roles_item >/dev/null;
         }?;
 
         Ok(())

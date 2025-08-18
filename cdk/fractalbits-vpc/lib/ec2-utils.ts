@@ -67,15 +67,21 @@ export const createEc2Role = (scope: Construct): iam.Role => {
   return role;
 };
 
-export const createServiceDiscoveryTable = (scope: Construct): dynamodb.Table => {
-  return new dynamodb.Table(scope, 'ServiceDiscoveryTable', {
+export const createDynamoDbTable = (
+  scope: Construct,
+  id: string,
+  tableName: string,
+  partitionKeyName: string,
+  partitionKeyType: dynamodb.AttributeType = dynamodb.AttributeType.STRING
+): dynamodb.Table => {
+  return new dynamodb.Table(scope, id, {
     partitionKey: {
-      name: 'service_id',
-      type: dynamodb.AttributeType.STRING,
+      name: partitionKeyName,
+      type: partitionKeyType,
     },
     removalPolicy: cdk.RemovalPolicy.DESTROY,
     billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-    tableName: 'fractalbits-service-discovery',
+    tableName: tableName,
   });
 };
 

@@ -2,7 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import {Construct} from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as s3 from 'aws-cdk-lib/aws-s3';
-import {createEbsVolume, createEc2Asg, createInstance, createUserData, createServiceDiscoveryTable, createEc2Role, createVpcEndpoints} from './ec2-utils';
+import {createEbsVolume, createEc2Asg, createInstance, createUserData, createDynamoDbTable, createEc2Role, createVpcEndpoints} from './ec2-utils';
 
 interface FractalbitsMetaStackProps extends cdk.StackProps {
   serviceName: string;
@@ -29,7 +29,7 @@ export class FractalbitsMetaStack extends cdk.Stack {
 
     createVpcEndpoints(this.vpc);
 
-    createServiceDiscoveryTable(this);
+    createDynamoDbTable(this, 'ServiceDiscoveryTable', 'fractalbits-service-discovery', 'service_id');
 
     const ec2Role = createEc2Role(this);
 

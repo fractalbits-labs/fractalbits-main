@@ -7,7 +7,7 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as autoscaling from 'aws-cdk-lib/aws-autoscaling';
 
-import {createInstance, createUserData, createEc2Asg, createEbsVolume, createServiceDiscoveryTable, createEc2Role, createVpcEndpoints, createPrivateLinkNlb} from './ec2-utils';
+import {createInstance, createUserData, createEc2Asg, createEbsVolume, createDynamoDbTable, createEc2Role, createVpcEndpoints, createPrivateLinkNlb} from './ec2-utils';
 
 export interface FractalbitsVpcStackProps extends cdk.StackProps {
   numApiServers: number;
@@ -125,27 +125,10 @@ export class FractalbitsVpcStack extends cdk.Stack {
       }
     }
 
-    new dynamodb.Table(this, 'FractalbitsTable', {
-      partitionKey: {
-        name: 'id',
-        type: dynamodb.AttributeType.STRING,
-      },
-      removalPolicy: cdk.RemovalPolicy.DESTROY, // Delete table on stack delete
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      tableName: 'fractalbits-keys-and-buckets',
-    });
-
-    createServiceDiscoveryTable(this);
-
-    new dynamodb.Table(this, 'LeaderElectionTable', {
-      partitionKey: {
-        name: 'key',
-        type: dynamodb.AttributeType.STRING,
-      },
-      removalPolicy: cdk.RemovalPolicy.DESTROY, // Delete table on stack delete
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      tableName: 'fractalbits-leader-election',
-    });
+    // Create DynamoDB tables
+    createDynamoDbTable(this, 'FractalbitsTable', 'fractalbits-api-keys-and-buckets', 'id');
+    createDynamoDbTable(this, 'ServiceDiscoveryTable', 'fractalbits-service-discovery', 'service_id');
+    createDynamoDbTable(this, 'LeaderElectionTable', 'fractalbits-leader-election', 'key');
 
     // new dynamodb.Table(this, 'EBSFailoverStateTable', {
     //   partitionKey: {

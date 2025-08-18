@@ -54,36 +54,27 @@ pub fn bootstrap(
 }
 
 fn initialize_nss_roles_in_ddb(nss_a_id: &str, nss_b_id: &str) -> CmdResult {
-    const DDB_TABLE_NAME: &str = "fractalbits-keys-and-buckets";
+    const DDB_SERVICE_DISCOVERY_TABLE: &str = "fractalbits-service-discovery";
     let region = get_current_aws_region()?;
 
-    info!("Initializing NSS role states in DynamoDB");
+    info!("Initializing NSS role states in service-discovery table");
     info!("Setting {nss_a_id} as active");
     info!("Setting {nss_b_id} as standby");
 
-    // Create items with instance IDs as keys
-    let nss_a_item =
-        format!(r#"{{"id":{{"S":"{nss_a_id}"}},"value":{{"S":"active"}},"version":{{"N":"1"}}}}"#);
-    let nss_b_item =
-        format!(r#"{{"id":{{"S":"{nss_b_id}"}},"value":{{"S":"standby"}},"version":{{"N":"1"}}}}"#);
+    // Create nss_roles entry with both instance states
+    let nss_roles_item = format!(
+        r#"{{"service_id":{{"S":"nss_roles"}},"states":{{"M":{{"{nss_a_id}":{{"S":"active"}},"{nss_b_id}":{{"S":"standby"}}}}}}}}"#
+    );
 
-    // Put active NSS role
+    // Put nss_roles entry with states map
     run_cmd! {
         aws dynamodb put-item
-            --table-name $DDB_TABLE_NAME
-            --item $nss_a_item
+            --table-name $DDB_SERVICE_DISCOVERY_TABLE
+            --item $nss_roles_item
             --region $region
     }?;
 
-    // Put standby NSS role
-    run_cmd! {
-        aws dynamodb put-item
-            --table-name $DDB_TABLE_NAME
-            --item $nss_b_item
-            --region $region
-    }?;
-
-    info!("NSS roles initialized in DynamoDB");
+    info!("NSS roles initialized in service-discovery table");
     Ok(())
 }
 

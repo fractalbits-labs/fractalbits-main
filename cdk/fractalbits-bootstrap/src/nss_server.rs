@@ -135,7 +135,6 @@ fn create_mirrord_config(volume_dev: &str) -> CmdResult {
 server_port = 9999
 num_threads = {num_cores}
 log_level = "info"
-mirrord_role = "standby"
 art_journal_segment_size = {art_journal_segment_size}
 "##
     );

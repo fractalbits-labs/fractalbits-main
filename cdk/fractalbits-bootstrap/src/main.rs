@@ -244,10 +244,7 @@ fn main() -> CmdResult {
         Command::BenchServer {
             api_server_endpoint,
             bench_client_num,
-        } => bench_server::bootstrap(
-            api_server_endpoint,
-            bench_client_num,
-        )?,
+        } => bench_server::bootstrap(api_server_endpoint, bench_client_num)?,
         Command::BenchClient => bench_client::bootstrap()?,
     }
 

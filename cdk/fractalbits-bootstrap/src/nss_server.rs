@@ -62,7 +62,7 @@ fn setup_configs(
     rss_endpoint: &str,
 ) -> CmdResult {
     let volume_dev = get_volume_dev(volume_id);
-    create_nss_config(bucket_name, &volume_dev, iam_role, mirrord_endpoint)?;
+    create_nss_config(bucket_name, &volume_dev, iam_role)?;
     create_mirrord_config(&volume_dev)?;
     create_mount_unit(&volume_dev, "/data/ebs", "ext4")?;
     create_ebs_udev_rule(volume_id, "nss_role_agent")?;
@@ -75,12 +75,7 @@ fn setup_configs(
     Ok(())
 }
 
-fn create_nss_config(
-    bucket_name: &str,
-    volume_dev: &str,
-    iam_role: &str,
-    mirrord_endpoint: &str,
-) -> CmdResult {
+fn create_nss_config(bucket_name: &str, volume_dev: &str, iam_role: &str) -> CmdResult {
     let aws_region = get_current_aws_region()?;
 
     // Get total memory in kilobytes from /proc/meminfo
@@ -105,7 +100,6 @@ fn create_nss_config(
     let art_thread_dataop_count = num_cores / 2;
     let art_thread_count = art_thread_dataop_count + 4;
 
-    let mirrord_host = mirrord_endpoint;
     let config_content = format!(
         r##"working_dir = "/data"
 server_port = 8088
@@ -116,8 +110,6 @@ blob_dram_kilo_bytes = {blob_dram_kilo_bytes}
 art_journal_segment_size = {art_journal_segment_size}
 log_level = "info"
 iam_role = "{iam_role}"
-nss_role = "solo"
-mirrord_host = "{mirrord_host}"
 mirrord_port = 9999
 
 [s3_cache]

@@ -5,7 +5,6 @@ use std::io::Error;
 const COMMAND_TIMEOUT_SECONDS: u64 = 300;
 const POLL_INTERVAL_SECONDS: u64 = 5;
 const MAX_POLL_ATTEMPTS: u64 = 60;
-const NSS_ROLE: &str = "solo";
 
 pub fn bootstrap(
     nss_a_id: &str,
@@ -31,7 +30,7 @@ pub fn bootstrap(
     if let Some(follower_id) = follower_id {
         for (nss_id, volume_id, role) in [
             (nss_b_id, volume_b_id, "standby"),
-            (nss_a_id, volume_a_id, NSS_ROLE),
+            (nss_a_id, volume_a_id, "active"),
         ] {
             info!("Formatting NSS instance {nss_id} ({role}) with volume {volume_id}");
             // Format EBS with SSM
@@ -62,12 +61,12 @@ fn initialize_nss_roles_in_ddb(nss_a_id: &str, nss_b_id: &str) -> CmdResult {
     let region = get_current_aws_region()?;
 
     info!("Initializing NSS role states in service-discovery table");
-    info!("Setting {nss_a_id} as {NSS_ROLE}");
+    info!("Setting {nss_a_id} as active");
     info!("Setting {nss_b_id} as standby");
 
     // Create nss_roles entry with both instance states
     let nss_roles_item = format!(
-        r#"{{"service_id":{{"S":"nss_roles"}},"states":{{"M":{{"{nss_a_id}":{{"S":"{NSS_ROLE}"}},"{nss_b_id}":{{"S":"standby"}}}}}}}}"#
+        r#"{{"service_id":{{"S":"nss_roles"}},"states":{{"M":{{"{nss_a_id}":{{"S":"active"}},"{nss_b_id}":{{"S":"standby"}}}}}}}}"#
     );
 
     // Put nss_roles entry with states map

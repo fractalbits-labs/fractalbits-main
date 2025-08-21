@@ -9,6 +9,7 @@ pub fn run_cmd_deploy(
     release_mode: bool,
     target_arm: bool,
     bss_use_i3: bool,
+    bootstrap_only: bool,
 ) -> CmdResult {
     let build_info = BUILD_INFO.get().unwrap();
     let bucket_name = get_build_bucket_name()?;
@@ -34,6 +35,14 @@ pub fn run_cmd_deploy(
             ["-Dtarget=x86_64-linux-gnu", "-Dcpu=cascadelake", ""],
         )
     };
+    let arch = if target_arm { "aarch64" } else { "x86_64" };
+
+    if bootstrap_only {
+        // Build fractalbits-bootstrap binary only, in debug mode
+        build_bootstrap_only(rust_build_target)?;
+        run_cmd!(aws s3 cp target/$rust_build_target/debug/fractalbits-bootstrap $bucket/$arch/fractalbits-bootstrap)?;
+        return Ok(());
+    }
 
     run_cmd! {
         info "Building Rust projects with zigbuild";
@@ -123,7 +132,6 @@ pub fn run_cmd_deploy(
         // "ebs-failover",
         "rewrk_rpc",
     ];
-    let arch = if target_arm { "aarch64" } else { "x86_64" };
     let build_dir = if release_mode { "release" } else { "debug" };
     for bin in &rust_bins {
         run_cmd!(aws s3 cp target/$rust_build_target/$build_dir/$bin $bucket/$arch/$bin)?;
@@ -152,6 +160,16 @@ pub fn run_cmd_deploy(
         run_cmd!(aws s3 cp zig-out/bin/bss_server $bucket/$arch/bss_server)?;
     };
 
+    Ok(())
+}
+
+fn build_bootstrap_only(rust_build_target: &str) -> CmdResult {
+    let build_info = BUILD_INFO.get().unwrap();
+    run_cmd! {
+        info "Building fractalbits-bootstrap";
+        BUILD_INFO=$build_info
+        cargo zigbuild -p fractalbits-bootstrap --target $rust_build_target;
+    }?;
     Ok(())
 }
 

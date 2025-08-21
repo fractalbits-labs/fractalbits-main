@@ -111,6 +111,9 @@ enum Cmd {
 
         #[clap(long)]
         bss_use_i3: bool,
+
+        #[clap(long)]
+        bootstrap_only: bool,
     },
 
     #[clap(about = "Grant S3 build bucket policy")]
@@ -300,12 +303,14 @@ fn main() -> CmdResult {
             release,
             target_arm,
             bss_use_i3,
+            bootstrap_only,
         } => cmd_deploy::run_cmd_deploy(
             use_s3_backend,
             enable_dev_mode,
             release,
             target_arm,
             bss_use_i3,
+            bootstrap_only,
         )?,
         Cmd::GrantBuildBucket => cmd_deploy::update_builds_bucket_access_policy()?,
     }

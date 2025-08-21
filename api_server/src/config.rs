@@ -8,8 +8,8 @@ pub enum BlobStorageBackend {
     BssOnlySingleAz,
     HybridSingleAz,
     S3ExpressSingleAz,
-    #[default]
     S3ExpressMultiAz,
+    #[default]
     S3ExpressMultiAzWithTracking,
 }
 
@@ -171,7 +171,7 @@ impl Default for Config {
             http_request_timeout_seconds: 5,
             rpc_timeout_seconds: 4,
             blob_storage: BlobStorageConfig {
-                backend: BlobStorageBackend::S3ExpressMultiAz,
+                backend: BlobStorageBackend::S3ExpressMultiAzWithTracking,
                 bss: None,
                 s3_hybrid_single_az: None,
                 s3_express_multi_az: Some(S3ExpressMultiAzConfig::default()),

@@ -23,6 +23,11 @@ pub fn bootstrap(
     // Initialize NSS role states in DynamoDB
     initialize_nss_roles_in_ddb(nss_a_id, nss_b_id)?;
 
+    // Initialize AZ status if this is a multi-AZ deployment
+    if let Some(remote_az) = remote_az {
+        initialize_az_status_in_ddb(remote_az)?;
+    }
+
     create_rss_config()?;
     // setup_cloudwatch_agent()?;
     create_systemd_unit_file("root_server", follower_id.is_some())?;
@@ -89,6 +94,30 @@ fn initialize_nss_roles_in_ddb(nss_a_id: &str, nss_b_id: &str) -> CmdResult {
     }?;
 
     info!("NSS roles initialized in service-discovery table");
+    Ok(())
+}
+
+fn initialize_az_status_in_ddb(remote_az: &str) -> CmdResult {
+    const DDB_SERVICE_DISCOVERY_TABLE: &str = "fractalbits-service-discovery";
+    let region = get_current_aws_region()?;
+    let local_az = get_current_aws_az_id()?;
+
+    info!("Initializing AZ status in service-discovery table");
+    info!("Setting {local_az} and {remote_az} to Normal");
+
+    let az_status_item = format!(
+        r#"{{"service_id":{{"S":"az_status"}},"status":{{"M":{{"{local_az}":{{"S":"Normal"}},"{remote_az}":{{"S":"Normal"}}}}}}}}"#
+    );
+
+    // Put az_status entry with status map
+    run_cmd! {
+        aws dynamodb put-item
+            --table-name $DDB_SERVICE_DISCOVERY_TABLE
+            --item $az_status_item
+            --region $region
+    }?;
+
+    info!("AZ status initialized in service-discovery table ({local_az}: Normal, {remote_az}: Normal)");
     Ok(())
 }
 

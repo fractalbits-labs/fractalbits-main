@@ -90,6 +90,20 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
                 --item $nss_roles_item >/dev/null;
         }?;
 
+        // Initialize AZ status in service-discovery table (using mock AZ names for local testing)
+        let az_status_item = r#"{"service_id":{"S":"az_status"},"status":{"M":{"az1":{"S":"Normal"},"az2":{"S":"Normal"}}}}"#;
+
+        run_cmd! {
+            info "Initializing AZ status in service-discovery table ...";
+            AWS_DEFAULT_REGION=fakeRegion
+            AWS_ACCESS_KEY_ID=fakeMyKeyId
+            AWS_SECRET_ACCESS_KEY=fakeSecretAccessKey
+            AWS_ENDPOINT_URL_DYNAMODB="http://localhost:8000"
+            aws dynamodb put-item
+                --table-name $SERVICE_DISCOVERY_TABLE
+                --item $az_status_item >/dev/null;
+        }?;
+
         Ok(())
     };
     let init_rss = || -> CmdResult {

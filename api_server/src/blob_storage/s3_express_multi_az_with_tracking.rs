@@ -26,13 +26,13 @@ pub struct S3ExpressWithTrackingConfig {
     pub local_az: String,
     pub remote_az: String,
     pub local_az_host: String,
-    pub local_az_port: u16,
-    pub local_az_bucket: String,
-    pub remote_az_bucket: String,
     #[allow(dead_code)] // Will be used for separate remote AZ client
     pub remote_az_host: Option<String>,
+    pub local_az_port: u16,
     #[allow(dead_code)] // Will be used for separate remote AZ client
     pub remote_az_port: Option<u16>,
+    pub local_az_bucket: String,
+    pub remote_az_bucket: String,
     pub rate_limit_config: S3RateLimitConfig,
     pub retry_config: S3RetryConfig,
     pub prewarming_config: SessionPrewarmingConfig,
@@ -45,20 +45,11 @@ pub struct S3ExpressMultiAzWithTracking {
     data_blob_tracker: Arc<DataBlobTracker>,
     rss_client: Arc<RpcClientRss>,
     nss_client: Arc<RpcClientNss>,
-    /// Key for storing AZ availability status in RSS
-    az_status_key: String,
+    local_az: String,
     remote_az: String,
     retry_config: S3RetryConfig,
     _prewarming_service: Option<Arc<SessionPrewarmingService>>,
     _prewarming_task: Option<tokio::task::JoinHandle<()>>,
-}
-
-#[derive(Debug, Clone)]
-pub enum AzStatus {
-    Normal,   // Both AZs available
-    Degraded, // Remote AZ unavailable
-    Resync,   // Resyncing from degraded
-    Sanitize, // Cleaning up after resync
 }
 
 impl From<DataBlobTrackingError> for BlobStorageError {
@@ -132,7 +123,7 @@ impl S3ExpressMultiAzWithTracking {
             data_blob_tracker,
             rss_client,
             nss_client,
-            az_status_key: format!("az_status/{}", config.local_az),
+            local_az: config.local_az.clone(),
             remote_az: config.remote_az.clone(),
             retry_config: config.retry_config.clone(),
             _prewarming_service: prewarming_service,
@@ -248,41 +239,29 @@ impl S3ExpressMultiAzWithTracking {
         }
     }
 
-    /// Check current AZ status from RSS
-    async fn get_az_status(&self) -> AzStatus {
-        match self.rss_client.get(&self.az_status_key, None).await {
-            Ok((_version, value)) => match value.as_str() {
-                "Normal" => AzStatus::Normal,
-                "Degraded" => AzStatus::Degraded,
-                "Resync" => AzStatus::Resync,
-                "Sanitize" => AzStatus::Sanitize,
-                _ => {
-                    warn!("Unknown AZ status, defaulting to Normal");
-                    AzStatus::Normal
-                }
-            },
-            Err(_) => {
-                // Default to Normal if status not found
-                AzStatus::Normal
+    /// Check current AZ status from RSS service discovery
+    async fn get_local_az_status(&self) -> String {
+        match self.rss_client.get_az_status(None).await {
+            Ok(status_map) => status_map
+                .az_status
+                .get(&self.local_az)
+                .unwrap_or(&"Normal".to_string())
+                .clone(),
+            Err(e) => {
+                warn!("Failed to get AZ status: {}, defaulting to Normal", e);
+                "Normal".to_string()
             }
         }
     }
 
-    /// Set AZ status in RSS
-    async fn set_az_status(&self, status: AzStatus) -> Result<(), BlobStorageError> {
-        let status_str = match status {
-            AzStatus::Normal => "Normal",
-            AzStatus::Degraded => "Degraded",
-            AzStatus::Resync => "Resync",
-            AzStatus::Sanitize => "Sanitize",
-        };
-
+    /// Set AZ status for a specific AZ in RSS service discovery
+    async fn set_az_status(&self, az_id: &str, status: &str) -> Result<(), BlobStorageError> {
         self.rss_client
-            .put(1, &self.az_status_key, status_str, None)
+            .set_az_status(az_id, status, None)
             .await
             .map_err(|e| BlobStorageError::S3(format!("Failed to set AZ status: {e}")))?;
 
-        info!("AZ status changed to: {:?}", status);
+        info!("AZ status changed - {}: {}", az_id, status);
         Ok(())
     }
 
@@ -341,10 +320,10 @@ impl BlobStorage for S3ExpressMultiAzWithTracking {
         let s3_key = blob_key(blob_id, block_number);
 
         // Get current AZ status
-        let az_status = self.get_az_status().await;
+        let az_status = self.get_local_az_status().await;
 
-        let result: Result<(), BlobStorageError> = match az_status {
-            AzStatus::Normal => {
+        let result: Result<(), BlobStorageError> = match az_status.as_str() {
+            "Normal" => {
                 // Normal mode: write to both buckets concurrently
                 let (local_result, remote_result) = tokio::join!(
                     self.put_object_with_retry(&self.local_az_bucket, &s3_key, body.clone()),
@@ -364,7 +343,7 @@ impl BlobStorage for S3ExpressMultiAzWithTracking {
                 if !remote_success {
                     // Remote failed, switch to degraded mode and record single-copy blob
                     warn!("Remote AZ failed, switching to degraded mode");
-                    self.set_az_status(AzStatus::Degraded).await?;
+                    self.set_az_status(&self.remote_az, "Degraded").await?;
 
                     // Record this blob as single-copy
                     let metadata = self.remote_az.as_bytes();
@@ -392,7 +371,7 @@ impl BlobStorage for S3ExpressMultiAzWithTracking {
 
                 Ok(())
             }
-            AzStatus::Degraded => {
+            "Degraded" => {
                 // Degraded mode: write only to local, record as single-copy
                 let local_result = s3_retry!(
                     "put_blob",
@@ -431,16 +410,9 @@ impl BlobStorage for S3ExpressMultiAzWithTracking {
 
                 Ok(())
             }
-            AzStatus::Resync | AzStatus::Sanitize => {
+            "Resync" | "Sanitize" => {
                 // During resync/sanitize, still write only to local to avoid conflicts
-                warn!(
-                    "Writing in {} mode, using local-only storage",
-                    match az_status {
-                        AzStatus::Resync => "resync",
-                        AzStatus::Sanitize => "sanitize",
-                        _ => "unknown",
-                    }
-                );
+                warn!("Writing in {} mode, using local-only storage", az_status);
 
                 let local_result = s3_retry!(
                     "put_blob",
@@ -457,15 +429,7 @@ impl BlobStorage for S3ExpressMultiAzWithTracking {
                 );
 
                 if let Err(e) = local_result {
-                    error!(
-                        "Local AZ bucket write failed in {} mode: {}",
-                        match az_status {
-                            AzStatus::Resync => "resync",
-                            AzStatus::Sanitize => "sanitize",
-                            _ => "unknown",
-                        },
-                        e
-                    );
+                    error!("Local AZ bucket write failed in {} mode: {}", az_status, e);
                     return Err(BlobStorageError::S3(format!(
                         "Local bucket write failed: {e}"
                     )));
@@ -475,6 +439,34 @@ impl BlobStorage for S3ExpressMultiAzWithTracking {
                 let metadata = self.remote_az.as_bytes();
                 self.record_single_copy_blob(blob_id, block_number, metadata)
                     .await?;
+
+                Ok(())
+            }
+            _ => {
+                warn!(
+                    "Unknown AZ status: {}, defaulting to Normal behavior",
+                    az_status
+                );
+                // Default to Normal behavior
+                let (local_result, remote_result) = tokio::join!(
+                    self.put_object_with_retry(&self.local_az_bucket, &s3_key, body.clone()),
+                    self.put_object_with_retry(&self.remote_az_bucket, &s3_key, body.clone())
+                );
+
+                if local_result.is_err() {
+                    error!("Local AZ bucket write failed: {:?}", local_result);
+                    return Err(BlobStorageError::S3(
+                        "Local bucket write failed".to_string(),
+                    ));
+                }
+
+                if !remote_result.is_ok() {
+                    warn!("Remote AZ failed, switching to degraded mode");
+                    self.set_az_status(&self.remote_az, "Degraded").await?;
+                    let metadata = self.remote_az.as_bytes();
+                    self.record_single_copy_blob(blob_id, block_number, metadata)
+                        .await?;
+                }
 
                 Ok(())
             }

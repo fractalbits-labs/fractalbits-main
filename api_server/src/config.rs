@@ -70,13 +70,13 @@ impl Default for S3ExpressMultiAzConfig {
         Self {
             local_az_host: "http://127.0.0.1".into(),
             local_az_port: 9001,
-            s3_region: "us-west-1".into(),
-            local_az_bucket: "fractalbits-local-az-bucket".into(),
-            remote_az_bucket: "fractalbits-remote-az-bucket".into(),
+            s3_region: "localdev".into(),
+            local_az_bucket: "fractalbits-localdev-az1-data-bucket".into(),
+            remote_az_bucket: "fractalbits-localdev-az2-data-bucket".into(),
             remote_az_host: Some("127.0.0.1".into()),
             remote_az_port: Some(9002),
-            local_az: "az1".into(),
-            remote_az: "az2".into(),
+            local_az: "localdev-az1".into(),
+            remote_az: "localdev-az2".into(),
             ratelimit: RatelimitConfig::default(),
             retry_config: S3RetryConfig::default(),
         }
@@ -107,9 +107,9 @@ impl Default for S3ExpressSingleAzConfig {
         Self {
             s3_host: "http://127.0.0.1".into(),
             s3_port: 9000, // local minio port
-            s3_region: "us-west-1".into(),
+            s3_region: "localdev".into(),
             s3_bucket: "fractalbits-bucket".into(),
-            az: "us-west-1a".into(),
+            az: "localdev-az1".into(),
             force_path_style: true,
             ratelimit: RatelimitConfig::default(),
             retry_config: S3RetryConfig::default(),
@@ -125,6 +125,7 @@ pub struct Config {
     pub rss_conn_num: u16,
 
     pub port: u16,
+    pub mgmt_port: u16,
     pub region: String,
     pub root_domain: String,
     pub with_metrics: bool,
@@ -165,7 +166,8 @@ impl Default for Config {
             nss_conn_num: 2,
             rss_conn_num: 1,
             port: 8080,
-            region: "us-west-1".into(),
+            mgmt_port: 18080,
+            region: "localdev".into(),
             root_domain: ".localhost".into(),
             with_metrics: true,
             http_request_timeout_seconds: 5,

@@ -301,6 +301,9 @@ server_port = 8088
 # Server health port
 health_port = 18088
 
+# API Server management port
+api_server_mgmt_port = 18088
+
 # Leader Election Configuration
 [leader_election]
 # DynamoDB table name for leader election

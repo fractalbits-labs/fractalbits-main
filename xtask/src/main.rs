@@ -16,7 +16,7 @@ pub const TS_FMT: &str = "%b %d %H:%M:%.S";
 pub const NSS_SERVER_BENCH_CONFIG: &str = "nss_server_bench_config.toml";
 pub const API_SERVER_GUI_CONFIG: &str = "api_server_gui_config.toml";
 // Need to match with api_server's default config to make authentication work
-pub const UI_DEFAULT_REGION: &str = "us-west-1";
+pub const UI_DEFAULT_REGION: &str = "localdev";
 
 #[derive(Parser)]
 #[command(rename_all = "snake_case")]

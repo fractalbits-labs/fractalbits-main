@@ -89,7 +89,8 @@ async fn main() {
     }
 
     let port = config.port;
-    let app_state = AppState::new(Arc::new(config)).await;
+    let mgmt_port = config.mgmt_port;
+    let app_state = Arc::new(AppState::new(Arc::new(config)).await);
 
     let api_key_routes = Router::new()
         .route("/", post(api_key_routes::create_api_key))
@@ -109,18 +110,17 @@ async fn main() {
         )
         .route("/cache/clear", post(cache_mgmt::clear_cache));
 
-    let router = if let Some(web_root) = opt.gui_web_root {
+    // Main application router
+    let main_router = if let Some(web_root) = opt.gui_web_root {
         Router::new()
             .nest_service("/ui", ServeDir::new(web_root))
             .nest("/api_keys", api_key_routes)
-            .nest("/mgmt", mgmt_routes)
             .fallback(any_handler)
     } else {
-        Router::new()
-            .nest("/mgmt", mgmt_routes)
-            .fallback(any_handler)
+        Router::new().fallback(any_handler)
     };
-    let app = router
+
+    let main_app = main_router
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|req: &Request| {
@@ -134,11 +134,12 @@ async fn main() {
                 // logging of errors so disable that
                 .on_failure(()),
         )
-        .with_state(Arc::new(app_state))
+        .with_state(app_state.clone())
         .into_make_service_with_connect_info::<SocketAddr>();
 
-    let addr = format!("0.0.0.0:{port}");
-    let listener = tokio::net::TcpListener::bind(addr)
+    // Start main server
+    let main_addr = format!("0.0.0.0:{port}");
+    let main_listener = tokio::net::TcpListener::bind(main_addr)
         .await
         .unwrap()
         .tap_io(|tcp_stream| {
@@ -147,8 +148,48 @@ async fn main() {
             }
         });
 
-    info!("Server started at port {port}");
-    if let Err(e) = axum::serve(listener, app).await {
-        tracing::error!("Server stopped: {e}");
+    info!("Main server started at port {port}");
+
+    // Start management server
+    let mgmt_app = Router::new()
+        .nest("/mgmt", mgmt_routes)
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|req: &Request| {
+                    let method = req.method();
+                    let uri = req.uri();
+                    let path = uri.path();
+
+                    tracing::debug_span!("mgmt_request", %method, %uri, path)
+                })
+                .on_failure(()),
+        )
+        .with_state(app_state)
+        .into_make_service_with_connect_info::<SocketAddr>();
+
+    let mgmt_addr = format!("0.0.0.0:{mgmt_port}");
+    let mgmt_listener = tokio::net::TcpListener::bind(mgmt_addr)
+        .await
+        .unwrap()
+        .tap_io(|tcp_stream| {
+            if let Err(err) = tcp_stream.set_nodelay(true) {
+                tracing::warn!("failed to set TCP_NODELAY on mgmt connection: {err:#}");
+            }
+        });
+
+    info!("Management server started at port {mgmt_port}");
+
+    // Run both servers concurrently
+    tokio::select! {
+        result = axum::serve(main_listener, main_app) => {
+            if let Err(e) = result {
+                tracing::error!("Main server stopped: {e}");
+            }
+        }
+        result = axum::serve(mgmt_listener, mgmt_app) => {
+            if let Err(e) = result {
+                tracing::error!("Management server stopped: {e}");
+            }
+        }
     }
 }

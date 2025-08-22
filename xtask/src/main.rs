@@ -3,6 +3,7 @@ mod cmd_build;
 mod cmd_deploy;
 mod cmd_nightly;
 mod cmd_precheckin;
+mod cmd_run_tests;
 mod cmd_service;
 mod cmd_tool;
 
@@ -118,6 +119,12 @@ enum Cmd {
 
     #[clap(about = "Grant S3 build bucket policy")]
     GrantBuildBucket,
+
+    #[clap(about = "Run various test suites")]
+    RunTests {
+        #[clap(long_help = "Type of tests to run")]
+        test_type: TestType,
+    },
 }
 
 #[derive(Clone, AsRefStr, EnumString)]
@@ -192,6 +199,13 @@ impl std::fmt::Display for NssRole {
     }
 }
 
+#[derive(Parser, Clone, EnumString)]
+#[strum(serialize_all = "snake_case")]
+pub enum TestType {
+    MultiAz,
+    // Future test types can be added here
+}
+
 #[derive(Parser, Clone)]
 #[clap(rename_all = "snake_case")]
 enum ToolKind {
@@ -204,8 +218,9 @@ enum ToolKind {
     },
 }
 
+#[tokio::main]
 #[cmd_lib::main]
-fn main() -> CmdResult {
+async fn main() -> CmdResult {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_target(false)
         .init();
@@ -313,6 +328,7 @@ fn main() -> CmdResult {
             bootstrap_only,
         )?,
         Cmd::GrantBuildBucket => cmd_deploy::update_builds_bucket_access_policy()?,
+        Cmd::RunTests { test_type } => cmd_run_tests::run_tests(test_type).await?,
     }
     Ok(())
 }

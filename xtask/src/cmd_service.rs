@@ -834,7 +834,7 @@ fn create_dirs_for_bss_server() -> CmdResult {
     Ok(())
 }
 
-fn wait_for_service_ready(service: ServiceName, timeout_secs: u32) -> CmdResult {
+pub fn wait_for_service_ready(service: ServiceName, timeout_secs: u32) -> CmdResult {
     use std::time::{Duration, Instant};
 
     let start = Instant::now();

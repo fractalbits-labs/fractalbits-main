@@ -1,11 +1,56 @@
+use crate::cmd_service::{start_services, stop_service, wait_for_service_ready};
+use crate::{BuildMode, CmdResult, DataBlobStorage, ServiceName, TestType};
 use aws_sdk_s3::primitives::ByteStream;
 use cmd_lib::*;
+use colored::*;
 use std::time::Duration;
 use test_common::*;
 use tokio::time::sleep;
 
-#[tokio::test]
-async fn test_remote_az_service_interruption_and_recovery() {
+pub async fn run_tests(test_type: TestType) -> CmdResult {
+    match test_type {
+        TestType::MultiAz => run_multi_az_tests().await,
+    }
+}
+
+async fn run_multi_az_tests() -> CmdResult {
+    info!("Running multi-AZ resilience tests...");
+
+    // Run all three test scenarios
+    println!(
+        "\n{}",
+        "=== Test 1: Remote AZ Service Interruption and Recovery ===".bold()
+    );
+    if let Err(e) = test_remote_az_service_interruption_and_recovery().await {
+        eprintln!("{}: {}", "Test 1 FAILED".red().bold(), e);
+        return Err(e);
+    }
+
+    println!(
+        "\n{}",
+        "=== Test 2: Rapid Remote AZ Interruptions ===".bold()
+    );
+    if let Err(e) = test_rapid_remote_az_interruptions().await {
+        eprintln!("{}: {}", "Test 2 FAILED".red().bold(), e);
+        return Err(e);
+    }
+
+    println!("\n{}", "=== Test 3: Extended Remote AZ Outage ===".bold());
+    if let Err(e) = test_extended_remote_az_outage().await {
+        eprintln!("{}: {}", "Test 3 FAILED".red().bold(), e);
+        return Err(e);
+    }
+
+    println!(
+        "\n{}",
+        "=== All Multi-AZ Resilience Tests PASSED ==="
+            .green()
+            .bold()
+    );
+    Ok(())
+}
+
+async fn test_remote_az_service_interruption_and_recovery() -> CmdResult {
     let ctx = context();
 
     // Create test bucket
@@ -41,7 +86,7 @@ async fn test_remote_az_service_interruption_and_recovery() {
 
     // Simulate remote AZ going down
     println!("  Step 2: Simulating remote AZ service interruption...");
-    stop_remote_az_service().expect("Failed to stop remote AZ service");
+    stop_service(ServiceName::MinioAz2)?;
 
     // Wait a moment for the service to fully stop
     sleep(Duration::from_secs(2)).await;
@@ -87,12 +132,15 @@ async fn test_remote_az_service_interruption_and_recovery() {
 
     // Simulate remote AZ coming back online
     println!(" Step 4: Bringing remote AZ back online...");
-    start_remote_az_service().expect("Failed to start remote AZ service");
+    start_services(
+        ServiceName::MinioAz2,
+        BuildMode::Debug,
+        false,
+        DataBlobStorage::default(),
+    )?;
 
     // Wait for service to fully start and be ready
-    wait_for_remote_az_ready(30)
-        .await
-        .expect("Remote AZ service failed to start");
+    wait_for_service_ready(ServiceName::MinioAz2, 30)?;
     println!("OK: Remote AZ service back online");
 
     // Test that we can still access all objects after recovery
@@ -156,10 +204,10 @@ async fn test_remote_az_service_interruption_and_recovery() {
     println!("OK: New object uploaded and verified after recovery");
 
     println!("SUCCESS: Multi-AZ resilience test completed successfully!");
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_rapid_remote_az_interruptions() {
+async fn test_rapid_remote_az_interruptions() -> CmdResult {
     let ctx = context();
     let bucket_name = ctx.create_bucket("test-rapid-interruptions").await;
 
@@ -168,7 +216,7 @@ async fn test_rapid_remote_az_interruptions() {
     // Perform multiple rapid interruption cycles
     for cycle in 1..=3 {
         println!("  Cycle {cycle}: Stopping remote AZ");
-        stop_remote_az_service().expect("Failed to stop remote AZ service");
+        stop_service(ServiceName::MinioAz2)?;
         sleep(Duration::from_secs(1)).await;
 
         // Upload during outage
@@ -185,10 +233,13 @@ async fn test_rapid_remote_az_interruptions() {
             .expect("Failed to upload during rapid outage");
 
         println!("  Cycle {cycle}: Restarting remote AZ");
-        start_remote_az_service().expect("Failed to start remote AZ service");
-        wait_for_remote_az_ready(15)
-            .await
-            .expect("Remote AZ failed to restart");
+        start_services(
+            ServiceName::MinioAz2,
+            BuildMode::Debug,
+            false,
+            DataBlobStorage::default(),
+        )?;
+        wait_for_service_ready(ServiceName::MinioAz2, 15)?;
 
         // Verify data after restart
         let response = ctx
@@ -206,17 +257,17 @@ async fn test_rapid_remote_az_interruptions() {
     }
 
     println!("SUCCESS: Rapid interruption test completed successfully!");
+    Ok(())
 }
 
-#[tokio::test]
-async fn test_extended_remote_az_outage() {
+async fn test_extended_remote_az_outage() -> CmdResult {
     let ctx = context();
     let bucket_name = ctx.create_bucket("test-extended-outage").await;
 
     println!(" Testing extended remote AZ outage (10+ objects during downtime)...");
 
     // Stop remote AZ
-    stop_remote_az_service().expect("Failed to stop remote AZ service");
+    stop_service(ServiceName::MinioAz2)?;
     sleep(Duration::from_secs(2)).await;
 
     // Upload many objects during extended outage
@@ -253,10 +304,13 @@ async fn test_extended_remote_az_outage() {
     println!("  OK: All objects uploaded during extended outage");
 
     // Bring remote AZ back online
-    start_remote_az_service().expect("Failed to start remote AZ service");
-    wait_for_remote_az_ready(30)
-        .await
-        .expect("Remote AZ failed to start after extended outage");
+    start_services(
+        ServiceName::MinioAz2,
+        BuildMode::Debug,
+        false,
+        DataBlobStorage::default(),
+    )?;
+    wait_for_service_ready(ServiceName::MinioAz2, 30)?;
 
     // Verify all objects are still accessible
     for i in 1..=12 {
@@ -279,42 +333,5 @@ async fn test_extended_remote_az_outage() {
     }
 
     println!("SUCCESS: Extended outage test completed successfully!");
-}
-
-// Helper functions for service management
-fn stop_remote_az_service() -> Result<(), Box<dyn std::error::Error>> {
-    run_cmd!(cd ..; cargo xtask service stop minio_az2)?;
     Ok(())
 }
-
-fn start_remote_az_service() -> Result<(), Box<dyn std::error::Error>> {
-    run_cmd!(cd ..; cargo xtask service start minio_az2)?;
-    Ok(())
-}
-
-async fn wait_for_remote_az_ready(timeout_secs: u32) -> Result<(), Box<dyn std::error::Error>> {
-    use tokio::time::{timeout, Duration};
-
-    let result = timeout(Duration::from_secs(timeout_secs as u64), async {
-        loop {
-            if run_cmd!(nc -z localhost 9002).is_ok() {
-                // Give it a moment to be fully ready for requests
-                sleep(Duration::from_secs(1)).await;
-                return Ok(());
-            }
-            sleep(Duration::from_millis(500)).await;
-        }
-    })
-    .await;
-
-    match result {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(e),
-        Err(_) => {
-            Err(format!("Timeout waiting for remote AZ to be ready after {timeout_secs}s").into())
-        }
-    }
-}
-
-// Note: Data blob resync server tests have been moved to /data_blob_resync_server/tests/
-// This file now focuses on basic multi-AZ service interruption and recovery scenarios

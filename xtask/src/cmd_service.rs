@@ -414,7 +414,7 @@ pub fn start_nss_role_agent_service(build_mode: BuildMode, service_name: Service
     };
 
     run_cmd!(systemctl --user start $service_file)?;
-    wait_for_service_ready(service_name, 15)?;
+    wait_for_service_ready(service_name, 30)?;
 
     // For role agents, get the PID from systemd instead of pidof to avoid conflicts
     let pid_output = run_fun!(systemctl --user show --property=MainPID --value $service_file)?;

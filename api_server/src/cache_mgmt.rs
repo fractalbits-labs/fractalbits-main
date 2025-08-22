@@ -16,6 +16,11 @@ pub struct CacheInvalidationResponse {
     pub message: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AzStatusUpdateRequest {
+    pub status: String,
+}
+
 /// Invalidate a specific bucket from the cache
 pub async fn invalidate_bucket(
     State(app): State<Arc<AppState>>,
@@ -52,6 +57,42 @@ pub async fn invalidate_api_key(
     };
 
     (StatusCode::OK, Json(response))
+}
+
+/// Update az_status cache for a specific AZ with new status value
+pub async fn update_az_status(
+    State(app): State<Arc<AppState>>,
+    Path(az_id): Path<String>,
+    Json(request): Json<AzStatusUpdateRequest>,
+) -> impl IntoResponse {
+    info!(
+        "Updating az_status cache for: {} with status: {}",
+        az_id, request.status
+    );
+
+    if let Some(az_status_cache) = &app.az_status_cache {
+        let cache_key = format!("az_status:{}", az_id);
+        az_status_cache
+            .insert(cache_key, request.status.clone())
+            .await;
+
+        let response = CacheInvalidationResponse {
+            status: "success".to_string(),
+            message: format!(
+                "AZ status cache for '{}' updated to '{}'",
+                az_id, request.status
+            ),
+        };
+
+        (StatusCode::OK, Json(response))
+    } else {
+        let response = CacheInvalidationResponse {
+            status: "error".to_string(),
+            message: "AZ status cache not available for this storage backend".to_string(),
+        };
+
+        (StatusCode::NOT_FOUND, Json(response))
+    }
 }
 
 /// Clear the entire cache

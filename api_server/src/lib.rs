@@ -35,6 +35,7 @@ pub type BlobId = uuid::Uuid;
 pub struct AppState {
     pub config: Arc<Config>,
     pub cache: Arc<Cache<String, Versioned<String>>>,
+    pub az_status_cache: Option<Arc<Cache<String, String>>>,
 
     rpc_clients_nss: ConnPool<Arc<RpcClientNss>, String>,
     rpc_clients_rss: ConnPool<Arc<RpcClientRss>, String>,
@@ -101,26 +102,26 @@ impl AppState {
                 .build(),
         );
 
-        let blob_client = Arc::new(
-            BlobClient::new(
-                &config.blob_storage,
-                rx,
-                config.rpc_timeout(),
-                Some(data_blob_tracker.clone()),
-                rss_client_for_blob,
-                nss_client_for_blob,
-                cache.clone(),
-            )
-            .await
-            .expect("Failed to initialize blob client"),
-        );
+        let (blob_client, az_status_cache) = BlobClient::new(
+            &config.blob_storage,
+            rx,
+            config.rpc_timeout(),
+            Some(data_blob_tracker.clone()),
+            rss_client_for_blob,
+            nss_client_for_blob,
+            cache.clone(),
+        )
+        .await
+        .expect("Failed to initialize blob client");
+
         Self {
             config,
             rpc_clients_nss,
-            blob_client,
+            blob_client: Arc::new(blob_client),
             blob_deletion: tx,
             rpc_clients_rss,
             cache,
+            az_status_cache,
             data_blob_tracker,
         }
     }
@@ -225,7 +226,7 @@ impl BlobClient {
         rss_client: Option<Arc<RpcClientRss>>,
         nss_client: Option<Arc<RpcClientNss>>,
         _cache: Arc<Cache<String, Versioned<String>>>,
-    ) -> Result<Self, BlobStorageError> {
+    ) -> Result<(Self, Option<Arc<Cache<String, String>>>), BlobStorageError> {
         let storage = match &blob_storage_config.backend {
             BlobStorageBackend::BssOnlySingleAz => {
                 let bss_config = blob_storage_config.bss.as_ref().ok_or_else(|| {
@@ -336,16 +337,35 @@ impl BlobClient {
                         .build(),
                 );
 
-                BlobStorageImpl::S3ExpressMultiAzWithTracking(
+                let storage = BlobStorageImpl::S3ExpressMultiAzWithTracking(
                     S3ExpressMultiAzWithTracking::new(
                         &express_config,
                         data_blob_tracker,
                         rss_client,
                         nss_client,
-                        az_status_cache,
+                        az_status_cache.clone(),
                     )
                     .await?,
-                )
+                );
+
+                let storage = Arc::new(storage);
+
+                let blob_deletion_task_handle = tokio::spawn({
+                    let storage = storage.clone();
+                    async move {
+                        if let Err(e) = Self::blob_deletion_task(storage, rx).await {
+                            tracing::error!("FATAL: blob deletion task error: {e}");
+                        }
+                    }
+                });
+
+                return Ok((
+                    Self {
+                        storage,
+                        blob_deletion_task_handle,
+                    },
+                    Some(az_status_cache),
+                ));
             }
             BlobStorageBackend::S3ExpressSingleAz => {
                 let s3_express_single_az_config = blob_storage_config
@@ -385,10 +405,13 @@ impl BlobClient {
             }
         });
 
-        Ok(Self {
-            storage,
-            blob_deletion_task_handle,
-        })
+        Ok((
+            Self {
+                storage,
+                blob_deletion_task_handle,
+            },
+            None,
+        ))
     }
 
     async fn blob_deletion_task(

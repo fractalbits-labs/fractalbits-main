@@ -108,6 +108,10 @@ async fn main() {
             "/cache/invalidate/api_key/{id}",
             post(cache_mgmt::invalidate_api_key),
         )
+        .route(
+            "/cache/update/az_status/{id}",
+            post(cache_mgmt::update_az_status),
+        )
         .route("/cache/clear", post(cache_mgmt::clear_cache));
 
     // Main application router

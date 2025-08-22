@@ -184,6 +184,7 @@ dependencies = [
  "strum",
  "sync_wrapper 1.0.2",
  "tempfile",
+ "test_common",
  "thiserror 1.0.69",
  "tikv-jemallocator",
  "tokio",
@@ -4597,6 +4598,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_common"
+version = "0.1.0"
+dependencies = [
+ "aws-sdk-s3",
+ "cmd_lib",
+]
+
+[[package]]
 name = "textwrap"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5734,6 +5743,7 @@ dependencies = [
  "env_logger 0.11.8",
  "rlimit",
  "strum",
+ "test_common",
  "xtask_tools",
 ]
 

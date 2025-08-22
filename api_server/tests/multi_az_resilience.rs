@@ -1,8 +1,7 @@
-mod common;
 use aws_sdk_s3::primitives::ByteStream;
 use cmd_lib::*;
-use common::*;
 use std::time::Duration;
+use test_common::*;
 use tokio::time::sleep;
 
 #[tokio::test]

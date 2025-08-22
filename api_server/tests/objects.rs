@@ -1,6 +1,6 @@
-mod common;
 use aws_sdk_s3::primitives::{ByteStream, DateTime, DateTimeFormat};
 use aws_sdk_s3::types::{Delete, ObjectIdentifier};
+use test_common::*;
 
 const STD_KEY: &str = "hello world";
 const CTRL_KEY: &str = "\x00\x01\x02\x00";
@@ -9,7 +9,7 @@ const BODY: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqr
 
 #[tokio::test]
 async fn test_putobject() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("putobject").await;
 
     {
@@ -114,7 +114,7 @@ async fn test_putobject() {
 
 #[tokio::test]
 async fn test_getobject() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("getobject").await;
 
     let data = ByteStream::from_static(BODY);
@@ -175,7 +175,7 @@ async fn test_getobject() {
 
 #[tokio::test]
 async fn test_metadata() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("testmetadata").await;
 
     let exp = DateTime::from_secs(10000000000);
@@ -314,7 +314,7 @@ async fn test_metadata() {
 
 #[tokio::test]
 async fn test_deleteobject() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("deleteobject").await;
 
     let mut to_del = Delete::builder();

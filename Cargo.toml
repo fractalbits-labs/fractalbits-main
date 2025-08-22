@@ -17,6 +17,7 @@ members = [
     "rpc_clients/nss",
     "rpc_clients/rss",
     "rpc_clients/slotmap_conn_pool",
+    "test_common",
     "xtask",
     "xtask/tools",
 ]
@@ -31,6 +32,7 @@ rpc_client_bss = { path = "rpc_clients/bss" }
 rpc_client_nss = { path = "rpc_clients/nss" }
 rpc_client_rss = { path = "rpc_clients/rss" }
 slotmap_conn_pool = { path = "rpc_clients/slotmap_conn_pool" }
+test_common = { path = "test_common" }
 xtask_tools = { path = "xtask/tools" }
 
 tokio-util = { version = "0.7.12", features = ["codec"] }

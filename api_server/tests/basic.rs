@@ -1,9 +1,9 @@
-mod common;
 use aws_sdk_s3::primitives::ByteStream;
+use test_common::*;
 
 #[tokio::test]
 async fn test_basic_object_apis() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("my-bucket1").await;
 
     let key = "hello";
@@ -43,7 +43,7 @@ async fn test_basic_object_apis() {
 
 #[tokio::test]
 async fn test_basic_bucket_apis() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("my-bucket2").await;
 
     let buckets = ctx.list_buckets().await.buckets.unwrap();

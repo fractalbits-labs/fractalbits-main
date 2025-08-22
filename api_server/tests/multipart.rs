@@ -1,14 +1,14 @@
-mod common;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
 use base64::prelude::*;
+use test_common::*;
 
 const SZ_5MB: usize = 5 * 1024 * 1024;
 const SZ_10MB: usize = 10 * 1024 * 1024;
 
 #[tokio::test]
 async fn test_multipart_upload() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("test-mpu").await;
 
     let u1 = vec![0x11; SZ_5MB];
@@ -201,7 +201,7 @@ async fn test_multipart_upload() {
 
 #[tokio::test]
 async fn test_multipart_with_checksum() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("testmpu-cksum").await;
 
     let u1 = vec![0x11; SZ_5MB];
@@ -348,7 +348,7 @@ async fn test_multipart_with_checksum() {
 
 #[tokio::test]
 async fn test_uploadlistpart() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("uploadpart").await;
     // Use a unique key to avoid interference from other tests or previous runs
     let test_key = format!(
@@ -568,7 +568,7 @@ async fn test_uploadlistpart() {
 #[ignore = "unimplemented"]
 #[tokio::test]
 async fn test_uploadpartcopy() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("uploadpartcopy").await;
 
     let u1 = vec![0x11; SZ_10MB];

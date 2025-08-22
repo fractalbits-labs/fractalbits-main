@@ -1,13 +1,12 @@
 // convert from aws's s3 rust sdk tests
-mod common;
 
 use aws_sdk_s3::{
     operation::get_object::GetObjectOutput, primitives::ByteStream, types::ChecksumAlgorithm,
     types::ChecksumMode,
 };
 use axum::http::HeaderValue;
-use common::Context;
-use rstest::*;
+use rstest::rstest;
+use test_common::{assert_bytes_eq, context, Context};
 
 // The test structure is identical for all supported checksum algorithms
 #[allow(clippy::too_many_arguments)]
@@ -204,7 +203,7 @@ async fn test_sha256_checksum(#[case] streaming: bool) {
 }
 
 async fn setup(bucket: &str) -> (Context, String, String) {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket(bucket).await;
     let key = "test.txt".to_string();
     (ctx, bucket, key)

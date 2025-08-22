@@ -1,11 +1,11 @@
-mod common;
+use test_common::*;
 
 const KEYS: [&str; 8] = ["a", "a/a", "a/b", "a/c", "a/d/a", "a/é", "b", "c"];
 const KEYS_MULTIPART: [&str; 5] = ["a", "a", "c", "c/a", "c/b"];
 
 #[tokio::test]
 async fn test_listobjectsv2() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("listobjectsv2").await;
 
     for k in KEYS {
@@ -223,7 +223,7 @@ async fn test_listobjectsv2() {
 
 #[tokio::test]
 async fn test_listobjectsv1() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("listobjects").await;
 
     for k in KEYS {
@@ -433,7 +433,7 @@ async fn test_listobjectsv1() {
 #[ignore = "unimplemented"]
 #[tokio::test]
 async fn test_listmultipart() {
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("listmultipartuploads").await;
 
     for k in KEYS_MULTIPART {
@@ -618,7 +618,7 @@ async fn test_listmultipart() {
 async fn test_multichar_delimiter() {
     // Test case from dpape from issue #692 with reference results from Amazon
 
-    let ctx = common::context();
+    let ctx = context();
     let bucket = ctx.create_bucket("multichardelim").await;
 
     for k in [

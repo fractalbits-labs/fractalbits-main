@@ -75,7 +75,7 @@ impl DataBlobTracker {
                         ))
                     }
                 };
-                rss_client.put(1, &key, &root_blob_name, None).await?;
+                rss_client.put(0, &key, &root_blob_name, None).await?;
                 // Update cache
                 {
                     let mut cache = self.root_blob_cache.write().await;
@@ -319,6 +319,8 @@ impl DataBlobTracker {
 
     /// Parse blob key back to blob_id and block_num
     pub fn parse_blob_key(key: &str) -> Result<(Uuid, u32), DataBlobTrackingError> {
+        // Trim null terminators that might come from NSS storage
+        let key = key.trim_end_matches('\0');
         let parts: Vec<&str> = key.split(':').collect();
         if parts.len() != 2 {
             return Err(DataBlobTrackingError::Internal(format!(

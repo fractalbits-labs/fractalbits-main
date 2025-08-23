@@ -3,12 +3,56 @@ use crate::{BuildMode, CmdResult, DataBlobStorage, ServiceName};
 use aws_sdk_s3::primitives::ByteStream;
 use cmd_lib::*;
 use colored::*;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use test_common::*;
 use tokio::time::sleep;
 
+#[derive(Serialize, Deserialize, Debug)]
+struct BlobInfo {
+    blob_key: String,
+    missing_from: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ResyncResult {
+    blobs: Vec<BlobInfo>,
+    total_processed: u64,
+    successful: u64,
+    errors: u64,
+    total_time_ms: u64,
+}
+
+fn dump_single_copy_blobs_status() -> CmdResult {
+    println!("  Checking single-copy blob status...");
+    run_cmd!(./target/debug/data_blob_resync_server status)
+}
+
+fn dump_single_copy_blobs_list() -> Result<ResyncResult, std::io::Error> {
+    println!("  Listing single-copy blobs...");
+    let output = run_fun!(./target/debug/data_blob_resync_server resync --dry-run --json)?;
+
+    // Parse JSON output
+    serde_json::from_str::<ResyncResult>(&output)
+        .map_err(|e| std::io::Error::other(format!("Failed to parse JSON output: {e}")))
+}
+
 pub async fn run_multi_az_tests() -> CmdResult {
     info!("Running multi-AZ resilience tests...");
+
+    // Initialize and start all required services for multi-AZ testing
+    info!("Initializing and starting services for multi-AZ testing...");
+    crate::cmd_service::stop_service(ServiceName::All)?;
+    crate::cmd_build::build_rust_servers(BuildMode::Debug)?;
+    crate::cmd_service::init_service(ServiceName::All, BuildMode::Debug)?;
+    crate::cmd_service::start_services(
+        ServiceName::All,
+        BuildMode::Debug,
+        false,
+        DataBlobStorage::S3ExpressMultiAz,
+    )?;
+
+    info!("All services started successfully");
 
     // Run all three test scenarios
     println!(
@@ -122,6 +166,12 @@ async fn test_remote_az_service_interruption_and_recovery() -> CmdResult {
         let body = response.body.collect().await.expect("Failed to read body");
         assert_eq!(body.into_bytes().as_ref(), *data);
         println!("  OK: {key} uploaded and verified");
+    }
+
+    // Verify single-copy blob tracking during outage
+    println!(" Step 3.1: Verifying single-copy blob tracking...");
+    if let Err(e) = dump_single_copy_blobs_status() {
+        warn!("Could not check single-copy blob status: {e}");
     }
 
     // Simulate remote AZ coming back online
@@ -248,6 +298,11 @@ async fn test_rapid_remote_az_interruptions() -> CmdResult {
         let body = response.body.collect().await.expect("Failed to read body");
         assert_eq!(body.into_bytes().as_ref(), outage_data.as_bytes());
         println!("  OK: Cycle {cycle} completed successfully");
+
+        // Check single-copy blob status after each cycle
+        if let Err(e) = dump_single_copy_blobs_status() {
+            warn!("Could not check single-copy blob status for cycle {cycle}: {e}");
+        }
     }
 
     println!("SUCCESS: Rapid interruption test completed successfully!");
@@ -297,6 +352,17 @@ async fn test_extended_remote_az_outage() -> CmdResult {
 
     println!("  OK: All objects uploaded during extended outage");
 
+    // Verify all objects are tracked as single-copy
+    println!(" Verifying single-copy blob tracking for extended outage...");
+    if let Err(e) = dump_single_copy_blobs_status() {
+        warn!("Could not check single-copy blob status: {e}");
+    }
+    let result = dump_single_copy_blobs_list()?;
+    let blob_count = result.blobs.len();
+    println!("  Found {blob_count} single-copy blobs in tracking system");
+
+    // Expected: 3 (degraded) + 3 (rapid interruption) + 12 (extended outage) = 18 total
+    assert_eq!(18, blob_count, "Single-copy blob count mismatch");
     // Bring remote AZ back online
     start_services(
         ServiceName::MinioAz2,

@@ -5745,6 +5745,8 @@ dependencies = [
  "colored",
  "env_logger 0.11.8",
  "rlimit",
+ "serde",
+ "serde_json",
  "strum",
  "test_common",
  "tokio",

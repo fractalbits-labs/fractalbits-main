@@ -91,7 +91,7 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
         }?;
 
         // Initialize AZ status in service-discovery table (using mock AZ names for local testing)
-        let az_status_item = r#"{"service_id":{"S":"az_status"},"status":{"M":{"local-az1":{"S":"Normal"},"local-az2":{"S":"Normal"}}}}"#;
+        let az_status_item = r#"{"service_id":{"S":"az_status"},"status":{"M":{"localdev-az1":{"S":"Normal"},"localdev-az2":{"S":"Normal"}}}}"#;
 
         run_cmd! {
             info "Initializing AZ status in service-discovery table ...";

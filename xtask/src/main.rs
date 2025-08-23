@@ -198,6 +198,7 @@ impl std::fmt::Display for NssRole {
 
 #[derive(Parser, Clone, EnumString, clap::ValueEnum)]
 #[strum(serialize_all = "snake_case")]
+#[clap(rename_all = "snake_case")]
 pub enum TestType {
     MultiAz,
     LeaderElection,

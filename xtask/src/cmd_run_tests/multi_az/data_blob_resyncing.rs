@@ -1,11 +1,15 @@
 use crate::cmd_service::{start_services, stop_service, wait_for_service_ready};
 use crate::{BuildMode, CmdResult, DataBlobStorage, ServiceName};
+use aws_config::{BehaviorVersion, Region};
 use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::{Client as S3Client, Config as S3Config};
 use cmd_lib::*;
 use colored::*;
+use std::collections::HashSet;
 use std::time::Duration;
 use test_common::*;
 use tokio::time::sleep;
+use uuid::Uuid;
 
 pub async fn run_data_blob_resyncing_tests() -> CmdResult {
     info!("Running data blob resyncing tests...");
@@ -61,6 +65,7 @@ pub async fn run_data_blob_resyncing_tests() -> CmdResult {
 async fn test_basic_functionality() -> CmdResult {
     let ctx = context();
     let bucket_name = ctx.create_bucket("test-resync-basic").await;
+    let mut outage_blob_ids = HashSet::new();
 
     println!("Testing data_blob_resync_server basic functionality...");
 
@@ -99,7 +104,8 @@ async fn test_basic_functionality() -> CmdResult {
 
     for (key, data) in &outage_objects {
         println!("    Uploading {key} during outage");
-        ctx.client
+        let put_response = ctx
+            .client
             .put_object()
             .bucket(&bucket_name)
             .key(*key)
@@ -107,6 +113,15 @@ async fn test_basic_functionality() -> CmdResult {
             .send()
             .await
             .expect("Failed to upload object during outage");
+
+        // Extract blob ID from ETag for AZ verification
+        if let Some(etag) = put_response.e_tag() {
+            let etag_clean = etag.trim_matches('"');
+            if let Ok(blob_id) = Uuid::parse_str(etag_clean) {
+                outage_blob_ids.insert(blob_id.to_string());
+                println!("      Stored blob_id for AZ verification: {}", blob_id);
+            }
+        }
 
         // Verify immediate access
         let response = ctx
@@ -122,8 +137,12 @@ async fn test_basic_functionality() -> CmdResult {
         assert_eq!(body.into_bytes().as_ref(), *data);
     }
 
-    // Step 4: Check resync server status while remote AZ is down
-    println!("  Step 4: Checking resync server status during outage");
+    // Step 4: Verify blobs exist only in local AZ during outage
+    println!("  Step 4: Verifying blobs exist only in local AZ during outage");
+    verify_blob_distribution(&outage_blob_ids, true, false, "during outage").await?;
+
+    // Step 4.1: Check resync server status while remote AZ is down
+    println!("  Step 4.1: Checking resync server status during outage");
     run_resync_server_command("status", false, None)?;
     println!("    OK: Resync server status check completed");
 
@@ -141,6 +160,10 @@ async fn test_basic_functionality() -> CmdResult {
     println!("  Step 6: Running data blob resync operation");
     run_resync_server_command("resync", false, None)?;
     println!("    OK: Resync operation completed successfully");
+
+    // Step 6.1: Verify blobs now exist in both AZs after resync
+    println!("  Step 6.1: Verifying blobs now exist in both AZs after resync");
+    verify_blob_distribution(&outage_blob_ids, true, true, "after resync").await?;
 
     // Step 7: Verify all objects are still accessible after resync
     println!("  Step 7: Verifying data integrity after resync");
@@ -189,6 +212,7 @@ async fn test_basic_functionality() -> CmdResult {
 async fn test_with_deleted_blobs() -> CmdResult {
     let ctx = context();
     let bucket_name = ctx.create_bucket("test-resync-with-deletes").await;
+    let mut outage_blob_ids = HashSet::new();
 
     println!("Testing resync server with blob deletions during outage...");
 
@@ -216,8 +240,11 @@ async fn test_with_deleted_blobs() -> CmdResult {
     // Step 3: Upload new objects during outage
     println!("  Step 3: Uploading objects during outage");
     let outage_keys = vec!["outage-1", "outage-2", "outage-delete-me"];
+    let mut key_to_blob_id = std::collections::HashMap::new();
+
     for key in &outage_keys {
-        ctx.client
+        let put_response = ctx
+            .client
             .put_object()
             .bucket(&bucket_name)
             .key(*key)
@@ -227,7 +254,25 @@ async fn test_with_deleted_blobs() -> CmdResult {
             .send()
             .await
             .expect("Failed to upload object during outage");
+
+        // Extract blob ID from ETag for AZ verification
+        if let Some(etag) = put_response.e_tag() {
+            let etag_clean = etag.trim_matches('"');
+            if let Ok(blob_id) = Uuid::parse_str(etag_clean) {
+                let blob_id_str = blob_id.to_string();
+                outage_blob_ids.insert(blob_id_str.clone());
+                key_to_blob_id.insert(key.to_string(), blob_id_str);
+                println!(
+                    "    Stored blob_id for AZ verification: {} -> {}",
+                    key, blob_id
+                );
+            }
+        }
     }
+
+    // Step 3.1: Verify blobs exist only in local AZ during outage
+    println!("  Step 3.1: Verifying blobs exist only in local AZ during outage");
+    verify_blob_distribution(&outage_blob_ids, true, false, "during outage").await?;
 
     // Step 4: Delete some objects during outage (these should be tracked)
     println!("  Step 4: Deleting objects during outage");
@@ -243,6 +288,17 @@ async fn test_with_deleted_blobs() -> CmdResult {
             .expect("Failed to delete object during outage");
     }
 
+    // Create set of surviving blob IDs (excluding deleted ones)
+    let mut surviving_outage_blob_ids = HashSet::new();
+    for key in &outage_keys {
+        if !to_delete.contains(key) {
+            if let Some(blob_id) = key_to_blob_id.get(*key) {
+                surviving_outage_blob_ids.insert(blob_id.clone());
+                println!("    Tracking surviving blob: {} -> {}", key, blob_id);
+            }
+        }
+    }
+
     // Step 5: Restart remote AZ
     println!("  Step 5: Restarting remote AZ");
     start_services(
@@ -256,6 +312,10 @@ async fn test_with_deleted_blobs() -> CmdResult {
     // Step 6: Run resync operation (should handle deleted blobs correctly)
     println!("  Step 6: Running resync operation");
     run_resync_server_command("resync", false, None)?;
+
+    // Step 6.1: Verify surviving blobs now exist in both AZs after resync
+    println!("  Step 6.1: Verifying surviving blobs now exist in both AZs after resync");
+    verify_blob_distribution(&surviving_outage_blob_ids, true, true, "after resync").await?;
 
     // Step 7: Run sanitize operation to clean up deleted blob tracking
     println!("  Step 7: Running sanitize operation");
@@ -301,6 +361,7 @@ async fn test_with_deleted_blobs() -> CmdResult {
 async fn test_dry_run_mode() -> CmdResult {
     let ctx = context();
     let bucket_name = ctx.create_bucket("test-resync-dry-run").await;
+    let mut outage_blob_ids = HashSet::new();
 
     println!(" Testing resync server dry run mode...");
 
@@ -317,7 +378,8 @@ async fn test_dry_run_mode() -> CmdResult {
     ];
 
     for (key, data) in &outage_objects {
-        ctx.client
+        let put_response = ctx
+            .client
             .put_object()
             .bucket(&bucket_name)
             .key(*key)
@@ -325,6 +387,15 @@ async fn test_dry_run_mode() -> CmdResult {
             .send()
             .await
             .expect("Failed to upload object during outage");
+
+        // Extract blob ID from ETag for AZ verification
+        if let Some(etag) = put_response.e_tag() {
+            let etag_clean = etag.trim_matches('"');
+            if let Ok(blob_id) = Uuid::parse_str(etag_clean) {
+                outage_blob_ids.insert(blob_id.to_string());
+                println!("    Stored blob_id for AZ verification: {}", blob_id);
+            }
+        }
     }
 
     // Step 2: Restart remote AZ
@@ -341,6 +412,10 @@ async fn test_dry_run_mode() -> CmdResult {
     println!("  Step 3: Running dry-run resync operation");
     run_resync_server_command("resync", true, None)?;
 
+    // Step 3.1: Verify blobs still only exist in local AZ after dry-run
+    println!("  Step 3.1: Verifying blobs still only in local AZ after dry-run");
+    verify_blob_distribution(&outage_blob_ids, true, false, "after dry-run").await?;
+
     // Step 4: Check status - should still show pending blobs since dry-run didn't actually copy
     println!("  Step 4: Checking status after dry-run");
     run_resync_server_command("status", false, None)?;
@@ -348,6 +423,10 @@ async fn test_dry_run_mode() -> CmdResult {
     // Step 5: Run actual resync operation
     println!("  Step 5: Running actual resync operation");
     run_resync_server_command("resync", false, None)?;
+
+    // Step 5.1: Verify blobs now exist in both AZs after actual resync
+    println!("  Step 5.1: Verifying blobs now exist in both AZs after actual resync");
+    verify_blob_distribution(&outage_blob_ids, true, true, "after actual resync").await?;
 
     // Step 6: Verify all objects are accessible
     println!("  Step 6: Verifying objects after actual resync");
@@ -373,6 +452,7 @@ async fn test_dry_run_mode() -> CmdResult {
 async fn test_resume_functionality() -> CmdResult {
     let ctx = context();
     let bucket_name = ctx.create_bucket("test-resync-resume").await;
+    let mut outage_blob_ids = HashSet::new();
 
     println!(" Testing resync server resume functionality...");
 
@@ -386,7 +466,8 @@ async fn test_resume_functionality() -> CmdResult {
         let key = format!("resume-test-{i:03}");
         let data = format!("Resume test data item {i} with content");
 
-        ctx.client
+        let put_response = ctx
+            .client
             .put_object()
             .bucket(&bucket_name)
             .key(&key)
@@ -395,10 +476,22 @@ async fn test_resume_functionality() -> CmdResult {
             .await
             .expect("Failed to upload object during outage");
 
+        // Extract blob ID from ETag for AZ verification
+        if let Some(etag) = put_response.e_tag() {
+            let etag_clean = etag.trim_matches('"');
+            if let Ok(blob_id) = Uuid::parse_str(etag_clean) {
+                outage_blob_ids.insert(blob_id.to_string());
+            }
+        }
+
         if i % 5 == 0 {
             println!("    Uploaded {i} objects...");
         }
     }
+
+    // Step 1.1: Verify blobs exist only in local AZ during outage
+    println!("  Step 1.1: Verifying blobs exist only in local AZ during outage");
+    verify_blob_distribution(&outage_blob_ids, true, false, "during outage").await?;
 
     // Step 2: Restart remote AZ
     println!("  Step 2: Restarting remote AZ");
@@ -418,6 +511,10 @@ async fn test_resume_functionality() -> CmdResult {
     // Step 4: Run full resync to handle any remaining blobs
     println!("  Step 4: Running full resync to catch any remaining");
     run_resync_server_command("resync", false, None)?;
+
+    // Step 4.1: Verify all blobs now exist in both AZs after resume resync
+    println!("  Step 4.1: Verifying all blobs now exist in both AZs after resume resync");
+    verify_blob_distribution(&outage_blob_ids, true, true, "after resume resync").await?;
 
     // Step 5: Verify all objects are accessible
     println!("  Step 5: Verifying all objects after resume resync");
@@ -443,6 +540,76 @@ async fn test_resume_functionality() -> CmdResult {
     }
 
     println!("SUCCESS: Resume functionality test completed!");
+    Ok(())
+}
+
+// Helper function to create S3 client for specific AZ bucket
+fn create_az_s3_client(port: u16) -> S3Client {
+    use aws_sdk_s3::config::Credentials;
+
+    let credentials = Credentials::new("minioadmin", "minioadmin", None, None, "minio");
+    let config = S3Config::builder()
+        .endpoint_url(format!("http://127.0.0.1:{port}"))
+        .region(Region::from_static("localdev"))
+        .credentials_provider(credentials)
+        .behavior_version(BehaviorVersion::latest())
+        .force_path_style(true)
+        .build();
+
+    S3Client::from_conf(config)
+}
+
+// Helper function to check if blob exists in specific AZ bucket
+async fn check_blob_exists_in_az(client: &S3Client, bucket: &str, blob_key: &str) -> bool {
+    client
+        .get_object()
+        .bucket(bucket)
+        .key(blob_key)
+        .send()
+        .await
+        .is_ok()
+}
+
+// Helper function to verify blob distribution across AZs
+async fn verify_blob_distribution(
+    blob_ids: &HashSet<String>,
+    local_should_exist: bool,
+    remote_should_exist: bool,
+    step_description: &str,
+) -> CmdResult {
+    let local_client = create_az_s3_client(9001);
+    let remote_client = create_az_s3_client(9002);
+    let local_bucket = "fractalbits-localdev-az1-data-bucket";
+    let remote_bucket = "fractalbits-localdev-az2-data-bucket";
+
+    println!("    Verifying blob distribution {step_description}:");
+
+    for blob_id in blob_ids {
+        let blob_key = format!("{}-p0", blob_id);
+
+        let local_exists = check_blob_exists_in_az(&local_client, local_bucket, &blob_key).await;
+        let remote_exists = check_blob_exists_in_az(&remote_client, remote_bucket, &blob_key).await;
+
+        if local_exists != local_should_exist {
+            return Err(std::io::Error::other(format!(
+                "Blob {} local AZ existence mismatch: expected {}, got {}",
+                blob_id, local_should_exist, local_exists
+            )));
+        }
+
+        if remote_exists != remote_should_exist {
+            return Err(std::io::Error::other(format!(
+                "Blob {} remote AZ existence mismatch: expected {}, got {}",
+                blob_id, remote_should_exist, remote_exists
+            )));
+        }
+
+        println!(
+            "      OK: Blob {} - local:{}, remote:{}",
+            blob_id, local_exists, remote_exists
+        );
+    }
+
     Ok(())
 }
 

@@ -613,6 +613,38 @@ async fn test_listmultipart() {
     }
 }
 
+#[tokio::test]
+async fn test_list_buckets() {
+    let ctx = context();
+
+    // Create multiple buckets
+    let bucket1 = ctx.create_bucket("list-test-bucket-1").await;
+    let bucket2 = ctx.create_bucket("list-test-bucket-2").await;
+    let bucket3 = ctx.create_bucket("list-test-bucket-3").await;
+
+    // List all buckets
+    let result = ctx.client.list_buckets().send().await.unwrap();
+
+    // Verify all buckets are returned
+    let buckets = result.buckets.unwrap();
+    let bucket_names: Vec<String> = buckets
+        .iter()
+        .map(|b| b.name.as_ref().unwrap().clone())
+        .collect();
+
+    assert!(bucket_names.contains(&bucket1));
+    assert!(bucket_names.contains(&bucket2));
+    assert!(bucket_names.contains(&bucket3));
+
+    // Verify bucket count is at least 3 (there might be other buckets from other tests)
+    assert!(bucket_names.len() >= 3);
+
+    // Clean up created buckets
+    ctx.delete_bucket(&bucket1).await;
+    ctx.delete_bucket(&bucket2).await;
+    ctx.delete_bucket(&bucket3).await;
+}
+
 #[ignore = "Not supported"]
 #[tokio::test]
 async fn test_multichar_delimiter() {

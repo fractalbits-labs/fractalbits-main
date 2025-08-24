@@ -1524,10 +1524,13 @@ name = "data_blob_tracking"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "rpc_client_common",
  "rpc_client_nss",
  "rpc_client_rss",
+ "slotmap_conn_pool",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

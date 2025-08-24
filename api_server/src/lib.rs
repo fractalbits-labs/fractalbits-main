@@ -41,7 +41,7 @@ pub struct AppState {
     rpc_clients_rss: ConnPool<Arc<RpcClientRss>, String>,
 
     blob_client: Arc<BlobClient>,
-    blob_deletion: Sender<(BlobId, usize)>,
+    blob_deletion: Sender<(String, BlobId, usize)>,
     pub data_blob_tracker: Arc<DataBlobTracker>,
 }
 
@@ -73,7 +73,10 @@ impl AppState {
             Self::new_rpc_clients_pool_nss(&config.nss_addr, config.nss_conn_num).await;
 
         let (tx, rx) = mpsc::channel(1024 * 1024);
-        let data_blob_tracker = Arc::new(DataBlobTracker::new());
+        let data_blob_tracker = Arc::new(DataBlobTracker::with_pool(
+            config.rss_addr.clone(),
+            rpc_clients_rss.clone(),
+        ));
 
         // Get clients for tracking backend if needed
         let (rss_client_for_blob, nss_client_for_blob) = if matches!(
@@ -206,7 +209,7 @@ impl AppState {
         self.blob_client.clone()
     }
 
-    pub fn get_blob_deletion(&self) -> Sender<(BlobId, usize)> {
+    pub fn get_blob_deletion(&self) -> Sender<(String, BlobId, usize)> {
         self.blob_deletion.clone()
     }
 }
@@ -220,7 +223,7 @@ pub struct BlobClient {
 impl BlobClient {
     pub async fn new(
         blob_storage_config: &BlobStorageConfig,
-        rx: Receiver<(BlobId, usize)>,
+        rx: Receiver<(String, BlobId, usize)>,
         rpc_timeout: Duration,
         data_blob_tracker: Option<Arc<DataBlobTracker>>,
         rss_client: Option<Arc<RpcClientRss>>,
@@ -416,14 +419,17 @@ impl BlobClient {
 
     async fn blob_deletion_task(
         storage: Arc<BlobStorageImpl>,
-        mut input: Receiver<(BlobId, usize)>,
+        mut input: Receiver<(String, BlobId, usize)>,
     ) -> Result<(), BlobStorageError> {
-        while let Some((blob_id, block_numbers)) = input.recv().await {
+        while let Some((bucket_name, blob_id, block_numbers)) = input.recv().await {
             let deleted = stream::iter(0..block_numbers)
                 .map(|block_number| {
                     let storage = storage.clone();
+                    let bucket_name = bucket_name.clone();
                     async move {
-                        let res = storage.delete_blob(blob_id, block_number as u32).await;
+                        let res = storage
+                            .delete_blob(&bucket_name, blob_id, block_number as u32)
+                            .await;
                         match res {
                             Ok(()) => 1,
                             Err(e) => {
@@ -446,27 +452,36 @@ impl BlobClient {
 
     pub async fn put_blob(
         &self,
+        bucket_name: &str,
         blob_id: Uuid,
         block_number: u32,
         body: Bytes,
     ) -> Result<(), BlobStorageError> {
-        self.storage.put_blob(blob_id, block_number, body).await
+        self.storage
+            .put_blob(bucket_name, blob_id, block_number, body)
+            .await
     }
 
     pub async fn get_blob(
         &self,
+        bucket_name: &str,
         blob_id: Uuid,
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<(), BlobStorageError> {
-        self.storage.get_blob(blob_id, block_number, body).await
+        self.storage
+            .get_blob(bucket_name, blob_id, block_number, body)
+            .await
     }
 
     pub async fn delete_blob(
         &self,
+        bucket_name: &str,
         blob_id: Uuid,
         block_number: u32,
     ) -> Result<(), BlobStorageError> {
-        self.storage.delete_blob(blob_id, block_number).await
+        self.storage
+            .delete_blob(bucket_name, blob_id, block_number)
+            .await
     }
 }

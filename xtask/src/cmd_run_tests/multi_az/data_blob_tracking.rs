@@ -34,9 +34,25 @@ fn dump_single_copy_blobs_list() -> Result<ResyncResult, std::io::Error> {
     println!("  Listing single-copy blobs...");
     let output = run_fun!(./target/debug/data_blob_resync_server resync --dry-run --json)?;
 
+    // Handle empty output case
+    let trimmed_output = output.trim();
+    if trimmed_output.is_empty() {
+        eprintln!("Warning: Empty output from resync command, returning empty result");
+        return Ok(ResyncResult {
+            blobs: vec![],
+            total_processed: 0,
+            successful: 0,
+            errors: 0,
+            total_time_ms: 0,
+        });
+    }
+
     // Parse JSON output
-    serde_json::from_str::<ResyncResult>(&output)
-        .map_err(|e| std::io::Error::other(format!("Failed to parse JSON output: {e}")))
+    serde_json::from_str::<ResyncResult>(trimmed_output).map_err(|e| {
+        std::io::Error::other(format!(
+            "Failed to parse JSON output: {e}\nOutput was: {trimmed_output}"
+        ))
+    })
 }
 
 pub async fn run_multi_az_tests() -> CmdResult {

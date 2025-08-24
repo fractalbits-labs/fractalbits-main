@@ -360,6 +360,7 @@ impl From<SdkError<DeleteObjectError>> for BlobStorageError {
 pub trait BlobStorage: Send + Sync {
     async fn put_blob(
         &self,
+        bucket_name: &str,
         blob_id: Uuid,
         block_number: u32,
         body: Bytes,
@@ -367,81 +368,124 @@ pub trait BlobStorage: Send + Sync {
 
     async fn get_blob(
         &self,
+        bucket_name: &str,
         blob_id: Uuid,
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<(), BlobStorageError>;
 
-    async fn delete_blob(&self, blob_id: Uuid, block_number: u32) -> Result<(), BlobStorageError>;
+    async fn delete_blob(
+        &self,
+        bucket_name: &str,
+        blob_id: Uuid,
+        block_number: u32,
+    ) -> Result<(), BlobStorageError>;
 }
 
 impl BlobStorage for BlobStorageImpl {
     async fn put_blob(
         &self,
+        bucket_name: &str,
         blob_id: Uuid,
         block_number: u32,
         body: Bytes,
     ) -> Result<(), BlobStorageError> {
         match self {
             BlobStorageImpl::BssOnlySingleAz(storage) => {
-                storage.put_blob(blob_id, block_number, body).await
+                storage
+                    .put_blob(bucket_name, blob_id, block_number, body)
+                    .await
             }
             BlobStorageImpl::HybridSingleAz(storage) => {
-                storage.put_blob(blob_id, block_number, body).await
+                storage
+                    .put_blob(bucket_name, blob_id, block_number, body)
+                    .await
             }
             BlobStorageImpl::S3ExpressMultiAz(storage) => {
-                storage.put_blob(blob_id, block_number, body).await
+                storage
+                    .put_blob(bucket_name, blob_id, block_number, body)
+                    .await
             }
             BlobStorageImpl::S3ExpressMultiAzWithTracking(storage) => {
-                storage.put_blob(blob_id, block_number, body).await
+                storage
+                    .put_blob(bucket_name, blob_id, block_number, body)
+                    .await
             }
             BlobStorageImpl::S3ExpressSingleAz(storage) => {
-                storage.put_blob(blob_id, block_number, body).await
+                storage
+                    .put_blob(bucket_name, blob_id, block_number, body)
+                    .await
             }
         }
     }
 
     async fn get_blob(
         &self,
+        bucket_name: &str,
         blob_id: Uuid,
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<(), BlobStorageError> {
         match self {
             BlobStorageImpl::BssOnlySingleAz(storage) => {
-                storage.get_blob(blob_id, block_number, body).await
+                storage
+                    .get_blob(bucket_name, blob_id, block_number, body)
+                    .await
             }
             BlobStorageImpl::HybridSingleAz(storage) => {
-                storage.get_blob(blob_id, block_number, body).await
+                storage
+                    .get_blob(bucket_name, blob_id, block_number, body)
+                    .await
             }
             BlobStorageImpl::S3ExpressMultiAz(storage) => {
-                storage.get_blob(blob_id, block_number, body).await
+                storage
+                    .get_blob(bucket_name, blob_id, block_number, body)
+                    .await
             }
             BlobStorageImpl::S3ExpressMultiAzWithTracking(storage) => {
-                storage.get_blob(blob_id, block_number, body).await
+                storage
+                    .get_blob(bucket_name, blob_id, block_number, body)
+                    .await
             }
             BlobStorageImpl::S3ExpressSingleAz(storage) => {
-                storage.get_blob(blob_id, block_number, body).await
+                storage
+                    .get_blob(bucket_name, blob_id, block_number, body)
+                    .await
             }
         }
     }
 
-    async fn delete_blob(&self, blob_id: Uuid, block_number: u32) -> Result<(), BlobStorageError> {
+    async fn delete_blob(
+        &self,
+        bucket_name: &str,
+        blob_id: Uuid,
+        block_number: u32,
+    ) -> Result<(), BlobStorageError> {
         match self {
             BlobStorageImpl::BssOnlySingleAz(storage) => {
-                storage.delete_blob(blob_id, block_number).await
+                storage
+                    .delete_blob(bucket_name, blob_id, block_number)
+                    .await
             }
             BlobStorageImpl::HybridSingleAz(storage) => {
-                storage.delete_blob(blob_id, block_number).await
+                storage
+                    .delete_blob(bucket_name, blob_id, block_number)
+                    .await
             }
             BlobStorageImpl::S3ExpressMultiAz(storage) => {
-                storage.delete_blob(blob_id, block_number).await
+                storage
+                    .delete_blob(bucket_name, blob_id, block_number)
+                    .await
             }
             BlobStorageImpl::S3ExpressMultiAzWithTracking(storage) => {
-                storage.delete_blob(blob_id, block_number).await
+                storage
+                    .delete_blob(bucket_name, blob_id, block_number)
+                    .await
             }
             BlobStorageImpl::S3ExpressSingleAz(storage) => {
-                storage.delete_blob(blob_id, block_number).await
+                storage
+                    .delete_blob(bucket_name, blob_id, block_number)
+                    .await
             }
         }
     }

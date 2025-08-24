@@ -60,7 +60,7 @@ pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<Response
     }
     match object.state {
         ObjectState::Normal(..) => {
-            delete_blob(&object, blob_deletion).await?;
+            delete_blob(&ctx.bucket_name, &object, blob_deletion).await?;
         }
         ObjectState::Mpu(mpu_state) => match mpu_state {
             MpuState::Uploading => {
@@ -89,7 +89,7 @@ pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<Response
                         delete_inode(&bucket.root_blob_name, &mpu_key, Some(rpc_timeout))
                     )
                     .await?;
-                    delete_blob(mpu_obj, blob_deletion.clone()).await?;
+                    delete_blob(&ctx.bucket_name, mpu_obj, blob_deletion.clone()).await?;
                 }
             }
         },
@@ -98,12 +98,16 @@ pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<Response
 }
 
 async fn delete_blob(
+    bucket_name: &str,
     object: &ObjectLayout,
-    blob_deletion: Sender<(BlobId, usize)>,
+    blob_deletion: Sender<(String, BlobId, usize)>,
 ) -> Result<(), S3Error> {
     let blob_id = object.blob_id()?;
     let num_blocks = object.num_blocks()?;
-    if let Err(e) = blob_deletion.send((blob_id, num_blocks)).await {
+    if let Err(e) = blob_deletion
+        .send((bucket_name.to_string(), blob_id, num_blocks))
+        .await
+    {
         tracing::warn!(
             "Failed to send blob {blob_id} num_blocks={num_blocks} for background deletion: {e}"
         );

@@ -554,6 +554,7 @@ fn create_az_s3_client(port: u16) -> S3Client {
         .credentials_provider(credentials)
         .behavior_version(BehaviorVersion::latest())
         .force_path_style(true)
+        .disable_s3_express_session_auth(true)
         .build();
 
     S3Client::from_conf(config)

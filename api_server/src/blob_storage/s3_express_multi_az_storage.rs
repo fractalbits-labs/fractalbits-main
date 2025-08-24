@@ -208,6 +208,7 @@ impl S3ExpressMultiAzStorage {
 impl BlobStorage for S3ExpressMultiAzStorage {
     async fn put_blob(
         &self,
+        _bucket_name: &str,
         blob_id: Uuid,
         block_number: u32,
         body: Bytes,
@@ -310,6 +311,7 @@ impl BlobStorage for S3ExpressMultiAzStorage {
 
     async fn get_blob(
         &self,
+        _bucket_name: &str,
         blob_id: Uuid,
         block_number: u32,
         body: &mut Bytes,
@@ -373,7 +375,12 @@ impl BlobStorage for S3ExpressMultiAzStorage {
         Ok(())
     }
 
-    async fn delete_blob(&self, blob_id: Uuid, block_number: u32) -> Result<(), BlobStorageError> {
+    async fn delete_blob(
+        &self,
+        _bucket_name: &str,
+        blob_id: Uuid,
+        block_number: u32,
+    ) -> Result<(), BlobStorageError> {
         let start = Instant::now();
         let s3_key = blob_key(blob_id, block_number);
 

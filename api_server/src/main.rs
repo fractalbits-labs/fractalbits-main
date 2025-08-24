@@ -1,3 +1,4 @@
+use std::io;
 use std::sync::Arc;
 use std::{net::SocketAddr, path::PathBuf};
 
@@ -42,11 +43,17 @@ async fn main() {
                 .with_file(true)
                 .with_line_number(true)
                 .without_time()
+                .with_writer(io::stderr)
                 .with_filter(tracing_subscriber::filter::LevelFilter::ERROR),
         )
-        .with(tracing_subscriber::fmt::layer().without_time().with_filter(
-            tracing_subscriber::filter::filter_fn(|meta| *meta.level() != tracing::Level::ERROR),
-        ))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .without_time()
+                .with_writer(io::stderr)
+                .with_filter(tracing_subscriber::filter::filter_fn(|meta| {
+                    *meta.level() != tracing::Level::ERROR
+                })),
+        )
         .init();
 
     eprintln!(

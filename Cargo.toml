@@ -103,7 +103,7 @@ arrayvec = "0.7"
 governor = "0.6"
 nonzero_ext = "0.3"
 config = {version = "0.15", features = ["toml"]}
-socket2 = "0.5"
+socket2 = { version = "0.5", features = ["all"] }
 
 # Dev dependencies
 aws-sdk-s3 = "1.65.0"

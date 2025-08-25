@@ -7,13 +7,14 @@ const POLL_INTERVAL_SECONDS: u64 = 5;
 const MAX_POLL_ATTEMPTS: u64 = 60;
 
 pub fn bootstrap(
+    nss_endpoint: &str,
     nss_a_id: &str,
     nss_b_id: &str,
     volume_a_id: &str,
     volume_b_id: &str,
     follower_id: Option<&str>,
     remote_az: Option<&str>,
-    for_bench: bool,
+    _for_bench: bool,
 ) -> CmdResult {
     // download_binaries(&["rss_admin", "root_server", "ebs-failover"])?;
     download_binaries(&["rss_admin", "root_server"])?;
@@ -28,7 +29,7 @@ pub fn bootstrap(
         initialize_az_status_in_ddb(remote_az)?;
     }
 
-    create_rss_config()?;
+    create_rss_config(nss_endpoint)?;
     // setup_cloudwatch_agent()?;
     create_systemd_unit_file("root_server", follower_id.is_some())?;
 
@@ -52,13 +53,12 @@ pub fn bootstrap(
             // Format EBS with SSM
             let ebs_dev = get_volume_dev(volume_id);
             wait_for_ssm_ready(nss_id);
-            let extra_opt = if for_bench { "" } else { "" };
             let bootstrap_bin = "/opt/fractalbits/bin/fractalbits-bootstrap";
             info!("Running format_nss on {nss_id} ({role}) with device {ebs_dev}");
             run_cmd_with_ssm(
                 nss_id,
                 &format!(
-                    r##"sudo bash -c "{bootstrap_bin} format_nss --ebs_dev {ebs_dev} {extra_opt} &>>{CLOUD_INIT_LOG}""##
+                    r##"sudo bash -c "{bootstrap_bin} format_nss --ebs_dev {ebs_dev} &>>{CLOUD_INIT_LOG}""##
                 ),
             )?;
             info!("Successfully formatted {nss_id} ({role})");
@@ -292,8 +292,9 @@ fencing_timeout_seconds = 300                  # Max time to wait for instance t
     Ok(())
 }
 
-fn create_rss_config() -> CmdResult {
-    let config_content = r##"# Root Server Configuration
+fn create_rss_config(nss_endpoint: &str) -> CmdResult {
+    let config_content = format!(
+        r##"# Root Server Configuration
 
 # Server port
 server_port = 8088
@@ -303,6 +304,9 @@ health_port = 18088
 
 # API Server management port
 api_server_mgmt_port = 18088
+
+# Nss server rpc server address
+nss_addr = "{nss_endpoint}:8088"
 
 # Leader Election Configuration
 [leader_election]
@@ -327,7 +331,8 @@ max_retry_attempts = 5
 
 # Enable monitoring and metrics collection
 enable_monitoring = true
-"##;
+"##
+    );
     run_cmd! {
         mkdir -p $ETC_PATH;
         echo $config_content > $ETC_PATH/$ROOT_SERVER_CONFIG;

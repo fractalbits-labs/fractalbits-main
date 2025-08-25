@@ -432,6 +432,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
         id: "rss-A",
         bootstrapOptions:
           `${forBenchFlag} root_server ` +
+          `--nss_endpoint=${nssPrivateLink.endpointDns} ` +
           `--nss_a_id=${nssA} --nss_b_id=${nssB} ` +
           `--volume_a_id=${ebsVolumeAId} --volume_b_id=${ebsVolumeBId} ` +
           `--follower_id=${instances["rss-B"].instanceId}` +
@@ -441,7 +442,11 @@ export class FractalbitsVpcStack extends cdk.Stack {
       },
       {
         id: "rss-B",
-        bootstrapOptions: `${forBenchFlag} root_server --nss_a_id=${nssA} --nss_b_id=${nssB} --volume_a_id=${ebsVolumeAId} --volume_b_id=${ebsVolumeBId}`,
+        bootstrapOptions:
+          `${forBenchFlag} root_server ` +
+          `--nss_endpoint=${nssPrivateLink.endpointDns} ` +
+          `--nss_a_id=${nssA} --nss_b_id=${nssB} ` +
+          `--volume_a_id=${ebsVolumeAId} --volume_b_id=${ebsVolumeBId}`,
       },
       {
         id: "nss-A",

@@ -103,6 +103,9 @@ enum Command {
 
     #[clap(about = "Run on root_server instance to bootstrap fractalbits service(s)")]
     RootServer {
+        #[clap(long, long_help = "primary nss_server endpoint")]
+        nss_endpoint: String,
+
         #[clap(long, long_help = "Primary nss_server ec2 instance ID")]
         nss_a_id: String,
 
@@ -222,6 +225,7 @@ fn main() -> CmdResult {
             &rss_endpoint,
         )?,
         Command::RootServer {
+            nss_endpoint,
             nss_a_id,
             nss_b_id,
             volume_a_id,
@@ -229,6 +233,7 @@ fn main() -> CmdResult {
             follower_id,
             remote_az,
         } => root_server::bootstrap(
+            &nss_endpoint,
             &nss_a_id,
             &nss_b_id,
             &volume_a_id,
@@ -237,9 +242,7 @@ fn main() -> CmdResult {
             remote_az.as_deref(),
             for_bench,
         )?,
-        Command::FormatNss {
-            ebs_dev,
-        } => nss_server::format_nss(ebs_dev)?,
+        Command::FormatNss { ebs_dev } => nss_server::format_nss(ebs_dev)?,
         Command::BenchServer {
             api_server_endpoint,
             bench_client_num,

@@ -161,6 +161,8 @@ mirrord_endpoint = "{mirrord_endpoint}"
 nss_port = 8088
 mirrord_port = 9999
 rpc_server_port = 8077
+restart_limit_burst = 3
+restart_limit_interval_seconds = 600
 "##
     );
 

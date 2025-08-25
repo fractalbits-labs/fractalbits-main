@@ -109,13 +109,16 @@ Environment="RUST_LOG=info""##
         // }
         _ => unreachable!(),
     };
-    let restart_settings = if managed_service {
-        ""
+    let (restart_settings, auto_restart) = if managed_service {
+        ("", "")
     } else {
-        r##"# Limit to 3 restarts within a 10-minute (600 second) interval
+        (
+            r##"# Limit to 3 restarts within a 10-minute (600 second) interval
 StartLimitIntervalSec=600
 StartLimitBurst=3
-        "##
+        "##,
+            "Restart=on-failure\nRestartSec=5",
+        )
     };
     let systemd_unit_content = format!(
         r##"[Unit]
@@ -126,10 +129,9 @@ BindsTo={requires}
 {restart_settings}
 
 [Service]
+{auto_restart}
 LimitNOFILE=1000000
 LimitCORE=infinity
-Restart=on-failure
-RestartSec=5
 WorkingDirectory={working_dir}{env_settings}
 ExecStart={exec_start}
 

@@ -6,6 +6,7 @@ const COMMAND_TIMEOUT_SECONDS: u64 = 300;
 const POLL_INTERVAL_SECONDS: u64 = 5;
 const MAX_POLL_ATTEMPTS: u64 = 60;
 
+#[allow(clippy::too_many_arguments)]
 pub fn bootstrap(
     nss_endpoint: &str,
     nss_a_id: &str,

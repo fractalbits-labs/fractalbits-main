@@ -363,8 +363,9 @@ async fn get_range_blob_stream(
     end: usize,
 ) -> BodyDataStream {
     let start_block_i = start / block_size;
+    let end_block_i = (end - 1) / block_size;
     let blob_offset: usize = block_size * start_block_i;
-    let body_stream = futures::stream::iter(start_block_i..)
+    let body_stream = futures::stream::iter(start_block_i..=end_block_i)
         .then(move |i| {
             let blob_client = blob_client.clone();
             async move {

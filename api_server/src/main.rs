@@ -59,7 +59,7 @@ async fn main() {
     );
 
     let opt = Opt::parse();
-    let config = match opt.config_file {
+    let mut config = match opt.config_file {
         Some(config_file) => config::Config::builder()
             .add_source(config::File::from(config_file).required(true))
             .add_source(config::Environment::with_prefix("APP"))
@@ -116,10 +116,6 @@ async fn main() {
         }
     }
 
-    let port = config.port;
-    let mgmt_port = config.mgmt_port;
-    let app_state = Arc::new(AppState::new(Arc::new(config)).await);
-
     let api_key_routes = Router::new()
         .route("/", post(api_key_routes::create_api_key))
         .route("/", get(api_key_routes::list_api_keys))
@@ -145,6 +141,7 @@ async fn main() {
     // Main application router
     let main_router = if let Ok(web_root) = std::env::var("GUI_WEB_ROOT") {
         info!(%web_root, "serving ui");
+        config.allow_missing_or_bad_signature = true;
         Router::new()
             .nest_service("/ui", ServeDir::new(web_root))
             .nest("/api_keys", api_key_routes)
@@ -153,6 +150,9 @@ async fn main() {
         Router::new().fallback(any_handler)
     };
 
+    let port = config.port;
+    let mgmt_port = config.mgmt_port;
+    let app_state = Arc::new(AppState::new(Arc::new(config)).await);
     let main_app = main_router
         .layer(
             TraceLayer::new_for_http()

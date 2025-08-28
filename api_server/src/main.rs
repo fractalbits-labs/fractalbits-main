@@ -14,7 +14,7 @@ use axum::{
 };
 use clap::Parser;
 use tower_http::{services::ServeDir, trace::TraceLayer};
-use tracing::info;
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
 #[global_allocator]
@@ -67,12 +67,28 @@ async fn main() {
             .unwrap()
             .try_deserialize()
             .unwrap(),
-        None => config::Config::builder()
-            .add_source(config::Environment::with_prefix("APP"))
-            .build()
-            .unwrap()
-            .try_deserialize()
-            .unwrap_or_else(|_| Config::default()),
+        None => {
+            // Check for APP_BLOB_STORAGE_BACKEND environment variable
+            if let Ok(backend) = std::env::var("APP_BLOB_STORAGE_BACKEND") {
+                info!("APP_BLOB_STORAGE_BACKEND: {backend}");
+                match backend.as_str() {
+                    "s3_express_multi_az" => Config::s3_express_multi_az_with_tracking(),
+                    "s3_express_single_az" => Config::s3_express_single_az(),
+                    "hybrid_single_az" => Config::hybrid_single_az(),
+                    _ => {
+                        error!("Invalid APP_BLOB_STORAGE_BACKEND value: {backend}");
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                config::Config::builder()
+                    .add_source(config::Environment::with_prefix("APP"))
+                    .build()
+                    .unwrap()
+                    .try_deserialize()
+                    .unwrap_or_else(|_| Config::default())
+            }
+        }
     };
 
     if config.with_metrics {

@@ -574,17 +574,14 @@ fn create_api_server_systemd_unit_file(
     data_blob_storage: DataBlobStorage,
     for_gui: bool,
 ) -> CmdResult {
-    let config_file = match data_blob_storage {
-        DataBlobStorage::HybridSingleAz => "etc/api_server_hybrid_single_az.toml".into(),
-        DataBlobStorage::S3ExpressMultiAz => "etc/api_server_s3_express_multi_az.toml".into(),
-        DataBlobStorage::S3ExpressSingleAz => "etc/api_server_s3_express_single_az.toml".into(),
-    };
     let service = if for_gui {
         ServiceName::GuiServer
     } else {
         ServiceName::ApiServer
     };
-    create_systemd_unit_file(service, build_mode, Some(config_file))?;
+
+    // Pass data_blob_storage to create_systemd_unit_file so it can set the environment variable
+    create_systemd_unit_file_with_backend(service, build_mode, data_blob_storage)?;
 
     Ok(())
 }
@@ -684,6 +681,23 @@ fn create_systemd_unit_file(
     build_mode: BuildMode,
     config_file: Option<String>,
 ) -> CmdResult {
+    create_systemd_unit_file_impl(service, build_mode, config_file, None)
+}
+
+fn create_systemd_unit_file_with_backend(
+    service: ServiceName,
+    build_mode: BuildMode,
+    data_blob_storage: DataBlobStorage,
+) -> CmdResult {
+    create_systemd_unit_file_impl(service, build_mode, None, Some(data_blob_storage))
+}
+
+fn create_systemd_unit_file_impl(
+    service: ServiceName,
+    build_mode: BuildMode,
+    config_file: Option<String>,
+    data_blob_storage: Option<DataBlobStorage>,
+) -> CmdResult {
     let pwd = run_fun!(pwd)?;
     let build = build_mode.as_ref();
     let service_name = service.as_ref();
@@ -731,10 +745,27 @@ Environment="AWS_ENDPOINT_URL_DYNAMODB=http://localhost:8000""##
         }
         ServiceName::ApiServer => {
             env_settings += env_rust_log(build_mode);
+
+            // Add APP_BLOB_STORAGE_BACKEND environment variable if provided
+            if let Some(backend) = data_blob_storage {
+                env_settings += &format!(
+                    "\nEnvironment=\"APP_BLOB_STORAGE_BACKEND={}\"",
+                    backend.as_ref()
+                );
+            }
             format!("{pwd}/target/{build}/api_server")
         }
         ServiceName::GuiServer => {
             env_settings += env_rust_log(build_mode);
+
+            // Add APP_BLOB_STORAGE_BACKEND environment variable if provided
+            if let Some(backend) = data_blob_storage {
+                env_settings += &format!(
+                    "\nEnvironment=\"APP_BLOB_STORAGE_BACKEND={}\"",
+                    backend.as_ref()
+                );
+            }
+
             env_settings += r##"
 Environment="GUI_WEB_ROOT=ui/dist""##;
             format!("{pwd}/target/{build}/api_server")

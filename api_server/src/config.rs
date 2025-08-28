@@ -160,6 +160,12 @@ pub struct S3HybridConfig {
 
 impl Default for Config {
     fn default() -> Self {
+        Self::s3_express_multi_az_with_tracking()
+    }
+}
+
+impl Config {
+    pub fn s3_express_multi_az_with_tracking() -> Self {
         Self {
             nss_addr: "127.0.0.1:8087".to_string(),
             rss_addr: "127.0.0.1:8086".to_string(),
@@ -177,6 +183,88 @@ impl Default for Config {
                 bss: None,
                 s3_hybrid_single_az: None,
                 s3_express_multi_az: Some(S3ExpressMultiAzConfig::default()),
+                s3_express_single_az: None,
+            },
+            allow_missing_or_bad_signature: false,
+        }
+    }
+
+    pub fn s3_express_multi_az() -> Self {
+        Self {
+            nss_addr: "127.0.0.1:8087".to_string(),
+            rss_addr: "127.0.0.1:8086".to_string(),
+            nss_conn_num: 2,
+            rss_conn_num: 1,
+            port: 8080,
+            mgmt_port: 18080,
+            region: "localdev".into(),
+            root_domain: ".localhost".into(),
+            with_metrics: true,
+            http_request_timeout_seconds: 5,
+            rpc_timeout_seconds: 4,
+            blob_storage: BlobStorageConfig {
+                backend: BlobStorageBackend::S3ExpressMultiAz,
+                bss: None,
+                s3_hybrid_single_az: None,
+                s3_express_multi_az: Some(S3ExpressMultiAzConfig::default()),
+                s3_express_single_az: None,
+            },
+            allow_missing_or_bad_signature: false,
+        }
+    }
+
+    pub fn s3_express_single_az() -> Self {
+        Self {
+            nss_addr: "127.0.0.1:8087".to_string(),
+            rss_addr: "127.0.0.1:8086".to_string(),
+            nss_conn_num: 2,
+            rss_conn_num: 1,
+            port: 8080,
+            mgmt_port: 18080,
+            region: "localdev".into(),
+            root_domain: ".localhost".into(),
+            with_metrics: true,
+            http_request_timeout_seconds: 5,
+            rpc_timeout_seconds: 4,
+            blob_storage: BlobStorageConfig {
+                backend: BlobStorageBackend::S3ExpressSingleAz,
+                bss: None,
+                s3_hybrid_single_az: None,
+                s3_express_multi_az: None,
+                s3_express_single_az: Some(S3ExpressSingleAzConfig::default()),
+            },
+            allow_missing_or_bad_signature: false,
+        }
+    }
+
+    pub fn hybrid_single_az() -> Self {
+        Self {
+            nss_addr: "127.0.0.1:8087".to_string(),
+            rss_addr: "127.0.0.1:8086".to_string(),
+            nss_conn_num: 2,
+            rss_conn_num: 1,
+            port: 8080,
+            mgmt_port: 18080,
+            region: "localdev".into(),
+            root_domain: ".localhost".into(),
+            with_metrics: true,
+            http_request_timeout_seconds: 5,
+            rpc_timeout_seconds: 4,
+            blob_storage: BlobStorageConfig {
+                backend: BlobStorageBackend::HybridSingleAz,
+                bss: Some(BssConfig {
+                    addr: "127.0.0.1:8088".to_string(),
+                    conn_num: 2,
+                }),
+                s3_hybrid_single_az: Some(S3HybridConfig {
+                    s3_host: "http://127.0.0.1".into(),
+                    s3_port: 9000,
+                    s3_region: "localdev".into(),
+                    s3_bucket: "fractalbits-bucket".into(),
+                    ratelimit: RatelimitConfig::default(),
+                    retry_config: S3RetryConfig::default(),
+                }),
+                s3_express_multi_az: None,
                 s3_express_single_az: None,
             },
             allow_missing_or_bad_signature: false,

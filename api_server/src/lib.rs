@@ -15,7 +15,6 @@ pub use data_blob_tracking::{DataBlobTracker, DataBlobTrackingError};
 use futures::stream::{self, StreamExt};
 use metrics::histogram;
 use moka::future::Cache;
-use rpc_client_common::RpcError;
 use rpc_client_nss::RpcClientNss;
 use rpc_client_rss::RpcClientRss;
 
@@ -47,19 +46,15 @@ pub struct AppState {
 }
 
 impl KvClientProvider for AppState {
-    type Error = RpcError;
-
     async fn checkout_rpc_client_rss(
         &self,
-    ) -> Result<
-        impl kv_client_traits::KvClient<Error = Self::Error>,
-        <RpcClientRss as Poolable>::Error,
-    > {
+    ) -> Result<Arc<RpcClientRss>, Box<dyn std::error::Error + Send + Sync>> {
         let start = Instant::now();
         let res = self
             .rpc_clients_rss
             .checkout(self.config.rss_addr.clone())
-            .await?;
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         histogram!("checkout_rpc_client_nanos", "type" => "rss")
             .record(start.elapsed().as_nanos() as f64);
         Ok(res)

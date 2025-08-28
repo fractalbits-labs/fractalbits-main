@@ -4,7 +4,6 @@ members = [
     "api_server/benches/rewrk",
     "api_server/benches/rewrk_rpc",
     "api_server/bucket_tables",
-    "api_server/kv_client_traits",
     "cdk/fractalbits-bootstrap",
     "common/crates/data_blob_tracking",
     "multi_az/data_blob_resync_server",
@@ -29,7 +28,6 @@ resolver = "2"
 
 [workspace.dependencies]
 bucket_tables = { path = "api_server/bucket_tables" }
-kv_client_traits = { path = "api_server/kv_client_traits" }
 data_blob_tracking = { path = "common/crates/data_blob_tracking" }
 rpc_client_common = { path = "common/crates/rpc_clients/client_common" }
 rpc_client_bss = { path = "common/crates/rpc_clients/bss" }

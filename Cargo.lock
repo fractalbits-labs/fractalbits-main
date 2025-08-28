@@ -156,7 +156,6 @@ dependencies = [
  "http-range",
  "httpdate",
  "itertools 0.13.0",
- "kv_client_traits",
  "md-5",
  "metrics",
  "metrics-exporter-prometheus",
@@ -988,11 +987,11 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "hex",
- "kv_client_traits",
  "metrics",
  "moka",
  "rand 0.8.5",
  "rpc_client_common",
+ "rpc_client_rss",
  "serde",
  "serde_json",
  "tokio",
@@ -2657,19 +2656,6 @@ dependencies = [
  "pest",
  "pest_derive",
  "serde",
-]
-
-[[package]]
-name = "kv_client_traits"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "rpc_client_common",
- "rpc_client_rss",
- "serde",
- "tokio",
- "tracing",
 ]
 
 [[package]]

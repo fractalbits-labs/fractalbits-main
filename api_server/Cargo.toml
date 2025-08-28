@@ -10,7 +10,6 @@ rpc_client_bss.workspace = true
 rpc_client_rss.workspace = true
 nss_codec.workspace = true
 bucket_tables.workspace = true
-kv_client_traits.workspace = true
 data_blob_tracking.workspace = true
 slotmap_conn_pool.workspace = true
 

@@ -30,7 +30,7 @@ pub fn bootstrap(
 
     create_rss_config(nss_endpoint)?;
     // setup_cloudwatch_agent()?;
-    create_systemd_unit_file("root_server", follower_id.is_some())?;
+    create_systemd_unit_file("rss", follower_id.is_some())?;
 
     // Initialize NSS formatting and root server startup if follower_id is provided
     if let Some(follower_id) = follower_id {
@@ -161,15 +161,15 @@ fn wait_for_leadership() -> CmdResult {
 }
 
 fn start_follower_root_server(follower_id: &str) -> CmdResult {
-    info!("Starting root_server service on follower instance {follower_id}");
+    info!("Starting rss service on follower instance {follower_id}");
     wait_for_ssm_ready(follower_id);
 
     // The follower instance should have already run its own bootstrap process
     // (with no follower_id parameter) to set up configs and systemd unit file
     // We just need to start the service
-    run_cmd_with_ssm(follower_id, "sudo systemctl start root_server.service")?;
+    run_cmd_with_ssm(follower_id, "sudo systemctl start rss.service")?;
 
-    info!("Successfully started root_server service on follower {follower_id}");
+    info!("Successfully started rss service on follower {follower_id}");
     Ok(())
 }
 

@@ -81,15 +81,15 @@ Environment="GUI_WEB_ROOT={GUI_WEB_ROOT}"
             requires = "data-ebs.mount data-local.mount";
             format!("{BIN_PATH}{service_name} -c {ETC_PATH}{MIRRORD_CONFIG}")
         }
-        "root_server" => {
+        "rss" => {
             env_settings = r##"
 Environment="RUST_LOG=info""##
                 .to_string();
-            format!("{BIN_PATH}{service_name} -c {ETC_PATH}{ROOT_SERVER_CONFIG}")
+            format!("{BIN_PATH}root_server -c {ETC_PATH}{ROOT_SERVER_CONFIG}")
         }
-        "bss_server" => {
+        "bss" => {
             requires = "data-local.mount";
-            format!("{BIN_PATH}{service_name} -c {ETC_PATH}{BSS_SERVER_CONFIG}")
+            format!("{BIN_PATH}bss_server -c {ETC_PATH}{BSS_SERVER_CONFIG}")
         }
         "bench_client" => {
             format!("{BIN_PATH}warp client")

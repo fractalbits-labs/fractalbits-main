@@ -14,7 +14,6 @@ use strum::{AsRefStr, EnumString};
 
 pub const TEST_BUCKET_ROOT_BLOB_NAME: &str = "947ef2be-44b2-4ac2-969b-2574eb85662b";
 pub const TS_FMT: &str = "%b %d %H:%M:%.S";
-pub const NSS_SERVER_BENCH_CONFIG: &str = "nss_server_bench_config.toml";
 // Need to match with api_server's default config to make authentication work
 pub const UI_DEFAULT_REGION: &str = "localdev";
 

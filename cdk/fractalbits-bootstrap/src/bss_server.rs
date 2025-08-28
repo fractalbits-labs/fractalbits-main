@@ -16,7 +16,7 @@ pub fn bootstrap(meta_stack_testing: bool, for_bench: bool) -> CmdResult {
     }
 
     create_bss_config()?;
-    create_systemd_unit_file("bss_server", true)?;
+    create_systemd_unit_file("bss", true)?;
 
     if meta_stack_testing || for_bench {
         download_binaries(&["rewrk_rpc"])?;

@@ -45,8 +45,6 @@ pub trait RpcCodec<Header: MessageHeaderTrait>:
     const RPC_TYPE: &'static str;
 }
 
-// Removed Message enum - now using MessageFrame directly
-
 pub struct RpcClient<Codec, Header: MessageHeaderTrait> {
     requests: RequestMap<Header>,
     sender: Sender<MessageFrame<Header>>,

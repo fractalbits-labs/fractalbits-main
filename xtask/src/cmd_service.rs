@@ -362,7 +362,7 @@ pub fn start_bss_service(build_mode: BuildMode, data_blob_storage: DataBlobStora
         }
     }
 
-    create_systemd_unit_file(ServiceName::Bss, build_mode, None)?;
+    create_systemd_unit_file(ServiceName::Bss, build_mode)?;
 
     run_cmd!(systemctl --user start bss.service)?;
     wait_for_service_ready(ServiceName::Bss, 15)?;
@@ -381,11 +381,7 @@ pub fn start_nss_service(build_mode: BuildMode, data_on_local: bool) -> CmdResul
         }
     }
 
-    let config_file = match build_mode {
-        BuildMode::Debug => None,
-        BuildMode::Release => None,
-    };
-    create_systemd_unit_file(ServiceName::Nss, build_mode, config_file)?;
+    create_systemd_unit_file(ServiceName::Nss, build_mode)?;
 
     let nss_service = "nss.service";
     run_cmd!(systemctl --user start $nss_service)?;
@@ -398,7 +394,7 @@ pub fn start_nss_service(build_mode: BuildMode, data_on_local: bool) -> CmdResul
 }
 
 pub fn start_mirrord_service(build_mode: BuildMode) -> CmdResult {
-    create_systemd_unit_file(ServiceName::Mirrord, build_mode, None)?;
+    create_systemd_unit_file(ServiceName::Mirrord, build_mode)?;
 
     run_cmd!(systemctl --user start mirrord.service)?;
     wait_for_service_ready(ServiceName::Mirrord, 15)?;
@@ -410,7 +406,7 @@ pub fn start_mirrord_service(build_mode: BuildMode) -> CmdResult {
 }
 
 pub fn start_nss_role_agent_service(build_mode: BuildMode, service_name: ServiceName) -> CmdResult {
-    create_systemd_unit_file(service_name, build_mode, None)?;
+    create_systemd_unit_file(service_name, build_mode)?;
 
     let service_file = match service_name {
         ServiceName::NssRoleAgentA => "nss_role_agent_a.service",
@@ -434,7 +430,7 @@ pub fn start_rss_service(build_mode: BuildMode) -> CmdResult {
         start_ddb_local_service()?;
     }
 
-    create_systemd_unit_file(ServiceName::Rss, build_mode, None)?;
+    create_systemd_unit_file(ServiceName::Rss, build_mode)?;
     run_cmd!(systemctl --user start rss.service)?;
     wait_for_service_ready(ServiceName::Rss, 15)?;
 
@@ -614,12 +610,12 @@ pub fn start_all_services(
     info!("Starting all services with systemd dependency management");
 
     // Create all systemd unit files first
-    create_systemd_unit_file(ServiceName::Rss, build_mode, None)?;
+    create_systemd_unit_file(ServiceName::Rss, build_mode)?;
 
     // Only create BSS systemd unit file if we're in hybrid mode
     match data_blob_storage {
         DataBlobStorage::HybridSingleAz => {
-            create_systemd_unit_file(ServiceName::Bss, build_mode, None)?;
+            create_systemd_unit_file(ServiceName::Bss, build_mode)?;
         }
         DataBlobStorage::S3ExpressMultiAz => {
             info!("Skipping BSS systemd unit file creation in s3_express_multi_az mode");
@@ -629,11 +625,11 @@ pub fn start_all_services(
         }
     }
 
-    create_systemd_unit_file(ServiceName::NssRoleAgentA, build_mode, None)?;
-    create_systemd_unit_file(ServiceName::Nss, build_mode, None)?;
+    create_systemd_unit_file(ServiceName::NssRoleAgentA, build_mode)?;
+    create_systemd_unit_file(ServiceName::Nss, build_mode)?;
 
-    create_systemd_unit_file(ServiceName::NssRoleAgentB, build_mode, None)?;
-    create_systemd_unit_file(ServiceName::Mirrord, build_mode, None)?;
+    create_systemd_unit_file(ServiceName::NssRoleAgentB, build_mode)?;
+    create_systemd_unit_file(ServiceName::Mirrord, build_mode)?;
 
     create_api_server_systemd_unit_file(build_mode, data_blob_storage, for_gui)?;
 
@@ -676,12 +672,8 @@ pub fn start_all_services(
     Ok(())
 }
 
-fn create_systemd_unit_file(
-    service: ServiceName,
-    build_mode: BuildMode,
-    config_file: Option<String>,
-) -> CmdResult {
-    create_systemd_unit_file_impl(service, build_mode, config_file, None)
+fn create_systemd_unit_file(service: ServiceName, build_mode: BuildMode) -> CmdResult {
+    create_systemd_unit_file_impl(service, build_mode, None)
 }
 
 fn create_systemd_unit_file_with_backend(
@@ -689,13 +681,12 @@ fn create_systemd_unit_file_with_backend(
     build_mode: BuildMode,
     data_blob_storage: DataBlobStorage,
 ) -> CmdResult {
-    create_systemd_unit_file_impl(service, build_mode, None, Some(data_blob_storage))
+    create_systemd_unit_file_impl(service, build_mode, Some(data_blob_storage))
 }
 
 fn create_systemd_unit_file_impl(
     service: ServiceName,
     build_mode: BuildMode,
-    config_file: Option<String>,
     data_blob_storage: Option<DataBlobStorage>,
 ) -> CmdResult {
     let pwd = run_fun!(pwd)?;
@@ -714,7 +705,7 @@ Environment="RUST_LOG=warn""##
             }
         }
     };
-    let mut exec_start = match service {
+    let exec_start = match service {
         ServiceName::Bss => format!("{pwd}/zig-out/bin/bss_server"),
         ServiceName::Nss => match build_mode {
             BuildMode::Debug => format!("{pwd}/zig-out/bin/nss_server serve"),
@@ -772,9 +763,6 @@ Environment="GUI_WEB_ROOT=ui/dist""##;
         }
         _ => unreachable!(),
     };
-    if let Some(config) = config_file {
-        exec_start += &format!(" -c {config}");
-    }
     let working_dir = run_fun!(realpath $pwd)?;
 
     // Add systemd dependencies based on service type

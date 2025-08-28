@@ -4009,18 +4009,15 @@ dependencies = [
 name = "rss_admin"
 version = "0.1.0"
 dependencies = [
- "async-trait",
- "aws-config",
- "aws-sdk-dynamodb",
  "bucket_tables",
  "bytes",
  "clap 4.5.43",
- "kv_client_traits",
- "openssl",
- "rpc_client_common",
- "strum",
- "thiserror 1.0.69",
+ "rpc_client_rss",
+ "serde",
+ "serde_json",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

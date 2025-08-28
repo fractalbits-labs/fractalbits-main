@@ -19,8 +19,6 @@ pub fn bootstrap(
 ) -> CmdResult {
     // download_binaries(&["rss_admin", "root_server", "ebs-failover"])?;
     download_binaries(&["rss_admin", "root_server"])?;
-    let region = get_current_aws_region()?;
-    run_cmd!($BIN_PATH/rss_admin --region=$region api-key init-test)?;
 
     // Initialize NSS role states in DynamoDB
     initialize_nss_roles_in_ddb(nss_a_id, nss_b_id)?;
@@ -66,6 +64,8 @@ pub fn bootstrap(
         }
 
         wait_for_leadership()?;
+        run_cmd!($BIN_PATH/rss_admin --rss-addr=127.0.0.1:8088 api-key init-test)?;
+
         start_follower_root_server(follower_id)?;
 
         // bootstrap_ebs_failover_service(nss_a_id, nss_b_id, volume_id)?;

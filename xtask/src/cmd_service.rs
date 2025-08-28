@@ -114,15 +114,17 @@ pub fn init_service(service: ServiceName, build_mode: BuildMode) -> CmdResult {
             init_ddb_local()?;
         }
 
-        // Initialize api key for testing
+        // Start RSS service since admin now connects via RPC
+        start_rss_service(build_mode)?;
+
+        // Initialize api key for testing using RSS RPC
         let build = build_mode.as_ref();
         run_cmd! {
-            AWS_DEFAULT_REGION=fakeRegion
-            AWS_ACCESS_KEY_ID=fakeMyKeyId
-            AWS_SECRET_ACCESS_KEY=fakeSecretAccessKey
-            AWS_ENDPOINT_URL_DYNAMODB="http://localhost:8000"
-            ./target/${build}/rss_admin --region=fakeRegion api-key init-test;
+            ./target/${build}/rss_admin --rss-addr=127.0.0.1:8086 api-key init-test;
         }?;
+
+        // Stop services after initialization
+        stop_service(ServiceName::Rss)?;
         stop_service(ServiceName::DdbLocal)?;
         Ok(())
     };

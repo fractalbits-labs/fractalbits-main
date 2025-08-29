@@ -168,7 +168,9 @@ pub fn init_service(
     };
 
     match service {
-        ServiceName::ApiServer | ServiceName::GuiServer => {}
+        ServiceName::ApiServer | ServiceName::GuiServer => {
+            generate_https_certificates()?;
+        }
         ServiceName::DdbLocal => init_ddb_local()?,
         ServiceName::Minio => init_minio()?,
         ServiceName::MinioAz1 => init_minio_dev_az1()?,
@@ -181,6 +183,7 @@ pub fn init_service(
         ServiceName::Mirrord => init_mirrord()?,
         ServiceName::DataBlobResyncServer => {}
         ServiceName::All => {
+            generate_https_certificates()?;
             init_rss()?;
             init_bss()?;
             init_nss()?;
@@ -955,7 +958,10 @@ pub fn wait_for_service_ready(service: ServiceName, timeout_secs: u32) -> CmdRes
                 ServiceName::Bss => check_port_ready(8088),
                 ServiceName::Nss => check_port_ready(8087),
                 ServiceName::Mirrord => check_port_ready(9999),
-                ServiceName::ApiServer | ServiceName::GuiServer => check_port_ready(8080),
+                ServiceName::ApiServer | ServiceName::GuiServer => {
+                    // Check both HTTP and HTTPS ports for API server
+                    check_port_ready(8080) && check_port_ready(8443)
+                }
                 ServiceName::NssRoleAgentA => check_port_ready(8087), // Check managed nss_server
                 ServiceName::NssRoleAgentB => check_port_ready(9999), // check managed mirrord
                 ServiceName::DataBlobResyncServer => true,            // CLI tool, not a service
@@ -1024,5 +1030,27 @@ fn register_local_api_server() -> CmdResult {
     }
 
     info!("Local api_server registered in service discovery");
+    Ok(())
+}
+
+fn generate_https_certificates() -> CmdResult {
+    info!("Generating HTTPS certificates for local development");
+
+    // Check if certificates already exist
+    if run_cmd!(test -f etc/cert.pem).is_ok() && run_cmd!(test -f etc/key.pem).is_ok() {
+        info!("Certificates already exist, skipping generation");
+        return Ok(());
+    }
+
+    run_cmd! {
+        info "Running mkcert for trusted local certificates...";
+        mkcert -install;
+        mkdir -p etc;
+        mkcert -key-file etc/key.pem -cert-file etc/cert.pem 127.0.0.1 localhost;
+    }?;
+
+    info!("HTTPS certificates generated successfully with mkcert:");
+    info!("  Certificate: etc/cert.pem (trusted by system)");
+    info!("  Private key: etc/key.pem (unencrypted)");
     Ok(())
 }

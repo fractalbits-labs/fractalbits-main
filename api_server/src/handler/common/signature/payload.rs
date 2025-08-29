@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use actix_web::http::header::{HeaderMap, AUTHORIZATION, HOST};
+use actix_web::http::header::{HeaderMap, HeaderValue, AUTHORIZATION, HOST};
 use actix_web::HttpRequest;
 use chrono::{DateTime, Utc};
 use data_types::{ApiKey, Versioned};
@@ -16,6 +16,27 @@ use crate::AppState;
 use super::super::data::Hash;
 use super::super::encoding::uri_encode;
 use super::*;
+
+/// Ensures the host header is present in the headers map, which is required for SigV4 signature verification.
+/// For HTTP/2 requests, the :authority pseudo-header replaces the host header, but actix-web doesn't
+/// automatically add it to the headers map. This function creates a new headers map with the host header
+/// added from the request's connection info when it's missing.
+fn ensure_host_header_present(request: &HttpRequest) -> Result<HeaderMap, Error> {
+    let mut headers = request.headers().clone();
+
+    // Check if host header is missing (typical for HTTP/2)
+    if !headers.contains_key(HOST) {
+        // Get the host from connection info (:authority pseudo-header for HTTP/2)
+        let connection_info = request.connection_info();
+        let host_value = connection_info.host();
+        let header_value = HeaderValue::from_str(host_value)
+            .map_err(|_| Error::Other("Invalid host value from connection info".into()))?;
+        headers.insert(HOST, header_value);
+        tracing::debug!("Added missing host header for HTTP/2: {}", host_value);
+    }
+
+    Ok(headers)
+}
 
 pub struct CheckedSignature {
     pub key: Option<Versioned<ApiKey>>,
@@ -117,11 +138,14 @@ pub async fn check_standard_signature(
     let query_params: BTreeMap<String, String> =
         serde_urlencoded::from_str(request.query_string()).unwrap_or_default();
 
+    // Create a headers map that includes the host header for HTTP/2 compatibility
+    let headers_for_signature = ensure_host_header_present(request)?;
+
     let canonical_request = canonical_request(
         request.method(),
         request.path(),
         &query_params,
-        request.headers(),
+        &headers_for_signature,
         &authentication.signed_headers,
         &authentication.content_sha256,
     )?;
@@ -154,8 +178,11 @@ async fn check_presigned_signature(
 ) -> Result<CheckedSignature, Error> {
     let signed_headers = &authentication.signed_headers;
 
+    // Create a headers map that includes the host header
+    let headers_for_signature = ensure_host_header_present(request)?;
+
     // Verify signed headers
-    verify_signed_headers(request.headers(), signed_headers)?;
+    verify_signed_headers(&headers_for_signature, signed_headers)?;
 
     // Remove X-Amz-Signature from query for canonical request calculation
     query.remove(xheader::X_AMZ_SIGNATURE.as_str());
@@ -164,7 +191,7 @@ async fn check_presigned_signature(
         request.method(),
         request.path(),
         query,
-        request.headers(),
+        &headers_for_signature,
         signed_headers,
         &authentication.content_sha256,
     )?;

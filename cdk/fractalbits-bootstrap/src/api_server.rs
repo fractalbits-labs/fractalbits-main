@@ -88,6 +88,13 @@ http_request_timeout_seconds = 5
 rpc_timeout_seconds = 4
 allow_missing_or_bad_signature = false
 
+[https]
+enabled = false
+port = 443
+cert_file = "/opt/fractalbits/etc/cert.pem"
+key_file = "/opt/fractalbits/etc/key.pem"
+force_http1_only = false
+
 [blob_storage]
 backend = "s3_express_multi_az_with_tracking"
 
@@ -136,6 +143,13 @@ with_metrics = false
 http_request_timeout_seconds = 5
 rpc_timeout_seconds = 4
 allow_missing_or_bad_signature = false
+
+[https]
+enabled = false
+port = 443
+cert_file = "/opt/fractalbits/etc/cert.pem"
+key_file = "/opt/fractalbits/etc/key.pem"
+force_http1_only = false
 
 [blob_storage]
 backend = "hybrid_single_az"

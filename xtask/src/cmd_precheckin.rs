@@ -85,6 +85,10 @@ fn run_s3_api_tests() -> CmdResult {
         info "Run cargo tests (s3 api tests)";
         cargo test --package api_server;
     }?;
+    run_cmd! {
+        info "Run cargo tests (s3 https api tests)";
+        USE_HTTPS_ENDPOINT=true cargo test --package api_server;
+    }?;
     let _ = cmd_service::stop_service(ServiceName::All);
 
     Ok(())

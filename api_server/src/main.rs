@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::{fs::File, io::Read};
 use std::{net::SocketAddr, path::PathBuf};
 
 mod api_key_routes;
@@ -8,6 +9,10 @@ use actix_files::Files;
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use api_server::{handler::any_handler, AppState, Config};
 use clap::Parser;
+use openssl::{
+    pkey::{PKey, Private},
+    ssl::{SslAcceptor, SslMethod},
+};
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
@@ -21,11 +26,26 @@ struct Opt {
     config_file: Option<PathBuf>,
 }
 
+fn load_private_key(key_path: &str) -> Result<PKey<Private>, Box<dyn std::error::Error>> {
+    let mut file = File::open(key_path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+
+    // Try to load as encrypted key first (with password)
+    if let Ok(key) = PKey::private_key_from_pem_passphrase(&buffer, b"password") {
+        return Ok(key);
+    }
+
+    // Fall back to unencrypted key
+    let key = PKey::private_key_from_pem(&buffer)?;
+    Ok(key)
+}
+
 #[actix_web::main]
 async fn main() {
     // AWS SDK suppression filter
     let third_party_filter =
-        "tower_http=warn,hyper_util=warn,aws_smithy=warn,aws_sdk=warn,actix_web=warn,actix_server=warn";
+        "tower_http=warn,hyper_util=warn,aws_smithy=warn,aws_sdk=warn,actix_web=warn,actix_server=warn,h2=warn";
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -113,6 +133,8 @@ async fn main() {
 
     let port = config.port;
     let mgmt_port = config.mgmt_port;
+    let https_config = config.https.clone();
+
     // Get web root from environment variable
     let web_root = match std::env::var("GUI_WEB_ROOT") {
         Ok(gui_web_root) => {
@@ -124,9 +146,8 @@ async fn main() {
     let app_state = AppState::new(Arc::new(config)).await;
     let app_state_arc = Arc::new(app_state);
 
-    // Start main server
-    info!("Main server started at port {port}");
-    let main_server = HttpServer::new({
+    // Create app factory closure
+    let create_app = {
         let app_state_arc = app_state_arc.clone();
         let web_root = web_root.clone();
         move || {
@@ -154,9 +175,62 @@ async fn main() {
             }
             app.default_service(web::route().to(any_handler))
         }
-    })
-    .bind(format!("0.0.0.0:{port}"))
-    .unwrap();
+    };
+
+    // Start HTTP server
+    info!("HTTP server started at port {port}");
+    let http_server = HttpServer::new(create_app.clone())
+        .bind(format!("0.0.0.0:{port}"))
+        .unwrap();
+
+    // Start HTTPS server if enabled
+    let https_server = if https_config.enabled {
+        info!("HTTPS server started at port {}", https_config.port);
+
+        // Build TLS config from files
+        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+
+        // Load private key
+        let key_path = &https_config.key_file;
+        let cert_path = &https_config.cert_file;
+
+        // Try to load the private key (handles both encrypted and unencrypted keys)
+        match load_private_key(key_path) {
+            Ok(private_key) => {
+                builder.set_private_key(&private_key).unwrap();
+            }
+            Err(e) => {
+                error!("Failed to load private key from {}: {}", key_path, e);
+                error!("If using mkcert, ensure the key is unencrypted");
+                error!("If using OpenSSL, ensure the password is correct");
+                std::process::exit(1);
+            }
+        }
+
+        // Set certificate chain
+        if let Err(e) = builder.set_certificate_chain_file(cert_path) {
+            error!("Failed to load certificate chain from {}: {}", cert_path, e);
+            std::process::exit(1);
+        }
+
+        // Configure ALPN protocols based on configuration
+        if https_config.force_http1_only {
+            info!("Configuring HTTPS for HTTP/1.1 only");
+            // ALPN protocol format: length-prefixed strings
+            builder.set_alpn_protos(b"\x08http/1.1").unwrap();
+        } else {
+            info!("Configuring HTTPS for both HTTP/1.1 and HTTP/2");
+        }
+
+        Some(
+            HttpServer::new(create_app)
+                .bind_openssl(format!("0.0.0.0:{}", https_config.port), builder)
+                .unwrap(),
+        )
+    } else {
+        info!("HTTPS is disabled");
+        None
+    };
 
     // Start management server
     info!("Management server started at port {mgmt_port}");
@@ -188,19 +262,43 @@ async fn main() {
     .bind(format!("0.0.0.0:{mgmt_port}"))
     .unwrap();
 
-    // Run both servers concurrently
-    let main_server_future = main_server.run();
+    // Run all servers concurrently
+    let http_server_future = http_server.run();
     let mgmt_server_future = mgmt_server.run();
 
-    tokio::select! {
-        result = main_server_future => {
-            if let Err(e) = result {
-                tracing::error!("Main server stopped: {e}");
+    match https_server {
+        Some(https_server) => {
+            let https_server_future = https_server.run();
+            tokio::select! {
+                result = http_server_future => {
+                    if let Err(e) = result {
+                        tracing::error!("HTTP server stopped: {e}");
+                    }
+                }
+                result = https_server_future => {
+                    if let Err(e) = result {
+                        tracing::error!("HTTPS server stopped: {e}");
+                    }
+                }
+                result = mgmt_server_future => {
+                    if let Err(e) = result {
+                        tracing::error!("Management server stopped: {e}");
+                    }
+                }
             }
         }
-        result = mgmt_server_future => {
-            if let Err(e) = result {
-                tracing::error!("Management server stopped: {e}");
+        None => {
+            tokio::select! {
+                result = http_server_future => {
+                    if let Err(e) = result {
+                        tracing::error!("HTTP server stopped: {e}");
+                    }
+                }
+                result = mgmt_server_future => {
+                    if let Err(e) = result {
+                        tracing::error!("Management server stopped: {e}");
+                    }
+                }
             }
         }
     }

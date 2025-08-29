@@ -117,6 +117,27 @@ impl Default for S3ExpressSingleAzConfig {
     }
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct HttpsConfig {
+    pub enabled: bool,
+    pub port: u16,
+    pub cert_file: String,
+    pub key_file: String,
+    pub force_http1_only: bool,
+}
+
+impl Default for HttpsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            port: 8443,
+            cert_file: "etc/cert.pem".to_string(),
+            key_file: "etc/key.pem".to_string(),
+            force_http1_only: false,
+        }
+    }
+}
+
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct Config {
     pub nss_addr: String,
@@ -126,6 +147,7 @@ pub struct Config {
 
     pub port: u16,
     pub mgmt_port: u16,
+    pub https: HttpsConfig,
     pub region: String,
     pub root_domain: String,
     pub with_metrics: bool,
@@ -173,11 +195,12 @@ impl Config {
             rss_conn_num: 1,
             port: 8080,
             mgmt_port: 18080,
+            https: HttpsConfig::default(),
             region: "localdev".into(),
             root_domain: ".localhost".into(),
             with_metrics: true,
-            http_request_timeout_seconds: 5,
-            rpc_timeout_seconds: 4,
+            http_request_timeout_seconds: 30,
+            rpc_timeout_seconds: 10,
             blob_storage: BlobStorageConfig {
                 backend: BlobStorageBackend::S3ExpressMultiAzWithTracking,
                 bss: None,
@@ -197,11 +220,12 @@ impl Config {
             rss_conn_num: 1,
             port: 8080,
             mgmt_port: 18080,
+            https: HttpsConfig::default(),
             region: "localdev".into(),
             root_domain: ".localhost".into(),
             with_metrics: true,
-            http_request_timeout_seconds: 5,
-            rpc_timeout_seconds: 4,
+            http_request_timeout_seconds: 30,
+            rpc_timeout_seconds: 10,
             blob_storage: BlobStorageConfig {
                 backend: BlobStorageBackend::S3ExpressMultiAz,
                 bss: None,
@@ -221,11 +245,12 @@ impl Config {
             rss_conn_num: 1,
             port: 8080,
             mgmt_port: 18080,
+            https: HttpsConfig::default(),
             region: "localdev".into(),
             root_domain: ".localhost".into(),
             with_metrics: true,
-            http_request_timeout_seconds: 5,
-            rpc_timeout_seconds: 4,
+            http_request_timeout_seconds: 30,
+            rpc_timeout_seconds: 10,
             blob_storage: BlobStorageConfig {
                 backend: BlobStorageBackend::S3ExpressSingleAz,
                 bss: None,
@@ -245,11 +270,12 @@ impl Config {
             rss_conn_num: 1,
             port: 8080,
             mgmt_port: 18080,
+            https: HttpsConfig::default(),
             region: "localdev".into(),
             root_domain: ".localhost".into(),
             with_metrics: true,
-            http_request_timeout_seconds: 5,
-            rpc_timeout_seconds: 4,
+            http_request_timeout_seconds: 30,
+            rpc_timeout_seconds: 10,
             blob_storage: BlobStorageConfig {
                 backend: BlobStorageBackend::HybridSingleAz,
                 bss: Some(BssConfig {

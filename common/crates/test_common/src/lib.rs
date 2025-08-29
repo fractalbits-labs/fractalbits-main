@@ -3,7 +3,8 @@ use aws_sdk_s3::operation::list_buckets::ListBucketsOutput;
 use aws_sdk_s3::{Client, Config};
 use cmd_lib::*;
 
-const DEFAULT_PORT: u16 = 8080;
+const DEFAULT_HTTP_PORT: u16 = 8080;
+const DEFAULT_HTTPS_PORT: u16 = 8443;
 const TEST_KEY: &str = "test_api_key";
 const TEST_SECRET: &str = "test_api_secret";
 
@@ -72,14 +73,25 @@ pub fn context() -> Context {
 
 pub fn build_client() -> Client {
     let credentials = Credentials::new(TEST_KEY, TEST_SECRET, None, None, "fractalbits-integ-bits");
-    #[allow(deprecated)]
-    let config = Config::builder()
-        .endpoint_url(format!("http://127.0.0.1:{DEFAULT_PORT}"))
+
+    // Check environment variable to determine HTTP vs HTTPS
+    let use_https = std::env::var("USE_HTTPS_ENDPOINT")
+        .map(|val| val.to_lowercase() == "true")
+        .unwrap_or(false); // Default to HTTP
+
+    let (scheme, port) = if use_https {
+        ("https", DEFAULT_HTTPS_PORT)
+    } else {
+        ("http", DEFAULT_HTTP_PORT)
+    };
+
+    let config_builder = Config::builder()
+        .endpoint_url(format!("{}://127.0.0.1:{}", scheme, port))
         .region(Region::from_static("localdev"))
         .credentials_provider(credentials)
-        .behavior_version(BehaviorVersion::v2024_03_28())
-        .build();
+        .behavior_version(BehaviorVersion::latest());
 
+    let config = config_builder.build();
     Client::from_conf(config)
 }
 

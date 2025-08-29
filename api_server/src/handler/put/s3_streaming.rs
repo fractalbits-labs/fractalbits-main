@@ -111,7 +111,7 @@ impl S3StreamingPayload {
                 match msg {
                     ChecksumMessage::Data(data) => {
                         total_bytes += data.len();
-                        tracing::debug!(
+                        tracing::trace!(
                             "Updating checksummer with {} bytes: {:?}",
                             data.len(),
                             std::str::from_utf8(&data).unwrap_or("<non-utf8>")
@@ -119,7 +119,7 @@ impl S3StreamingPayload {
                         checksummer.update(&data);
                     }
                     ChecksumMessage::Trailers(trailers) => {
-                        tracing::debug!("Received trailer checksums: {:?}", trailers);
+                        tracing::trace!("Received trailer checksums: {:?}", trailers);
                         trailer_checksums = Some(trailers);
                     }
                 }

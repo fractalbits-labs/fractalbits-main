@@ -6,10 +6,10 @@ use std::time::Duration;
 #[serde(rename_all = "snake_case")]
 pub enum BlobStorageBackend {
     BssOnlySingleAz,
+    #[default]
     HybridSingleAz,
     S3ExpressSingleAz,
     S3ExpressMultiAz,
-    #[default]
     S3ExpressMultiAzWithTracking,
 }
 
@@ -182,7 +182,7 @@ pub struct S3HybridConfig {
 
 impl Default for Config {
     fn default() -> Self {
-        Self::s3_express_multi_az_with_tracking()
+        Self::hybrid_single_az()
     }
 }
 

@@ -27,16 +27,6 @@ pub async fn delete_bucket_handler(ctx: BucketRequestContext) -> Result<HttpResp
     match result {
         Ok(_) => {
             info!("Successfully deleted bucket: {}", bucket.bucket_name);
-            // Invalidate both bucket and API key cache
-            ctx.app
-                .cache
-                .invalidate(&format!("bucket:{}", bucket.bucket_name))
-                .await;
-            ctx.app
-                .cache
-                .invalidate(&format!("api_key:{api_key_id}"))
-                .await;
-
             Ok(HttpResponse::NoContent().finish())
         }
         Err(e) => {

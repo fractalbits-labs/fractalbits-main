@@ -742,13 +742,6 @@ impl ResponseError for S3Error {
     }
 }
 
-impl From<serde_urlencoded::de::Error> for S3Error {
-    fn from(value: serde_urlencoded::de::Error) -> Self {
-        tracing::error!("Query parsing error: {value}");
-        Self::UnsupportedArgument
-    }
-}
-
 impl From<InvalidUri> for S3Error {
     fn from(value: InvalidUri) -> Self {
         tracing::error!("InvalidUri: {value}");

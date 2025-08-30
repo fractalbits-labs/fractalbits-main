@@ -419,7 +419,6 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "serde_urlencoded",
  "sha1",
  "sha2",
  "slotmap_conn_pool",

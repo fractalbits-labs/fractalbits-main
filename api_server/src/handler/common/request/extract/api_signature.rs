@@ -1,4 +1,4 @@
-use actix_web::{dev::Payload, FromRequest, HttpRequest};
+use actix_web::{dev::Payload, web::Query, FromRequest, HttpRequest};
 use futures::future::{ready, Ready};
 use serde::Deserialize;
 use std::fmt;
@@ -50,11 +50,9 @@ impl FromRequest for ApiSignatureExtractor {
     type Future = Ready<Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
-        // Use serde_urlencoded to properly deserialize query parameters
-        let query_string = req.query_string();
-        let mut api_signature: ApiSignature =
-            serde_urlencoded::from_str(query_string).unwrap_or_default();
-
+        let mut api_signature = Query::<ApiSignature>::from_query(req.query_string())
+            .unwrap_or_else(|_| Query(Default::default()))
+            .into_inner();
         // Extract x-amz-copy-source from headers if present
         if let Some(copy_source) = req
             .headers()

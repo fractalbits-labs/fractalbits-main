@@ -2,8 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::sync::Arc;
 
-use actix_web::http::header::{HeaderMap, HeaderValue, AUTHORIZATION, HOST};
-use actix_web::HttpRequest;
+use actix_web::{
+    http::header::{HeaderMap, HeaderValue, AUTHORIZATION, HOST},
+    web::Query,
+    HttpRequest,
+};
 use arrayvec::ArrayString;
 use chrono::{DateTime, Utc};
 use data_types::{ApiKey, Versioned};
@@ -39,9 +42,9 @@ pub async fn check_payload_signature(
     auth: &Authentication,
     request: &HttpRequest,
 ) -> Result<CheckedSignature, SignatureError> {
-    let query_string = request.query_string();
-    let mut query: BTreeMap<String, String> =
-        serde_urlencoded::from_str(query_string).unwrap_or_default();
+    let mut query = Query::<BTreeMap<String, String>>::from_query(request.query_string())
+        .unwrap_or_else(|_| Query(Default::default()))
+        .into_inner();
 
     if query.contains_key(xheader::X_AMZ_ALGORITHM.as_str()) {
         // Presigned URL style authentication
@@ -103,8 +106,9 @@ async fn check_standard_signature(
     authentication: &Authentication,
     request: &HttpRequest,
 ) -> Result<CheckedSignature, SignatureError> {
-    let query_params: BTreeMap<String, String> =
-        serde_urlencoded::from_str(request.query_string()).unwrap_or_default();
+    let query_params = Query::<BTreeMap<String, String>>::from_query(request.query_string())
+        .unwrap_or_else(|_| Query(Default::default()))
+        .into_inner();
 
     // Create a headers map that includes the host header for HTTP/2 compatibility
     let headers_for_signature = ensure_host_header_present(request)?;

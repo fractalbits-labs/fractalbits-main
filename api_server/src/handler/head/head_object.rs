@@ -3,16 +3,13 @@ use crate::handler::{
     get::{override_headers, GetObjectHeaderOpts, GetObjectQueryOpts},
     ObjectRequestContext,
 };
-use actix_web::HttpResponse;
+use actix_web::{web::Query, HttpResponse};
 use futures_util::{stream, StreamExt as _};
 
 pub async fn head_object_handler(ctx: ObjectRequestContext) -> Result<HttpResponse, S3Error> {
     let bucket = ctx.resolve_bucket().await?;
-
-    // Extract query parameters from request
-    let query_string = ctx.request.query_string();
-    let query_opts: GetObjectQueryOpts =
-        serde_urlencoded::from_str(query_string).map_err(|_| S3Error::UnsupportedArgument)?;
+    let query_opts = Query::<GetObjectQueryOpts>::from_query(ctx.request.query_string())
+        .map_err(|_| S3Error::UnsupportedArgument)?;
 
     // Extract header options from headers
     let header_opts = GetObjectHeaderOpts::from_headers(ctx.request.headers())?;

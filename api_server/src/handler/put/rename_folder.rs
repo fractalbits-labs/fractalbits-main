@@ -1,5 +1,5 @@
 use crate::handler::{common::s3_error::S3Error, ObjectRequestContext};
-use actix_web::HttpResponse;
+use actix_web::{web::Query, HttpResponse};
 use rpc_client_common::nss_rpc_retry;
 use serde::Deserialize;
 use tracing::error;
@@ -12,10 +12,9 @@ struct QueryOpts {
 
 pub async fn rename_folder_handler(ctx: ObjectRequestContext) -> Result<HttpResponse, S3Error> {
     let bucket = ctx.resolve_bucket().await?;
-
-    // Parse query parameters
-    let query_string = ctx.request.query_string();
-    let QueryOpts { src_path } = serde_urlencoded::from_str(query_string).unwrap_or_default();
+    let QueryOpts { src_path } = Query::<QueryOpts>::from_query(ctx.request.query_string())
+        .unwrap_or_else(|_| Query(Default::default()))
+        .into_inner();
     let mut dst_path = ctx.key;
     if !dst_path.ends_with('/') {
         dst_path.push('/');

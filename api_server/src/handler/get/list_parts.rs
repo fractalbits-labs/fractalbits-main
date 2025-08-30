@@ -11,6 +11,7 @@ use crate::handler::common::{
 use crate::handler::ObjectRequestContext;
 use crate::object_layout::{MpuState, ObjectState};
 use crate::AppState;
+use actix_web::web::Query;
 use base64::prelude::*;
 use data_types::Bucket;
 use serde::{Deserialize, Serialize};
@@ -91,10 +92,9 @@ pub async fn list_parts_handler(
     ctx: ObjectRequestContext,
 ) -> Result<actix_web::HttpResponse, S3Error> {
     let bucket = ctx.resolve_bucket().await?;
-
-    // Parse query parameters
-    let query_string = ctx.request.query_string();
-    let query_opts: QueryOpts = serde_urlencoded::from_str(query_string).unwrap_or_default();
+    let query_opts = Query::<QueryOpts>::from_query(ctx.request.query_string())
+        .unwrap_or_else(|_| Query(Default::default()))
+        .into_inner();
 
     let max_parts = query_opts.max_parts.unwrap_or(1000);
     let object = get_raw_object(&ctx.app, &bucket.root_blob_name, &ctx.key).await?;

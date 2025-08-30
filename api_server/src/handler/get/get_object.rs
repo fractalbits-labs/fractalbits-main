@@ -14,6 +14,7 @@ use crate::{
 use crate::{AppState, BlobId};
 use actix_web::{
     http::{header, header::HeaderValue, StatusCode},
+    web::Query,
     HttpResponse,
 };
 use bytes::Bytes;
@@ -79,15 +80,9 @@ impl<'a> HeaderOpts<'a> {
 }
 
 pub async fn get_object_handler(ctx: ObjectRequestContext) -> Result<HttpResponse, S3Error> {
-    tracing::debug!("GetObject handler: {}/{}", ctx.bucket_name, ctx.key);
-
-    // Resolve bucket to get bucket details
     let bucket = ctx.resolve_bucket().await?;
-
-    // Extract query parameters from request
-    let query_string = ctx.request.query_string();
-    let query_opts: QueryOpts =
-        serde_urlencoded::from_str(query_string).map_err(|_| S3Error::UnsupportedArgument)?;
+    let query_opts = Query::<QueryOpts>::from_query(ctx.request.query_string())
+        .map_err(|_| S3Error::UnsupportedArgument)?;
 
     // Extract header options from headers
     let header_opts = HeaderOpts::from_headers(ctx.request.headers())?;

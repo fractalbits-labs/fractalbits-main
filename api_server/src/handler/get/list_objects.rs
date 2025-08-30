@@ -6,9 +6,8 @@ use crate::handler::{
     },
     ObjectRequestContext,
 };
-use actix_web::HttpResponse;
+use actix_web::{web::Query, HttpResponse};
 use serde::{Deserialize, Serialize};
-use serde_urlencoded;
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Default)]
@@ -104,9 +103,9 @@ impl ListBucketResult {
 }
 
 pub async fn list_objects_handler(ctx: ObjectRequestContext) -> Result<HttpResponse, S3Error> {
-    // Parse query parameters
-    let query_string = ctx.request.query_string();
-    let opts: QueryOpts = serde_urlencoded::from_str(query_string).unwrap_or_default();
+    let opts = Query::<QueryOpts>::from_query(ctx.request.query_string())
+        .unwrap_or_else(|_| Query(Default::default()))
+        .into_inner();
     tracing::debug!("list_objects {opts:?}");
 
     if let Some(encoding_type) = &opts.encoding_type {

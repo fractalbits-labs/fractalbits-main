@@ -5,6 +5,7 @@ use crate::handler::{
     },
     ObjectRequestContext,
 };
+use actix_web::web::Query;
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
@@ -73,9 +74,7 @@ struct CommonPrefixes {
 pub async fn list_multipart_uploads_handler(
     ctx: ObjectRequestContext,
 ) -> Result<actix_web::HttpResponse, S3Error> {
-    // Parse query parameters
-    let query_string = ctx.request.query_string();
-    let _opts: ListMultipartUploadsOptions =
-        serde_urlencoded::from_str(query_string).unwrap_or_default();
+    let _opts = Query::<ListMultipartUploadsOptions>::from_query(ctx.request.query_string())
+        .unwrap_or_else(|_| Query(Default::default()));
     Xml(ListMultipartUploadsResult::default()).try_into()
 }

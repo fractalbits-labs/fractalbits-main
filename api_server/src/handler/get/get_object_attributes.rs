@@ -10,7 +10,10 @@ use crate::handler::{
     },
     ObjectRequestContext,
 };
-use actix_web::http::header::{HeaderMap, HeaderValue};
+use actix_web::{
+    http::header::{HeaderMap, HeaderValue},
+    web::Query,
+};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 
@@ -172,10 +175,8 @@ pub async fn get_object_attributes_handler(
     ctx: ObjectRequestContext,
 ) -> Result<actix_web::HttpResponse, S3Error> {
     let bucket = ctx.resolve_bucket().await?;
-
-    // Parse query parameters (version_id if present)
-    let query_string = ctx.request.query_string();
-    let _query_opts: QueryOpts = serde_urlencoded::from_str(query_string).unwrap_or_default();
+    let _query_opts = Query::<QueryOpts>::from_query(ctx.request.query_string())
+        .unwrap_or_else(|_| Query(Default::default()));
 
     // Parse object attributes from headers
     let header_opts = HeaderOpts::from_headers(ctx.request.headers())?;

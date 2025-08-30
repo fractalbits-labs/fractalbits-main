@@ -1,3 +1,4 @@
+use actix_web::web::Query;
 use nss_codec::list_inodes_response;
 use rpc_client_common::nss_rpc_retry;
 use std::sync::Arc;
@@ -17,7 +18,6 @@ use crate::{
 use data_types::Bucket;
 use rkyv::{self, rancor::Error};
 use serde::{Deserialize, Serialize};
-use serde_urlencoded;
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -195,13 +195,12 @@ pub struct Prefix {
 pub async fn list_objects_v2_handler(
     ctx: ObjectRequestContext,
 ) -> Result<actix_web::HttpResponse, S3Error> {
-    // Parse query parameters - need to handle URL decoding properly
-    let query_string = ctx.request.query_string();
-    // Use serde_urlencoded which handles URL decoding automatically
-    let opts: QueryOpts = serde_urlencoded::from_str(query_string).unwrap_or_default();
+    let opts = Query::<QueryOpts>::from_query(ctx.request.query_string())
+        .unwrap_or_else(|_| Query(Default::default()))
+        .into_inner();
     tracing::debug!(
         "list_objects_v2 query_string='{}' parsed={opts:?}",
-        query_string
+        ctx.request.query_string()
     );
 
     // Sanity checks

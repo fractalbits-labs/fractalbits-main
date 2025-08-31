@@ -1,12 +1,12 @@
 mod bss_only_single_az_storage;
-mod hybrid_single_az_storage;
+mod s3_hybrid_single_az_storage;
 mod retry;
 mod s3_express_multi_az_storage;
 mod s3_express_multi_az_with_tracking;
 mod s3_express_single_az_storage;
 
 pub use bss_only_single_az_storage::BssOnlySingleAzStorage;
-pub use hybrid_single_az_storage::HybridSingleAzStorage;
+pub use s3_hybrid_single_az_storage::S3HybridSingleAzStorage;
 pub use retry::S3RetryConfig;
 pub use s3_express_multi_az_storage::{S3ExpressMultiAzConfig, S3ExpressMultiAzStorage};
 pub use s3_express_multi_az_with_tracking::{
@@ -18,7 +18,7 @@ pub use s3_express_single_az_storage::{S3ExpressSingleAzConfig, S3ExpressSingleA
 
 pub enum BlobStorageImpl {
     BssOnlySingleAz(BssOnlySingleAzStorage),
-    HybridSingleAz(HybridSingleAzStorage),
+    HybridSingleAz(S3HybridSingleAzStorage),
     S3ExpressMultiAz(S3ExpressMultiAzStorage),
     S3ExpressMultiAzWithTracking(S3ExpressMultiAzWithTracking),
     S3ExpressSingleAz(S3ExpressSingleAzStorage),

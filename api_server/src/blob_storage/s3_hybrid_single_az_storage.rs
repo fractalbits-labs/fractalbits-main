@@ -13,7 +13,7 @@ use std::{
 use tracing::info;
 use uuid::Uuid;
 
-pub struct HybridSingleAzStorage {
+pub struct S3HybridSingleAzStorage {
     rpc_clients_bss: ConnPool<Arc<RpcClientBss>, String>,
     client_s3: S3Client,
     s3_cache_bucket: String,
@@ -21,11 +21,11 @@ pub struct HybridSingleAzStorage {
     rpc_timeout: Duration,
 }
 
-impl HybridSingleAzStorage {
+impl S3HybridSingleAzStorage {
     pub async fn new(
         bss_addr: &str,
         bss_conn_num: u16,
-        s3_cache_config: &S3HybridSingleAzConfig,
+        s3_hybrid_config: &S3HybridSingleAzConfig,
         rpc_timeout: Duration,
     ) -> Self {
         let clients_bss = ConnPool::new();
@@ -47,9 +47,9 @@ impl HybridSingleAzStorage {
         info!("BSS RPC client pool initialized with {bss_conn_num} connections.");
 
         let client_s3 = create_s3_client(
-            &s3_cache_config.s3_host,
-            s3_cache_config.s3_port,
-            &s3_cache_config.s3_region,
+            &s3_hybrid_config.s3_host,
+            s3_hybrid_config.s3_port,
+            &s3_hybrid_config.s3_region,
             false, // force_path_style not needed for hybrid storage
         )
         .await;
@@ -57,7 +57,7 @@ impl HybridSingleAzStorage {
         Self {
             rpc_clients_bss: clients_bss,
             client_s3,
-            s3_cache_bucket: s3_cache_config.s3_bucket.clone(),
+            s3_cache_bucket: s3_hybrid_config.s3_bucket.clone(),
             bss_addr: bss_addr.to_string(),
             rpc_timeout,
         }
@@ -74,7 +74,7 @@ impl HybridSingleAzStorage {
     }
 }
 
-impl BlobStorage for HybridSingleAzStorage {
+impl BlobStorage for S3HybridSingleAzStorage {
     async fn put_blob(
         &self,
         _tracking_root_blob_name: Option<&str>,

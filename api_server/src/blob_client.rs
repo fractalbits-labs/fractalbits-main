@@ -1,7 +1,7 @@
 use crate::{
     blob_storage::{
         BlobStorage, BlobStorageError, BlobStorageImpl, BssOnlySingleAzStorage,
-        HybridSingleAzStorage, S3ExpressMultiAzStorage, S3ExpressMultiAzWithTracking,
+        S3HybridSingleAzStorage, S3ExpressMultiAzStorage, S3ExpressMultiAzWithTracking,
         S3ExpressSingleAzStorage, S3ExpressWithTrackingConfig,
     },
     config::{BlobStorageBackend, BlobStorageConfig},
@@ -50,7 +50,7 @@ impl BlobClient {
             }
             BlobStorageBackend::S3HybridSingleAz => {
                 let bss_config = Self::get_bss_config(blob_storage_config, "Hybrid")?;
-                let s3_cache_config = blob_storage_config
+                let s3_hybrid_config = blob_storage_config
                     .s3_hybrid_single_az
                     .as_ref()
                     .ok_or_else(|| {
@@ -59,10 +59,10 @@ impl BlobClient {
                         )
                     })?;
                 BlobStorageImpl::HybridSingleAz(
-                    HybridSingleAzStorage::new(
+                    S3HybridSingleAzStorage::new(
                         &bss_config.addr,
                         bss_config.conn_num,
-                        s3_cache_config,
+                        s3_hybrid_config,
                         rpc_timeout,
                     )
                     .await,

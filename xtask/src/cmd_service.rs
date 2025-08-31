@@ -71,7 +71,14 @@ pub fn init_service(
         }?;
 
         // Initialize NSS role states in service-discovery table
-        let nss_roles_item = r#"{"service_id":{"S":"nss_roles"},"states":{"M":{"nss-A":{"S":"active"},"nss-B":{"S":"standby"}}}}"#;
+        let nss_roles_item = match init_config.data_blob_storage {
+            DataBlobStorage::HybridSingleAz | DataBlobStorage::S3ExpressSingleAz => {
+                r#"{"service_id":{"S":"nss_roles"},"states":{"M":{"nss-A":{"S":"solo"},"nss-B":{"S":"dead"}}}}"#
+            }
+            DataBlobStorage::S3ExpressMultiAz => {
+                r#"{"service_id":{"S":"nss_roles"},"states":{"M":{"nss-A":{"S":"active"},"nss-B":{"S":"standby"}}}}"#
+            }
+        };
 
         run_cmd! {
             info "Initializing NSS role states in service-discovery table ...";
@@ -318,9 +325,7 @@ pub fn start_service(service: ServiceName) -> CmdResult {
         ServiceName::DataBlobResyncServer => {
             info!("DataBlobResyncServer is a standalone CLI tool, not a service. Use 'cargo run -p data_blob_resync_server' instead.");
         }
-        ServiceName::All => {
-            start_all_services(BuildMode::Debug, false, DataBlobStorage::default())?
-        }
+        ServiceName::All => start_all_services()?,
         ServiceName::Minio => start_minio_service()?,
         ServiceName::MinioAz1 => start_minio_az1_service()?,
         ServiceName::MinioAz2 => start_minio_az2_service()?,
@@ -389,7 +394,7 @@ pub fn start_rss_service() -> CmdResult {
     }
 
     run_cmd!(systemctl --user start rss.service)?;
-    wait_for_service_ready(ServiceName::Rss, 15)?;
+    wait_for_service_ready(ServiceName::Rss, 30)?;
 
     let rss_server_pid = run_fun!(pidof root_server)?;
     check_pids(ServiceName::Rss, &rss_server_pid)?;
@@ -522,23 +527,6 @@ pub fn start_minio_az2_service() -> CmdResult {
     )
 }
 
-fn create_api_server_systemd_unit_file(
-    build_mode: BuildMode,
-    data_blob_storage: DataBlobStorage,
-    for_gui: bool,
-) -> CmdResult {
-    let service = if for_gui {
-        ServiceName::GuiServer
-    } else {
-        ServiceName::ApiServer
-    };
-
-    // Pass data_blob_storage to create_systemd_unit_file so it can set the environment variable
-    create_systemd_unit_file_with_backend(service, build_mode, data_blob_storage)?;
-
-    Ok(())
-}
-
 pub fn start_api_server() -> CmdResult {
     run_cmd!(systemctl --user start api_server.service)?;
     wait_for_service_ready(ServiceName::ApiServer, 10)?;
@@ -553,70 +541,39 @@ pub fn start_api_server() -> CmdResult {
     Ok(())
 }
 
-pub fn start_all_services(
-    build_mode: BuildMode,
-    for_gui: bool,
-    data_blob_storage: DataBlobStorage,
-) -> CmdResult {
+fn start_all_services() -> CmdResult {
     info!("Starting all services with systemd dependency management");
-
-    // Create all systemd unit files first
-    create_systemd_unit_file(ServiceName::Rss, build_mode)?;
-
-    // Only create BSS systemd unit file if we're in hybrid mode
-    match data_blob_storage {
-        DataBlobStorage::HybridSingleAz => {
-            create_systemd_unit_file(ServiceName::Bss, build_mode)?;
-        }
-        DataBlobStorage::S3ExpressMultiAz => {
-            info!("Skipping BSS systemd unit file creation in s3_express_multi_az mode");
-        }
-        DataBlobStorage::S3ExpressSingleAz => {
-            info!("Skipping BSS systemd unit file creation in s3_express_single_az mode");
-        }
-    }
-
-    create_systemd_unit_file(ServiceName::NssRoleAgentA, build_mode)?;
-    create_systemd_unit_file(ServiceName::Nss, build_mode)?;
-
-    create_systemd_unit_file(ServiceName::NssRoleAgentB, build_mode)?;
-    create_systemd_unit_file(ServiceName::Mirrord, build_mode)?;
-
-    create_api_server_systemd_unit_file(build_mode, data_blob_storage, for_gui)?;
 
     // Start supporting services first
     info!("Starting supporting services (ddb_local, minio instances)");
     start_ddb_local_service()?;
     start_minio_service()?; // Original minio for NSS metadata (port 9000)
-    if matches!(data_blob_storage, DataBlobStorage::S3ExpressMultiAz) {
+    if run_cmd!(grep -q multi_az etc/api_server.service).is_ok() {
         start_minio_az1_service()?; // Local AZ data blobs (port 9001)
         start_minio_az2_service()?; // Remote AZ data blobs (port 9002)
+        wait_for_service_ready(ServiceName::MinioAz1, 15)?;
+        wait_for_service_ready(ServiceName::MinioAz2, 15)?;
     }
-
-    wait_for_service_ready(ServiceName::DdbLocal, 10)?;
-
-    start_nss_role_agent_service(ServiceName::NssRoleAgentB)?;
+    wait_for_service_ready(ServiceName::DdbLocal, 15)?;
+    wait_for_service_ready(ServiceName::Minio, 15)?;
 
     // Start all main services - systemd dependencies will handle ordering
-    match data_blob_storage {
-        DataBlobStorage::HybridSingleAz => {
-            info!("Starting all main services (systemd will handle dependency ordering)");
-            run_cmd!(systemctl --user start rss.service bss.service nss_role_agent_a.service api_server.service)?;
+    if run_cmd!(grep -q single_az etc/api_server.service).is_ok() {
+        info!("Starting single_az services (systemd will handle dependency ordering)");
+        run_cmd!(systemctl --user start rss.service bss.service nss_role_agent_a.service api_server.service)?;
 
-            // Wait for all services to be ready in dependency order
-            wait_for_service_ready(ServiceName::Rss, 15)?;
-            wait_for_service_ready(ServiceName::Bss, 15)?;
-            wait_for_service_ready(ServiceName::NssRoleAgentA, 30)?;
-            wait_for_service_ready(ServiceName::ApiServer, 15)?;
-        }
-        DataBlobStorage::S3ExpressMultiAz | DataBlobStorage::S3ExpressSingleAz => {
-            let mode = data_blob_storage.as_ref();
-            info!("Starting main services (skipping BSS in {} mode)", mode);
-            run_cmd!(systemctl --user start rss.service nss_role_agent_a.service api_server.service)?;
-            wait_for_service_ready(ServiceName::Rss, 15)?;
-            wait_for_service_ready(ServiceName::NssRoleAgentA, 30)?;
-            wait_for_service_ready(ServiceName::ApiServer, 15)?;
-        }
+        // Wait for all services to be ready in dependency order
+        wait_for_service_ready(ServiceName::Rss, 30)?;
+        wait_for_service_ready(ServiceName::Bss, 15)?;
+        wait_for_service_ready(ServiceName::NssRoleAgentA, 30)?;
+        wait_for_service_ready(ServiceName::ApiServer, 15)?;
+    } else {
+        info!("Starting multi_az services (skipping BSS)");
+        start_nss_role_agent_service(ServiceName::NssRoleAgentB)?;
+        run_cmd!(systemctl --user start rss.service nss_role_agent_a.service api_server.service)?;
+        wait_for_service_ready(ServiceName::Rss, 30)?;
+        wait_for_service_ready(ServiceName::NssRoleAgentA, 30)?;
+        wait_for_service_ready(ServiceName::ApiServer, 15)?;
     }
 
     info!("All services started successfully!");
@@ -813,16 +770,14 @@ Environment="GUI_WEB_ROOT=ui/dist""##;
 
     // Add systemd dependencies based on service type
     let dependencies = match service {
-        // Note the current nss (managed by nss_role_agent_a) code requires mirrord (managed by
-        // nss_role_agent_b) to start at first, so we create dependency here. Once it has no
-        // restriction like this, we can remove the dependency requirement.
-        ServiceName::NssRoleAgentA => {
-            "After=rss.service nss_role_agent_b.service\nWants=rss.service nss_role_agent_b.service\n"
+        ServiceName::NssRoleAgentA | ServiceName::NssRoleAgentB => {
+            "After=rss.service\nWants=rss.service\n"
         }
-        ServiceName::NssRoleAgentB => "After=rss.service\nWants=rss.service\n",
         ServiceName::Rss => "After=ddb_local.service\nWants=ddb_local.service\n",
         ServiceName::Nss => "After=minio.service\nWants=minio.service\n",
-        ServiceName::ApiServer | ServiceName::GuiServer => "After=rss.service nss.service\nWants=rss.service nss.service\n",
+        ServiceName::ApiServer | ServiceName::GuiServer => {
+            "After=rss.service nss.service\nWants=rss.service nss.service\n"
+        }
         _ => "",
     };
 

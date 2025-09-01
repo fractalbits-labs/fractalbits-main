@@ -129,6 +129,7 @@ pub fn extract_checksum_from_trailers(
     let header_name = match algorithm {
         ChecksumAlgorithm::Crc32 => "x-amz-checksum-crc32",
         ChecksumAlgorithm::Crc32c => "x-amz-checksum-crc32c",
+        ChecksumAlgorithm::Crc64Nvme => "x-amz-checksum-crc64nvme",
         ChecksumAlgorithm::Sha1 => "x-amz-checksum-sha1",
         ChecksumAlgorithm::Sha256 => "x-amz-checksum-sha256",
     };
@@ -151,6 +152,15 @@ pub fn extract_checksum_from_trailers(
                 let mut bytes = [0u8; 4];
                 bytes.copy_from_slice(&checksum_bytes);
                 Some(ChecksumValue::Crc32c(bytes))
+            } else {
+                None
+            }
+        }
+        ChecksumAlgorithm::Crc64Nvme => {
+            if checksum_bytes.len() == 8 {
+                let mut bytes = [0u8; 8];
+                bytes.copy_from_slice(&checksum_bytes);
+                Some(ChecksumValue::Crc64Nvme(bytes))
             } else {
                 None
             }

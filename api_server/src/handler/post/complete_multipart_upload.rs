@@ -21,6 +21,7 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use bytes::Buf;
 use crc32c::Crc32cHasher as Crc32c;
 use crc32fast::Hasher as Crc32;
+use crc64fast_nvme::Digest as Crc64Nvme;
 use md5::Digest;
 use nss_codec::put_inode_response;
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
@@ -136,6 +137,11 @@ impl CompleteMultipartUploadResult {
                 checksum_type: Some("COMPOSITE".to_string()),
                 ..self
             },
+            Some(ChecksumValue::Crc64Nvme(crc64nvme)) => Self {
+                checksum_crc64nvme: Some(BASE64_STANDARD.encode(crc64nvme)),
+                checksum_type: Some("COMPOSITE".to_string()),
+                ..self
+            },
             None => self,
         }
     }
@@ -150,6 +156,7 @@ pub(crate) struct MpuChecksummer {
 pub(crate) enum MpuChecksummerAlgo {
     Crc32(Crc32),
     Crc32c(Crc32c),
+    Crc64Nvme(Crc64Nvme),
     Sha1(Sha1),
     Sha256(Sha256),
 }
@@ -162,6 +169,9 @@ impl MpuChecksummer {
                 Some(ChecksumAlgorithm::Crc32) => Some(MpuChecksummerAlgo::Crc32(Crc32::new())),
                 Some(ChecksumAlgorithm::Crc32c) => {
                     Some(MpuChecksummerAlgo::Crc32c(Crc32c::default()))
+                }
+                Some(ChecksumAlgorithm::Crc64Nvme) => {
+                    Some(MpuChecksummerAlgo::Crc64Nvme(Crc64Nvme::new()))
                 }
                 Some(ChecksumAlgorithm::Sha1) => Some(MpuChecksummerAlgo::Sha1(Sha1::new())),
                 Some(ChecksumAlgorithm::Sha256) => Some(MpuChecksummerAlgo::Sha256(Sha256::new())),
@@ -177,6 +187,12 @@ impl MpuChecksummer {
             }
             (Some(MpuChecksummerAlgo::Crc32c(ref mut crc32c)), Some(ChecksumValue::Crc32c(x))) => {
                 crc32c.write(&x);
+            }
+            (
+                Some(MpuChecksummerAlgo::Crc64Nvme(ref mut crc64nvme)),
+                Some(ChecksumValue::Crc64Nvme(x)),
+            ) => {
+                crc64nvme.write(&x);
             }
             (Some(MpuChecksummerAlgo::Sha1(ref mut sha1)), Some(ChecksumValue::Sha1(x))) => {
                 sha1.update(x);
@@ -200,6 +216,9 @@ impl MpuChecksummer {
             }
             Some(MpuChecksummerAlgo::Crc32c(crc32c)) => Some(ChecksumValue::Crc32c(
                 u32::to_be_bytes(u32::try_from(crc32c.finish()).unwrap()),
+            )),
+            Some(MpuChecksummerAlgo::Crc64Nvme(crc64nvme)) => Some(ChecksumValue::Crc64Nvme(
+                u64::to_be_bytes(crc64nvme.sum64()),
             )),
             Some(MpuChecksummerAlgo::Sha1(sha1)) => {
                 Some(ChecksumValue::Sha1(sha1.finalize()[..].try_into().unwrap()))

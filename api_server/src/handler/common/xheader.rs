@@ -17,6 +17,8 @@ pub const X_AMZ_SDK_CHECKSUM_ALGORITHM: HeaderName =
 pub const X_AMZ_CHECKSUM_MODE: HeaderName = HeaderName::from_static("x-amz-checksum-mode");
 pub const X_AMZ_CHECKSUM_CRC32: HeaderName = HeaderName::from_static("x-amz-checksum-crc32");
 pub const X_AMZ_CHECKSUM_CRC32C: HeaderName = HeaderName::from_static("x-amz-checksum-crc32c");
+pub const X_AMZ_CHECKSUM_CRC64NVME: HeaderName =
+    HeaderName::from_static("x-amz-checksum-crc64nvme");
 pub const X_AMZ_CHECKSUM_SHA1: HeaderName = HeaderName::from_static("x-amz-checksum-sha1");
 pub const X_AMZ_CHECKSUM_SHA256: HeaderName = HeaderName::from_static("x-amz-checksum-sha256");
 

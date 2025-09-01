@@ -386,6 +386,7 @@ dependencies = [
  "console-subscriber",
  "crc32c",
  "crc32fast",
+ "crc64fast-nvme",
  "data_blob_tracking",
  "data_types",
  "futures",
@@ -1599,6 +1600,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "crc64fast-nvme"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4955638f00a809894c947f85a024020a20815b65a5eea633798ea7924edab2b3"
+dependencies = [
+ "crc",
 ]
 
 [[package]]

@@ -127,6 +127,14 @@ impl GetObjectAttributesOutput {
                 };
                 self.checksum = Some(checksum);
             }
+            Some(ChecksumValue::Crc64Nvme(crc64nvme)) => {
+                let checksum = Checksum {
+                    checksum_crc64nvme: Some(BASE64_STANDARD.encode(crc64nvme)),
+                    checksum_type: "FULL_OBJECT".to_string(),
+                    ..Default::default()
+                };
+                self.checksum = Some(checksum);
+            }
             None => (),
         }
         self

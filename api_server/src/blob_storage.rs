@@ -1,18 +1,18 @@
 mod bss_only_single_az_storage;
-mod s3_hybrid_single_az_storage;
 mod retry;
 mod s3_express_multi_az_storage;
 mod s3_express_multi_az_with_tracking;
 mod s3_express_single_az_storage;
+mod s3_hybrid_single_az_storage;
 
 pub use bss_only_single_az_storage::BssOnlySingleAzStorage;
-pub use s3_hybrid_single_az_storage::S3HybridSingleAzStorage;
 pub use retry::S3RetryConfig;
 pub use s3_express_multi_az_storage::{S3ExpressMultiAzConfig, S3ExpressMultiAzStorage};
 pub use s3_express_multi_az_with_tracking::{
     S3ExpressMultiAzWithTracking, S3ExpressWithTrackingConfig,
 };
 pub use s3_express_single_az_storage::{S3ExpressSingleAzConfig, S3ExpressSingleAzStorage};
+pub use s3_hybrid_single_az_storage::S3HybridSingleAzStorage;
 
 // Rate limiting types are defined in this module
 

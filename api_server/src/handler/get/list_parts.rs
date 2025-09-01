@@ -61,6 +61,8 @@ struct Part {
     checksum_crc32: Option<String>,
     #[serde(rename = "ChecksumCRC32C", skip_serializing_if = "Option::is_none")]
     checksum_crc32c: Option<String>,
+    #[serde(rename = "ChecksumCRC64NVME", skip_serializing_if = "Option::is_none")]
+    checksum_crc64nvme: Option<String>,
     #[serde(rename = "ChecksumSHA1", skip_serializing_if = "Option::is_none")]
     checksum_sha1: Option<String>,
     #[serde(rename = "ChecksumSHA256", skip_serializing_if = "Option::is_none")]
@@ -169,6 +171,9 @@ async fn fetch_mpu_parts(
                 }
                 Some(ChecksumValue::Crc32c(x)) => {
                     part.checksum_crc32c = Some(BASE64_STANDARD.encode(x))
+                }
+                Some(ChecksumValue::Crc64Nvme(x)) => {
+                    part.checksum_crc64nvme = Some(BASE64_STANDARD.encode(x))
                 }
                 Some(ChecksumValue::Sha1(x)) => {
                     part.checksum_sha1 = Some(BASE64_STANDARD.encode(x))

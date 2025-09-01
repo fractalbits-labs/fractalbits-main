@@ -182,6 +182,10 @@ impl CopyObjectResult {
                 self.checksum_sha256 = Some(BASE64_STANDARD.encode(sha256));
                 self.checksum_type = Some("SHA256".to_string());
             }
+            Some(ChecksumValue::Crc64Nvme(crc64nvme)) => {
+                self.checksum_crc64nvme = Some(BASE64_STANDARD.encode(crc64nvme));
+                self.checksum_type = Some("CRC64NVME".to_string());
+            }
             None => {}
         }
         self

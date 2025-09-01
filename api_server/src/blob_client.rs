@@ -1,8 +1,8 @@
 use crate::{
     blob_storage::{
         BlobStorage, BlobStorageError, BlobStorageImpl, BssOnlySingleAzStorage,
-        S3HybridSingleAzStorage, S3ExpressMultiAzStorage, S3ExpressMultiAzWithTracking,
-        S3ExpressSingleAzStorage, S3ExpressWithTrackingConfig,
+        S3ExpressMultiAzStorage, S3ExpressMultiAzWithTracking, S3ExpressSingleAzStorage,
+        S3ExpressWithTrackingConfig, S3HybridSingleAzStorage,
     },
     config::{BlobStorageBackend, BlobStorageConfig},
     BlobId,

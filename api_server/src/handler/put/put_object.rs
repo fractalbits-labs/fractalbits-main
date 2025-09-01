@@ -81,6 +81,21 @@ fn calculate_checksum_for_body(
             }
             Ok(Some(ChecksumValue::Crc32c(calculated)))
         }
+        Some(ChecksumValue::Crc64Nvme(expected_bytes)) => {
+            let mut hasher = crc64fast_nvme::Digest::new();
+            hasher.write(body);
+            let calculated = hasher.sum64().to_be_bytes();
+
+            if calculated != *expected_bytes {
+                tracing::error!(
+                    "CRC64NVME checksum mismatch: expected {:?}, calculated {:?}",
+                    expected_bytes,
+                    calculated
+                );
+                return Err(S3Error::InvalidDigest);
+            }
+            Ok(Some(ChecksumValue::Crc64Nvme(calculated)))
+        }
         Some(ChecksumValue::Sha1(expected_bytes)) => {
             let mut hasher = Sha1::new();
             hasher.update(body);
@@ -132,6 +147,12 @@ fn calculate_checksum_for_body_with_algorithm(
             hasher.write(body);
             let calculated = (hasher.finish() as u32).to_be_bytes();
             Ok(Some(ChecksumValue::Crc32c(calculated)))
+        }
+        ChecksumAlgorithm::Crc64Nvme => {
+            let mut hasher = crc64fast_nvme::Digest::new();
+            hasher.write(body);
+            let calculated = hasher.sum64().to_be_bytes();
+            Ok(Some(ChecksumValue::Crc64Nvme(calculated)))
         }
         ChecksumAlgorithm::Sha1 => {
             let mut hasher = Sha1::new();
@@ -275,6 +296,8 @@ async fn put_object_streaming_internal(ctx: ObjectRequestContext) -> Result<Http
                 Some(ChecksumValue::Crc32(checksums.crc32.unwrap()))
             } else if checksums.crc32c.is_some() {
                 Some(ChecksumValue::Crc32c(checksums.crc32c.unwrap()))
+            } else if checksums.crc64nvme.is_some() {
+                Some(ChecksumValue::Crc64Nvme(checksums.crc64nvme.unwrap()))
             } else if checksums.sha1.is_some() {
                 Some(ChecksumValue::Sha1(checksums.sha1.unwrap()))
             } else if checksums.sha256.is_some() {

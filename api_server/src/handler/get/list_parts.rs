@@ -2,9 +2,11 @@ use std::sync::Arc;
 
 use crate::handler::common::mpu_parse_part_number;
 use crate::handler::common::{
-    checksum::ChecksumValue, get_raw_object, list_raw_objects, mpu_get_part_prefix,
+    checksum::ChecksumValue,
+    get_raw_object, list_raw_objects, mpu_get_part_prefix,
     response::xml::{Xml, XmlnsS3},
-    s3_error::S3Error, time,
+    s3_error::S3Error,
+    time,
 };
 use crate::handler::ObjectRequestContext;
 use crate::object_layout::{MpuState, ObjectState};

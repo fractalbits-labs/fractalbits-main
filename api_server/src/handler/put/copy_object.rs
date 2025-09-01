@@ -4,10 +4,12 @@ use crate::{
     handler::{
         bucket,
         common::{
-            checksum::ChecksumValue, get_raw_object,
+            checksum::ChecksumValue,
+            get_raw_object,
             request::extract::BucketAndKeyName,
             response::xml::{Xml, XmlnsS3},
-            s3_error::S3Error, time, xheader,
+            s3_error::S3Error,
+            time, xheader,
         },
         get::get_object_content_as_bytes,
         put::put_object_handler,

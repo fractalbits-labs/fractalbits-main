@@ -1,7 +1,8 @@
 use crate::{
     handler::{
         common::{
-            buffer_payload, checksum::{ChecksumAlgorithm, request_checksum_value, ChecksumValue},
+            buffer_payload,
+            checksum::{request_checksum_value, ChecksumAlgorithm, ChecksumValue},
             extract_metadata_headers, gen_etag, get_raw_object, list_raw_objects,
             mpu_get_part_prefix, mpu_parse_part_number,
             response::xml::{Xml, XmlnsS3},

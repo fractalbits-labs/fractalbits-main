@@ -83,12 +83,6 @@ pub async fn create_bucket_handler(ctx: BucketRequestContext) -> Result<HttpResp
     match result {
         Ok(_) => {
             info!("Successfully created bucket: {}", ctx.bucket_name);
-            // Invalidate API key cache since it now has new bucket permissions
-            ctx.app
-                .cache
-                .invalidate(&format!("api_key:{api_key_id}"))
-                .await;
-
             Ok(HttpResponse::Ok()
                 .insert_header(("location", format!("/{}", ctx.bucket_name)))
                 .finish())

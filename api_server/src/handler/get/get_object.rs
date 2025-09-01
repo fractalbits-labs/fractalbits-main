@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
-use crate::handler::{common::get_raw_object, ObjectRequestContext};
 use crate::{
-    handler::common::{
-        list_raw_objects, mpu_get_part_prefix, object_headers, s3_error::S3Error, xheader,
+    handler::{
+        common::{
+            get_raw_object, list_raw_objects, mpu_get_part_prefix, object_headers,
+            s3_error::S3Error, xheader,
+        },
+        ObjectRequestContext,
     },
     object_layout::ObjectLayout,
 };

@@ -2,9 +2,11 @@ use std::collections::HashSet;
 
 use crate::handler::{
     common::{
-        checksum::ChecksumValue, get_raw_object,
+        checksum::ChecksumValue,
+        get_raw_object,
         response::xml::{Xml, XmlnsS3},
-        s3_error::S3Error, time, xheader,
+        s3_error::S3Error,
+        time, xheader,
     },
     ObjectRequestContext,
 };

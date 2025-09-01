@@ -9,11 +9,13 @@ use std::task::{Context, Poll};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::handler::common::data::Hash;
-use crate::handler::common::s3_error::S3Error;
-use crate::handler::common::checksum::{
-    request_checksum_value, request_trailer_checksum_algorithm, ChecksumAlgorithm, Checksummer,
-    Checksums, ExpectedChecksums,
+use crate::handler::common::{
+    checksum::{
+        request_checksum_value, request_trailer_checksum_algorithm, ChecksumAlgorithm, Checksummer,
+        Checksums, ExpectedChecksums,
+    },
+    data::Hash,
+    s3_error::S3Error,
 };
 
 /// Streaming checksum receiver type

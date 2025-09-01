@@ -1,10 +1,15 @@
 use super::{
-    bucket::BucketEndpoint, common::s3_error::S3Error, delete::DeleteEndpoint, get::GetEndpoint,
-    head::HeadEndpoint, post::PostEndpoint, put::PutEndpoint,
-};
-use crate::handler::common::{
-    authorization::Authorization,
-    request::extract::{ApiCommand, ApiSignature},
+    bucket::BucketEndpoint,
+    common::{
+        authorization::Authorization,
+        request::extract::{ApiCommand, ApiSignature},
+        s3_error::S3Error,
+    },
+    delete::DeleteEndpoint,
+    get::GetEndpoint,
+    head::HeadEndpoint,
+    post::PostEndpoint,
+    put::PutEndpoint,
 };
 use actix_web::http::Method;
 

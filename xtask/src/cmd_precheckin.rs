@@ -1,6 +1,10 @@
 use crate::*;
 
-pub fn run_cmd_precheckin(s3_api_only: bool, debug_api_server: bool) -> CmdResult {
+pub fn run_cmd_precheckin(
+    s3_api_only: bool,
+    debug_api_server: bool,
+    data_blob_storage: DataBlobStorage,
+) -> CmdResult {
     let working_dir = run_fun!(pwd)?;
     if debug_api_server {
         cmd_service::stop_service(ServiceName::ApiServer)?;
@@ -17,7 +21,14 @@ pub fn run_cmd_precheckin(s3_api_only: bool, debug_api_server: bool) -> CmdResul
         return run_s3_api_tests(debug_api_server);
     }
 
-    cmd_service::init_service(ServiceName::All, BuildMode::Debug, InitConfig::default())?;
+    cmd_service::init_service(
+        ServiceName::All,
+        BuildMode::Debug,
+        InitConfig {
+            for_gui: false,
+            data_blob_storage,
+        },
+    )?;
     cmd_service::start_service(ServiceName::Minio)?;
     run_cmd! {
         info "Formatting nss_server";

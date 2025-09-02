@@ -53,6 +53,10 @@ enum Cmd {
             long_help = "Debug by recompiling and restarting api_server only"
         )]
         debug_api_server: bool,
+
+        #[clap(long, value_enum)]
+        #[arg(default_value_t)]
+        data_blob_storage: DataBlobStorage,
     },
 
     #[clap(about = "Build the whole project")]
@@ -270,7 +274,8 @@ async fn main() -> CmdResult {
         Cmd::Precheckin {
             s3_api_only,
             debug_api_server,
-        } => cmd_precheckin::run_cmd_precheckin(s3_api_only, debug_api_server)?,
+            data_blob_storage,
+        } => cmd_precheckin::run_cmd_precheckin(s3_api_only, debug_api_server, data_blob_storage)?,
         Cmd::Nightly => cmd_nightly::run_cmd_nightly()?,
         Cmd::Bench {
             service,

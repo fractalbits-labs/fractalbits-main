@@ -5,7 +5,6 @@ use std::time::Duration;
 #[derive(Deserialize, Debug, Clone, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BlobStorageBackend {
-    BssOnlySingleAz,
     #[default]
     S3HybridSingleAz,
     S3ExpressMultiAz,

@@ -1,17 +1,14 @@
-mod bss_only_single_az_storage;
 mod retry;
 mod s3_express_multi_az_storage;
 mod s3_hybrid_single_az_storage;
 
 pub use crate::config::RatelimitConfig;
-pub use bss_only_single_az_storage::BssOnlySingleAzStorage;
 pub use retry::S3RetryConfig;
 pub use s3_express_multi_az_storage::S3ExpressMultiAzStorage;
 pub use s3_hybrid_single_az_storage::S3HybridSingleAzStorage;
 
 #[allow(clippy::enum_variant_names)]
 pub enum BlobStorageImpl {
-    BssOnlySingleAz(BssOnlySingleAzStorage),
     HybridSingleAz(S3HybridSingleAzStorage),
     S3ExpressMultiAz(S3ExpressMultiAzStorage),
 }
@@ -351,11 +348,6 @@ impl BlobStorage for BlobStorageImpl {
         body: Bytes,
     ) -> Result<(), BlobStorageError> {
         match self {
-            BlobStorageImpl::BssOnlySingleAz(storage) => {
-                storage
-                    .put_blob(tracking_root_blob_name, blob_id, block_number, body)
-                    .await
-            }
             BlobStorageImpl::HybridSingleAz(storage) => {
                 storage
                     .put_blob(tracking_root_blob_name, blob_id, block_number, body)
@@ -376,9 +368,6 @@ impl BlobStorage for BlobStorageImpl {
         body: &mut Bytes,
     ) -> Result<(), BlobStorageError> {
         match self {
-            BlobStorageImpl::BssOnlySingleAz(storage) => {
-                storage.get_blob(blob_id, block_number, body).await
-            }
             BlobStorageImpl::HybridSingleAz(storage) => {
                 storage.get_blob(blob_id, block_number, body).await
             }
@@ -395,11 +384,6 @@ impl BlobStorage for BlobStorageImpl {
         block_number: u32,
     ) -> Result<(), BlobStorageError> {
         match self {
-            BlobStorageImpl::BssOnlySingleAz(storage) => {
-                storage
-                    .delete_blob(tracking_root_blob_name, blob_id, block_number)
-                    .await
-            }
             BlobStorageImpl::HybridSingleAz(storage) => {
                 storage
                     .delete_blob(tracking_root_blob_name, blob_id, block_number)

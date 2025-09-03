@@ -3,6 +3,7 @@ members = [
     "api_server",
     "api_server/benches/rewrk",
     "api_server/benches/rewrk_rpc",
+    "common/crates/aws_signature",
     "common/crates/data_types",
     "cdk/fractalbits-bootstrap",
     "common/crates/data_blob_tracking",
@@ -27,6 +28,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+aws_signature = { path = "common/crates/aws_signature" }
 data_types = { path = "common/crates/data_types" }
 data_blob_tracking = { path = "common/crates/data_blob_tracking" }
 rpc_client_common = { path = "common/crates/rpc_clients/client_common" }

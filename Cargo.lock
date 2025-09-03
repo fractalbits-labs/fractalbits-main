@@ -376,6 +376,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "aws-smithy-http-client",
+ "aws_signature",
  "base64 0.22.1",
  "bytes",
  "chrono",
@@ -410,6 +411,7 @@ dependencies = [
  "prost",
  "quick-xml",
  "rand 0.8.5",
+ "reqwest",
  "rkyv",
  "rpc_client_bss",
  "rpc_client_common",
@@ -970,6 +972,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws_signature"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "hmac",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "axum"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1279,6 +1293,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]

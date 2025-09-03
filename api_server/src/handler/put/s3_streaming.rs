@@ -1,3 +1,6 @@
+use crate::handler::common::signature::{
+    parse_chunk_signature, verify_chunk_signature, ChunkSignature, ChunkSignatureContext,
+};
 use crate::handler::common::{
     checksum::{
         request_checksum_value, request_trailer_checksum_algorithm, ChecksumAlgorithm, Checksummer,
@@ -44,7 +47,10 @@ pub struct S3Trailers {
 #[derive(Debug, Clone, PartialEq)]
 enum S3ChunkState {
     ReadingChunkSize,
-    ReadingChunkData { remaining: usize },
+    ReadingChunkData {
+        remaining: usize,
+        chunk_signature: Option<ChunkSignature>,
+    },
     ReadingChunkEnd,
     ReadingTrailers,
     Done,
@@ -61,6 +67,9 @@ pin_project! {
         state: S3ChunkState,
         trailer_buffer: BytesMut,
         checksum_sender: Option<mpsc::UnboundedSender<ChecksumMessage>>,
+        signature_context: Option<ChunkSignatureContext>,
+        previous_signature: Option<String>,
+        current_chunk_buffer: BytesMut,
     }
 }
 
@@ -71,15 +80,14 @@ impl S3StreamingPayload {
         payload: actix_web::dev::Payload,
         request: &HttpRequest,
     ) -> Result<(Self, StreamingChecksumReceiver), S3Error> {
-        // For now, always use the full checksum path to ensure correctness
-        // TODO: Re-implement optimization after fixing checksum calculation
-        Self::with_checksums_full(payload, request)
+        Self::with_checksums_full(payload, request, None)
     }
 
     /// Full path: complete functionality with task spawning for complex cases
     fn with_checksums_full(
         payload: actix_web::dev::Payload,
         request: &HttpRequest,
+        signature_info: Option<(ChunkSignatureContext, Option<String>)>,
     ) -> Result<(Self, StreamingChecksumReceiver), S3Error> {
         tracing::debug!("Using full checksum path (with task spawning)");
 
@@ -268,7 +276,15 @@ impl S3StreamingPayload {
             // For regular content-length requests, we pass data through directly
             S3ChunkState::ReadingChunkData {
                 remaining: usize::MAX,
+                chunk_signature: None,
             }
+        };
+
+        let (signature_context, previous_signature) = if let Some((ctx, seed_sig)) = signature_info
+        {
+            (Some(ctx), seed_sig)
+        } else {
+            (None, None)
         };
 
         let streaming_payload = Self {
@@ -276,6 +292,9 @@ impl S3StreamingPayload {
             state: initial_state,
             trailer_buffer: BytesMut::new(),
             checksum_sender: Some(checksum_tx),
+            signature_context,
+            previous_signature,
+            current_chunk_buffer: BytesMut::new(),
         };
 
         Ok((streaming_payload, checksum_handle))
@@ -388,9 +407,11 @@ impl Stream for S3StreamingPayload {
                                         }
                                     };
 
-                                // Parse chunk size (hex), ignoring chunk extensions
+                                // Parse chunk size and signature
                                 let chunk_size_hex =
                                     chunk_line_str.split(';').next().unwrap_or("").trim();
+                                let chunk_signature = parse_chunk_signature(chunk_line_str);
+
                                 match usize::from_str_radix(chunk_size_hex, 16) {
                                     Ok(0) => {
                                         // Zero-sized chunk means end of chunks, start reading trailers
@@ -398,8 +419,10 @@ impl Stream for S3StreamingPayload {
                                         continue;
                                     }
                                     Ok(size) => {
-                                        *this.state =
-                                            S3ChunkState::ReadingChunkData { remaining: size };
+                                        *this.state = S3ChunkState::ReadingChunkData {
+                                            remaining: size,
+                                            chunk_signature,
+                                        };
                                         continue;
                                     }
                                     Err(e) => {
@@ -440,14 +463,17 @@ impl Stream for S3StreamingPayload {
 
                                     let chunk_size_hex =
                                         chunk_line_str.split(';').next().unwrap_or("").trim();
+                                    let chunk_signature = parse_chunk_signature(chunk_line_str);
                                     match usize::from_str_radix(chunk_size_hex, 16) {
                                         Ok(0) => {
                                             *this.state = S3ChunkState::ReadingTrailers;
                                             continue;
                                         }
                                         Ok(size) => {
-                                            *this.state =
-                                                S3ChunkState::ReadingChunkData { remaining: size };
+                                            *this.state = S3ChunkState::ReadingChunkData {
+                                                remaining: size,
+                                                chunk_signature,
+                                            };
                                             continue;
                                         }
                                         Err(e) => {
@@ -477,7 +503,10 @@ impl Stream for S3StreamingPayload {
                         }
                     }
                 }
-                S3ChunkState::ReadingChunkData { remaining } => {
+                S3ChunkState::ReadingChunkData {
+                    remaining,
+                    chunk_signature,
+                } => {
                     // Special case: if remaining is usize::MAX, we're in pass-through mode (non-streaming)
                     if remaining == usize::MAX {
                         // Pass through all data directly without chunk parsing
@@ -502,6 +531,30 @@ impl Stream for S3StreamingPayload {
                     }
 
                     if remaining == 0 {
+                        // We've completed reading a chunk - verify its signature if needed
+                        if let (Some(signature_ctx), Some(chunk_sig), Some(prev_sig)) = (
+                            this.signature_context.as_ref(),
+                            chunk_signature.as_ref(),
+                            this.previous_signature.as_ref(),
+                        ) {
+                            if let Err(e) = verify_chunk_signature(
+                                signature_ctx,
+                                chunk_sig,
+                                prev_sig,
+                                this.current_chunk_buffer,
+                            ) {
+                                tracing::error!("Chunk signature verification failed: {:?}", e);
+                                return Poll::Ready(Some(Err(PayloadError::EncodingCorrupted)));
+                            }
+
+                            // Update previous signature for the next chunk
+                            *this.previous_signature = Some(chunk_sig.signature.clone());
+                            tracing::debug!("Chunk signature verified successfully");
+                        }
+
+                        // Clear the chunk buffer for the next chunk
+                        this.current_chunk_buffer.clear();
+
                         *this.state = S3ChunkState::ReadingChunkEnd;
                         continue;
                     }
@@ -511,6 +564,11 @@ impl Stream for S3StreamingPayload {
                         let to_take = std::cmp::min(remaining, this.trailer_buffer.len());
                         let chunk_data = this.trailer_buffer.split_to(to_take);
 
+                        // Buffer chunk data for signature verification (only if we have signature context)
+                        if this.signature_context.is_some() {
+                            this.current_chunk_buffer.extend_from_slice(&chunk_data);
+                        }
+
                         // Send data to checksum calculator
                         if let Some(ref sender) = this.checksum_sender {
                             let _ = sender.send(ChecksumMessage::Data(chunk_data.clone().into()));
@@ -518,6 +576,7 @@ impl Stream for S3StreamingPayload {
 
                         *this.state = S3ChunkState::ReadingChunkData {
                             remaining: remaining - to_take,
+                            chunk_signature: chunk_signature.clone(),
                         };
                         return Poll::Ready(Some(Ok(chunk_data.into())));
                     }
@@ -534,6 +593,11 @@ impl Stream for S3StreamingPayload {
                                 this.trailer_buffer.extend_from_slice(&leftover);
                             }
 
+                            // Buffer chunk data for signature verification (only if we have signature context)
+                            if this.signature_context.is_some() {
+                                this.current_chunk_buffer.extend_from_slice(&chunk_data);
+                            }
+
                             // Send data to checksum calculator
                             if let Some(ref sender) = this.checksum_sender {
                                 let _ = sender.send(ChecksumMessage::Data(chunk_data.clone()));
@@ -541,6 +605,7 @@ impl Stream for S3StreamingPayload {
 
                             *this.state = S3ChunkState::ReadingChunkData {
                                 remaining: remaining - to_take,
+                                chunk_signature: chunk_signature.clone(),
                             };
                             return Poll::Ready(Some(Ok(chunk_data)));
                         }

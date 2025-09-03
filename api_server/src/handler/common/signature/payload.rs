@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write;
 use std::sync::Arc;
 
 use actix_web::{
@@ -7,28 +6,20 @@ use actix_web::{
     web::Query,
     HttpRequest,
 };
-use arrayvec::ArrayString;
-use chrono::{DateTime, Utc};
 use data_types::{hash::Hash, ApiKey, Versioned};
-use hmac::{Hmac, Mac};
-use itertools::Itertools;
-use sha2::{Digest, Sha256};
 
 use crate::{
     handler::common::{
         request::extract::Authentication,
         signature::{ContentSha256Header, SignatureError},
-        time::{LONG_DATETIME, SHORT_DATE},
         xheader,
     },
     AppState,
 };
-
-type HmacSha256 = Hmac<Sha256>;
-// Possible values for x-amz-content-sha256, in addition to the actual sha256
-const UNSIGNED_PAYLOAD: &str = "UNSIGNED-PAYLOAD";
-const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
-const AWS4_HMAC_SHA256_PAYLOAD: &str = "AWS4-HMAC-SHA256-PAYLOAD";
+use aws_signature::{
+    create_canonical_request, get_signing_key, string_to_sign, verify_signature,
+    AWS4_HMAC_SHA256_PAYLOAD, UNSIGNED_PAYLOAD,
+};
 
 pub struct CheckedSignature {
     pub key: Option<Versioned<ApiKey>>,
@@ -130,7 +121,7 @@ async fn check_standard_signature(
     tracing::trace!("canonical request:\n{}", canonical_request);
     tracing::trace!("string to sign:\n{}", string_to_sign);
 
-    let key = verify_v4(app, authentication, string_to_sign.as_bytes()).await?;
+    let key = verify_v4(app, authentication, &string_to_sign).await?;
 
     let content_sha256_header = parse_x_amz_content_sha256(Some(&authentication.content_sha256))?;
 
@@ -197,7 +188,7 @@ async fn check_presigned_signature(
     tracing::trace!("canonical request (presigned url):\n{}", canonical_request);
     tracing::trace!("string to sign (presigned url):\n{}", string_to_sign);
 
-    let key = verify_v4(app, authentication, string_to_sign.as_bytes()).await?;
+    let key = verify_v4(app, authentication, &string_to_sign).await?;
 
     Ok(CheckedSignature {
         key,
@@ -225,139 +216,61 @@ fn verify_signed_headers(
     Ok(())
 }
 
-fn string_to_sign(datetime: &DateTime<Utc>, scope_string: &str, canonical_req: &str) -> String {
-    let mut hasher = Sha256::default();
-    hasher.update(canonical_req.as_bytes());
-    [
-        AWS4_HMAC_SHA256,
-        &datetime.format(LONG_DATETIME).to_string(),
-        scope_string,
-        &hex::encode(hasher.finalize().as_slice()),
-    ]
-    .join("\n")
-}
-
-fn canonical_request(
-    method: &actix_web::http::Method,
-    canonical_uri: &str,
-    query_params: &BTreeMap<String, String>,
-    headers: &actix_web::http::header::HeaderMap,
-    signed_headers: &BTreeSet<String>,
-    content_sha256: &str,
-) -> Result<String, SignatureError> {
-    // Canonical query string from passed query params
-    let canonical_query_string = {
-        let mut items = Vec::with_capacity(query_params.len());
-        for (key, value) in query_params.iter() {
-            items.push(uri_encode(key, true) + "=" + &uri_encode(value, true));
-        }
-        items.sort();
-        items.join("&")
-    };
-
-    // Canonical header string calculated from signed headers
-    let canonical_header_string = signed_headers
-        .iter()
-        .map(|name| {
-            let value = headers.get(name).ok_or_else(|| {
-                SignatureError::Other(format!("signed header `{name}` is not present"))
-            })?;
-            // Handle potentially non-ASCII header values (e.g., x-amz-meta-* headers with unicode)
-            let value_str = if let Ok(s) = value.to_str() {
-                s.to_string()
-            } else {
-                // For non-ASCII headers, convert bytes to UTF-8 lossy
-                String::from_utf8_lossy(value.as_bytes()).to_string()
-            };
-            Ok(format!("{}:{}", name.as_str(), value_str.trim()))
-        })
-        .collect::<Result<Vec<String>, SignatureError>>()?
-        .join("\n");
-    let signed_headers = signed_headers.iter().join(";");
-
-    let list = [
-        method.as_str(),
-        canonical_uri,
-        &canonical_query_string,
-        &canonical_header_string,
-        "",
-        &signed_headers,
-        content_sha256,
-    ];
-
-    Ok(list.join("\n"))
-}
-
-/// Encode &str for use in a URI (AWS SigV4 specific encoding)
-fn uri_encode(string: &str, encode_slash: bool) -> String {
-    let mut result = String::with_capacity(string.len() * 2);
-    for c in string.chars() {
-        match c {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '~' | '.' => result.push(c),
-            '/' if encode_slash => result.push_str("%2F"),
-            '/' if !encode_slash => result.push('/'),
-            _ => {
-                #[allow(clippy::format_collect)]
-                result.push_str(
-                    &format!("{c}")
-                        .bytes()
-                        .map(|b| format!("%{b:02X}"))
-                        .collect::<String>(),
-                );
-            }
-        }
-    }
-    result
-}
-
 async fn verify_v4(
     app: Arc<AppState>,
     auth: &Authentication,
-    payload: &[u8],
+    string_to_sign: &str,
 ) -> Result<Option<Versioned<ApiKey>>, SignatureError> {
     let key = app.get_api_key(auth.key_id.clone()).await?;
 
-    let mut hmac = signing_hmac(&auth.date, &key.data.secret_key, &app.config.region)
-        .map_err(|_| SignatureError::Other("Unable to build signing HMAC".into()))?;
-    hmac.update(payload);
-    let signature = hex::decode(&auth.signature)?;
-    if hmac.verify_slice(&signature).is_err() {
+    let signing_key = get_signing_key(auth.date, &key.data.secret_key, &app.config.region)
+        .map_err(|e| SignatureError::Other(format!("Unable to build signing key: {}", e)))?;
+
+    if !verify_signature(&signing_key, string_to_sign, &auth.signature)? {
         return Err(SignatureError::Other("signature mismatch".into()));
     }
 
     Ok(Some(key))
 }
 
-fn signing_hmac(
-    datetime: &DateTime<Utc>,
-    secret_key: &str,
-    region: &str,
-) -> Result<HmacSha256, hmac::digest::InvalidLength> {
-    let service = "s3";
+/// Create canonical request using actix-web types
+fn canonical_request(
+    method: &actix_web::http::Method,
+    canonical_uri: &str,
+    query_params: &BTreeMap<String, String>,
+    headers: &HeaderMap,
+    signed_headers: &BTreeSet<String>,
+    payload_hash: &str,
+) -> Result<String, SignatureError> {
+    // Check that all signed headers are present
+    for header_name in signed_headers {
+        if !headers.contains_key(header_name) {
+            return Err(SignatureError::Other(format!(
+                "signed header `{}` is not present",
+                header_name
+            )));
+        }
+    }
 
-    let mut initial_key = Vec::with_capacity(4 + secret_key.len());
-    initial_key.extend_from_slice(b"AWS4");
-    initial_key.extend_from_slice(secret_key.as_bytes());
-
-    let mut date_str = ArrayString::<8>::new();
-    write!(&mut date_str, "{}", datetime.format(SHORT_DATE))
-        .expect("Formatting a date into an 8-byte ArrayString should not fail");
-
-    let mut mac = HmacSha256::new_from_slice(&initial_key)?;
-    mac.update(date_str.as_bytes());
-    let key = mac.finalize().into_bytes();
-
-    let mut mac = HmacSha256::new_from_slice(&key)?;
-    mac.update(region.as_bytes());
-    let key = mac.finalize().into_bytes();
-
-    let mut mac = HmacSha256::new_from_slice(&key)?;
-    mac.update(service.as_bytes());
-    let key = mac.finalize().into_bytes();
-
-    let mut mac = HmacSha256::new_from_slice(&key)?;
-    mac.update(b"aws4_request");
-    let signing_key = mac.finalize().into_bytes();
-
-    HmacSha256::new_from_slice(&signing_key)
+    // Build canonical headers directly from HeaderMap
+    let mut canonical_headers = Vec::new();
+    for header_name in signed_headers {
+        if let Some(header_value) = headers.get(header_name) {
+            let value_str = if let Ok(s) = header_value.to_str() {
+                s.to_string()
+            } else {
+                // For non-ASCII headers, convert bytes to UTF-8 lossy
+                String::from_utf8_lossy(header_value.as_bytes()).to_string()
+            };
+            canonical_headers.push(format!("{}:{}", header_name, value_str.trim()));
+        }
+    }
+    Ok(create_canonical_request(
+        method.as_str(),
+        canonical_uri,
+        query_params,
+        &canonical_headers,
+        signed_headers,
+        payload_hash,
+    ))
 }

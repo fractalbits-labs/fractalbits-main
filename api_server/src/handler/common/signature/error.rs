@@ -56,3 +56,9 @@ impl From<std::convert::Infallible> for SignatureError {
         unreachable!("Infallible can never be constructed")
     }
 }
+
+impl From<aws_signature::SignatureError> for SignatureError {
+    fn from(err: aws_signature::SignatureError) -> Self {
+        SignatureError::Other(err.to_string())
+    }
+}

@@ -297,14 +297,12 @@ async fn put_object_streaming_internal(ctx: ObjectRequestContext) -> Result<Http
                 Some(ChecksumValue::Crc32(v))
             } else if let Some(v) = checksums.crc32c {
                 Some(ChecksumValue::Crc32c(v))
-            } else if let Some(v) =  checksums.crc64nvme {
+            } else if let Some(v) = checksums.crc64nvme {
                 Some(ChecksumValue::Crc64Nvme(v))
             } else if let Some(v) = checksums.sha1 {
                 Some(ChecksumValue::Sha1(v))
-            } else if let Some(v) = checksums.sha256 {
-                Some(ChecksumValue::Sha256(v))
             } else {
-                None
+                checksums.sha256.map(ChecksumValue::Sha256)
             }
         }
         Ok(Err(e)) => {

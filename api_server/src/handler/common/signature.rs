@@ -2,6 +2,11 @@ mod error;
 pub use error::SignatureError;
 pub mod payload;
 
+// Re-export from common crate
+pub use aws_signature::streaming::{
+    parse_chunk_signature, verify_chunk_signature, ChunkSignature, ChunkSignatureContext,
+};
+
 use crate::{handler::common::request::extract::Authentication, AppState};
 use actix_web::HttpRequest;
 use data_types::{hash::Hash, ApiKey, Versioned};
@@ -20,7 +25,6 @@ pub enum ContentSha256Header {
     StreamingPayload { trailer: bool, signed: bool },
 }
 
-// Signature verification doesn't use body
 pub async fn verify_request(
     app: Arc<AppState>,
     request: &HttpRequest,

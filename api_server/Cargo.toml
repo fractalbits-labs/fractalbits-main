@@ -70,6 +70,7 @@ governor.workspace = true
 futures-util.workspace = true
 
 [dev-dependencies]
+aws_signature = { workspace = true, features = ["testutils"] }
 test_common.workspace = true
 cmd_lib.workspace = true
 sha1.workspace = true

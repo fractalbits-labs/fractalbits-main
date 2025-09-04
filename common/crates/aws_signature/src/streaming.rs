@@ -1,7 +1,6 @@
-use crate::{
-    sigv4::{format_scope_string, get_signing_key},
-    HmacSha256, AWS4_HMAC_SHA256_PAYLOAD,
-};
+#[cfg(any(test, feature = "testutils"))]
+use crate::sigv4::{format_scope_string, get_signing_key};
+use crate::{HmacSha256, AWS4_HMAC_SHA256_PAYLOAD};
 use chrono::{DateTime, Utc};
 use hmac::Mac;
 use sha2::{Digest, Sha256};
@@ -53,6 +52,7 @@ impl From<hmac::digest::InvalidLength> for SignatureError {
 }
 
 /// Create a chunk signature context
+#[cfg(any(test, feature = "testutils"))]
 pub fn create_chunk_signature_context(
     datetime: DateTime<Utc>,
     secret_key: &str,
@@ -84,7 +84,7 @@ pub fn parse_chunk_signature(chunk_line: &str) -> Option<ChunkSignature> {
 }
 
 /// Generate string-to-sign for a chunk
-pub fn chunk_string_to_sign(
+fn chunk_string_to_sign(
     datetime: &DateTime<Utc>,
     scope_string: &str,
     previous_signature: &str,
@@ -135,6 +135,7 @@ pub fn verify_chunk_signature(
 }
 
 /// Calculate chunk signature for a given chunk
+#[cfg(any(test, feature = "testutils"))]
 pub fn calculate_chunk_signature(
     context: &ChunkSignatureContext,
     previous_signature: &str,
@@ -155,6 +156,7 @@ pub fn calculate_chunk_signature(
 }
 
 /// Create a complete streaming body with chunk signatures
+#[cfg(any(test, feature = "testutils"))]
 pub fn create_streaming_body(
     body: &[u8],
     chunk_size: usize,

@@ -3,6 +3,9 @@ name = "aws_signature"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+testutils = []
+
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 hmac = "0.12"

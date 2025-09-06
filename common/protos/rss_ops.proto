@@ -225,7 +225,7 @@ message GetDataVgInfoRequest {
 
 message GetDataVgInfoResponse {
   oneof result {
-    DataVgInfo info = 1;
+    string info_json = 1;
     string error = 2;
   }
 }

@@ -105,6 +105,50 @@ pub fn init_service(
                 --item $az_status_item >/dev/null;
         }?;
 
+        // Initialize BSS data volume group configuration in service-discovery table
+        let bss_data_vg_config_json = r#"{
+            "volumes": [
+                {
+                    "volume_id": 0,
+                    "bss_nodes": [
+                        {"node_id": "bss0", "address": "127.0.0.1:8088"},
+                        {"node_id": "bss1", "address": "127.0.0.1:8089"},
+                        {"node_id": "bss2", "address": "127.0.0.1:8090"}
+                    ]
+                },
+                {
+                    "volume_id": 1,
+                    "bss_nodes": [
+                        {"node_id": "bss3", "address": "127.0.0.1:8091"},
+                        {"node_id": "bss4", "address": "127.0.0.1:8092"},
+                        {"node_id": "bss5", "address": "127.0.0.1:8093"}
+                    ]
+                }
+            ],
+            "quorum": {
+                "n": 3,
+                "r": 2,
+                "w": 2
+            }
+        }"#;
+        let bss_data_vg_config_item = format!(
+            r#"{{"service_id":{{"S":"bss_data_vg_config"}},"value":{{"S":"{}"}}}}"#,
+            bss_data_vg_config_json
+                .replace('"', r#"\""#)
+                .replace(['\n', ' '], "")
+        );
+
+        run_cmd! {
+            info "Initializing BSS data volume group configuration in service-discovery table ...";
+            AWS_DEFAULT_REGION=fakeRegion
+            AWS_ACCESS_KEY_ID=fakeMyKeyId
+            AWS_SECRET_ACCESS_KEY=fakeSecretAccessKey
+            AWS_ENDPOINT_URL_DYNAMODB="http://localhost:8000"
+            aws dynamodb put-item
+                --table-name $SERVICE_DISCOVERY_TABLE
+                --item $bss_data_vg_config_item >/dev/null;
+        }?;
+
         Ok(())
     };
     let init_rss = || -> CmdResult {

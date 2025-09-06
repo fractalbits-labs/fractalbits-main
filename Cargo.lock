@@ -4240,6 +4240,7 @@ dependencies = [
  "rpc_codec_common",
  "rss_codec",
  "serde",
+ "serde_json",
  "slotmap_conn_pool",
  "socket2 0.5.10",
  "strum",

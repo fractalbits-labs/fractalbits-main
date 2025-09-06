@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 prost.workspace = true
 bytes.workspace = true

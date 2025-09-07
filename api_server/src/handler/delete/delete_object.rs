@@ -1,5 +1,5 @@
 use crate::{
-    blob_storage::BlobGuid,
+    blob_storage::DataBlobGuid,
     handler::{
         ObjectRequestContext,
         common::{list_raw_objects, mpu_get_part_prefix, s3_error::S3Error},
@@ -121,7 +121,7 @@ pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<HttpResp
 async fn delete_blob(
     tracking_root_blob_name: Option<String>,
     object: &ObjectLayout,
-    blob_deletion: Sender<(Option<String>, BlobGuid, usize)>,
+    blob_deletion: Sender<(Option<String>, DataBlobGuid, usize)>,
 ) -> Result<(), S3Error> {
     let blob_guid = object.blob_guid()?;
     let num_blocks = object.num_blocks()?;

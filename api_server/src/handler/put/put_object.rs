@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use super::block_data_stream::BlockDataStream;
 use super::s3_streaming::S3StreamingPayload;
 use crate::{
-    blob_storage::BlobGuid,
+    blob_storage::DataBlobGuid,
     handler::{
         ObjectRequestContext,
         common::{
@@ -238,7 +238,7 @@ fn should_use_streaming(request: &actix_web::HttpRequest) -> bool {
 // Internal streaming handler that processes chunks as they arrive
 async fn put_object_streaming_internal(
     ctx: ObjectRequestContext,
-    blob_guid: BlobGuid,
+    blob_guid: DataBlobGuid,
 ) -> Result<HttpResponse, S3Error> {
     let start = Instant::now();
 
@@ -454,7 +454,7 @@ async fn put_object_streaming_internal(
 // Helper function for buffered upload with pre-resolved bucket
 async fn put_object_with_no_trailer(
     ctx: ObjectRequestContext,
-    blob_guid: BlobGuid,
+    blob_guid: DataBlobGuid,
 ) -> Result<HttpResponse, S3Error> {
     let bucket = ctx.resolve_bucket().await?;
     let expected_size = ctx
@@ -531,7 +531,7 @@ async fn put_object_with_no_trailer(
             futures.push(future);
         }
 
-        let results: Vec<Result<BlobGuid, S3Error>> = futures::future::join_all(futures).await;
+        let results: Vec<Result<DataBlobGuid, S3Error>> = futures::future::join_all(futures).await;
         for result in results {
             let _blob_guid = result?; // Ignore the returned BlobGuid
         }

@@ -1,4 +1,4 @@
-use super::{BlobGuid, BlobStorage, BlobStorageError, DataVgProxy, blob_key, create_s3_client};
+use super::{BlobStorage, BlobStorageError, DataBlobGuid, DataVgProxy, blob_key, create_s3_client};
 use crate::{config::S3HybridSingleAzConfig, object_layout::ObjectLayout};
 use aws_sdk_s3::Client as S3Client;
 use bytes::Bytes;
@@ -57,7 +57,7 @@ impl S3HybridSingleAzStorage {
         })
     }
 
-    pub fn create_data_blob_guid(&self) -> BlobGuid {
+    pub fn create_data_blob_guid(&self) -> DataBlobGuid {
         self.data_vg_proxy.create_data_blob_guid()
     }
 }
@@ -70,12 +70,12 @@ impl BlobStorage for S3HybridSingleAzStorage {
         volume_id: u32,
         block_number: u32,
         body: Bytes,
-    ) -> Result<BlobGuid, BlobStorageError> {
+    ) -> Result<DataBlobGuid, BlobStorageError> {
         histogram!("blob_size", "operation" => "put").record(body.len() as f64);
         let start = Instant::now();
 
         // Create BlobGuid with provided volume_id
-        let blob_guid = BlobGuid { blob_id, volume_id };
+        let blob_guid = DataBlobGuid { blob_id, volume_id };
 
         if block_number == 0 && body.len() < ObjectLayout::DEFAULT_BLOCK_SIZE as usize {
             // Small blob - only store in BSS via DataVgProxy
@@ -110,7 +110,7 @@ impl BlobStorage for S3HybridSingleAzStorage {
 
     async fn get_blob(
         &self,
-        blob_guid: BlobGuid,
+        blob_guid: DataBlobGuid,
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<(), BlobStorageError> {
@@ -125,7 +125,7 @@ impl BlobStorage for S3HybridSingleAzStorage {
     async fn delete_blob(
         &self,
         _tracking_root_blob_name: Option<&str>,
-        blob_guid: BlobGuid,
+        blob_guid: DataBlobGuid,
         block_number: u32,
     ) -> Result<(), BlobStorageError> {
         let s3_key = blob_key(blob_guid.blob_id, block_number);

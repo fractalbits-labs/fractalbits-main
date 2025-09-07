@@ -1,13 +1,12 @@
-mod data_vg_proxy;
 mod retry;
 mod s3_express_multi_az_storage;
 mod s3_hybrid_single_az_storage;
 
 pub use crate::config::RatelimitConfig;
-pub use data_vg_proxy::DataVgProxy;
 pub use retry::S3RetryConfig;
 pub use s3_express_multi_az_storage::S3ExpressMultiAzStorage;
 pub use s3_hybrid_single_az_storage::S3HybridSingleAzStorage;
+pub use volume_group_proxy::{DataBlobGuid, DataVgProxy};
 
 #[allow(clippy::enum_variant_names)]
 pub enum BlobStorageImpl {
@@ -31,21 +30,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
 use uuid::Uuid;
-
-/// BlobGuid combines blob_id (UUID) with volume_id for multi-BSS support
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize,
-)]
-pub struct BlobGuid {
-    pub blob_id: Uuid,
-    pub volume_id: u32,
-}
-
-impl std::fmt::Display for BlobGuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}v{}", self.blob_id, self.volume_id)
-    }
-}
 
 /// S3 operation retry macro - similar to rpc_retry but for S3 operations
 #[macro_export]
@@ -306,6 +290,9 @@ pub enum BlobStorageError {
     #[error("BSS RPC error: {0}")]
     BssRpc(#[from] rpc_client_common::RpcError),
 
+    #[error("Data VG error: {0}")]
+    DataVg(#[from] volume_group_proxy::DataVgError),
+
     #[error("S3 error: {0}")]
     S3(String),
 
@@ -348,11 +335,11 @@ pub trait BlobStorage: Send + Sync {
         volume_id: u32,
         block_number: u32,
         body: Bytes,
-    ) -> Result<BlobGuid, BlobStorageError>;
+    ) -> Result<DataBlobGuid, BlobStorageError>;
 
     async fn get_blob(
         &self,
-        blob_guid: BlobGuid,
+        blob_guid: DataBlobGuid,
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<(), BlobStorageError>;
@@ -360,7 +347,7 @@ pub trait BlobStorage: Send + Sync {
     async fn delete_blob(
         &self,
         tracking_root_blob_name: Option<&str>,
-        blob_guid: BlobGuid,
+        blob_guid: DataBlobGuid,
         block_number: u32,
     ) -> Result<(), BlobStorageError>;
 }
@@ -373,7 +360,7 @@ impl BlobStorage for BlobStorageImpl {
         volume_id: u32,
         block_number: u32,
         body: Bytes,
-    ) -> Result<BlobGuid, BlobStorageError> {
+    ) -> Result<DataBlobGuid, BlobStorageError> {
         match self {
             BlobStorageImpl::HybridSingleAz(storage) => {
                 storage
@@ -402,7 +389,7 @@ impl BlobStorage for BlobStorageImpl {
 
     async fn get_blob(
         &self,
-        blob_guid: BlobGuid,
+        blob_guid: DataBlobGuid,
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<(), BlobStorageError> {
@@ -419,7 +406,7 @@ impl BlobStorage for BlobStorageImpl {
     async fn delete_blob(
         &self,
         tracking_root_blob_name: Option<&str>,
-        blob_guid: BlobGuid,
+        blob_guid: DataBlobGuid,
         block_number: u32,
     ) -> Result<(), BlobStorageError> {
         match self {

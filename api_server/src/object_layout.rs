@@ -1,4 +1,4 @@
-use crate::blob_storage::BlobGuid;
+use crate::blob_storage::DataBlobGuid;
 use crate::handler::common::{checksum::ChecksumValue, s3_error::S3Error};
 use rkyv::{Archive, Deserialize, Serialize};
 use uuid::Uuid;
@@ -21,7 +21,7 @@ impl ObjectLayout {
     pub const DEFAULT_BLOCK_SIZE: u32 = 1024 * 1024 - 256;
 
     #[inline]
-    pub fn blob_guid(&self) -> Result<BlobGuid, S3Error> {
+    pub fn blob_guid(&self) -> Result<DataBlobGuid, S3Error> {
         match self.state {
             ObjectState::Normal(ref data) => Ok(data.blob_guid),
             _ => Err(S3Error::InvalidObjectState),
@@ -92,7 +92,7 @@ pub enum MpuState {
 /// Data stored in normal object or mpu parts
 #[derive(Debug, Archive, Deserialize, Serialize, PartialEq)]
 pub struct ObjectMetaData {
-    pub blob_guid: BlobGuid,
+    pub blob_guid: DataBlobGuid,
     pub core_meta_data: ObjectCoreMetaData,
 }
 

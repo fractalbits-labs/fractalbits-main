@@ -5,7 +5,7 @@ pub mod handler;
 mod object_layout;
 
 use blob_client::BlobClient;
-use blob_storage::BlobGuid;
+use blob_storage::DataBlobGuid;
 pub use config::{BlobStorageBackend, BlobStorageConfig, Config, S3HybridSingleAzConfig};
 pub use data_blob_tracking::{DataBlobTracker, DataBlobTrackingError};
 use data_types::{ApiKey, Bucket, Versioned};
@@ -33,7 +33,7 @@ pub struct AppState {
     rpc_clients_rss: ConnPool<Arc<RpcClientRss>, String>,
 
     blob_client: Arc<BlobClient>,
-    blob_deletion: Sender<(Option<String>, BlobGuid, usize)>,
+    blob_deletion: Sender<(Option<String>, DataBlobGuid, usize)>,
     pub data_blob_tracker: Arc<DataBlobTracker>,
 }
 
@@ -162,7 +162,7 @@ impl AppState {
         self.blob_client.clone()
     }
 
-    pub fn get_blob_deletion(&self) -> Sender<(Option<String>, BlobGuid, usize)> {
+    pub fn get_blob_deletion(&self) -> Sender<(Option<String>, DataBlobGuid, usize)> {
         self.blob_deletion.clone()
     }
 }

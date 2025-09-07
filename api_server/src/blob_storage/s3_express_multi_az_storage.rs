@@ -1,5 +1,5 @@
 use super::{
-    BlobGuid, BlobStorage, BlobStorageError, S3ClientWrapper, S3RetryConfig, blob_key,
+    BlobStorage, BlobStorageError, DataBlobGuid, S3ClientWrapper, S3RetryConfig, blob_key,
     create_s3_client_wrapper,
 };
 use crate::s3_retry;
@@ -188,8 +188,8 @@ impl S3ExpressMultiAzStorage {
         Ok(())
     }
 
-    pub fn create_data_blob_guid(&self) -> BlobGuid {
-        BlobGuid {
+    pub fn create_data_blob_guid(&self) -> DataBlobGuid {
+        DataBlobGuid {
             blob_id: Uuid::now_v7(),
             volume_id: 0, // S3 Express Multi AZ doesn't use multi-volume BSS
         }
@@ -204,7 +204,7 @@ impl BlobStorage for S3ExpressMultiAzStorage {
         volume_id: u32,
         block_number: u32,
         body: Bytes,
-    ) -> Result<BlobGuid, BlobStorageError> {
+    ) -> Result<DataBlobGuid, BlobStorageError> {
         histogram!("blob_size", "operation" => "put", "storage" => "s3_express_multi_az")
             .record(body.len() as f64);
 
@@ -396,12 +396,12 @@ impl BlobStorage for S3ExpressMultiAzStorage {
         histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "put_blob")
             .record(start.elapsed().as_nanos() as f64);
 
-        Ok(BlobGuid { blob_id, volume_id })
+        Ok(DataBlobGuid { blob_id, volume_id })
     }
 
     async fn get_blob(
         &self,
-        blob_guid: BlobGuid,
+        blob_guid: DataBlobGuid,
         block_number: u32,
         body: &mut Bytes,
     ) -> Result<(), BlobStorageError> {
@@ -473,7 +473,7 @@ impl BlobStorage for S3ExpressMultiAzStorage {
     async fn delete_blob(
         &self,
         tracking_root_blob_name: Option<&str>,
-        blob_guid: BlobGuid,
+        blob_guid: DataBlobGuid,
         block_number: u32,
     ) -> Result<(), BlobStorageError> {
         let s3_key = blob_key(blob_guid.blob_id, block_number);

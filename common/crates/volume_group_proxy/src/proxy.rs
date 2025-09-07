@@ -1,4 +1,4 @@
-use super::{BlobGuid, BlobStorageError};
+use crate::DataVgError;
 use bytes::Bytes;
 use futures::stream::{FuturesUnordered, StreamExt};
 use metrics::histogram;
@@ -14,6 +14,21 @@ use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+/// BlobGuid combines blob_id (UUID) with volume_id for multi-BSS support
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize,
+)]
+pub struct DataBlobGuid {
+    pub blob_id: Uuid,
+    pub volume_id: u32,
+}
+
+impl std::fmt::Display for DataBlobGuid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "vol{}-{}", self.volume_id, self.blob_id)
+    }
+}
+
 pub struct DataVgProxy {
     volumes: Vec<rss_codec::DataVolume>,
     bss_connection_pools: HashMap<String, ConnPool<Arc<RpcClientBss>, String>>,
@@ -26,14 +41,14 @@ impl DataVgProxy {
     pub async fn new(
         data_vg_info: rss_codec::DataVgInfo,
         rpc_timeout: Duration,
-    ) -> Result<Self, BlobStorageError> {
+    ) -> Result<Self, DataVgError> {
         info!(
             "Initializing DataVgProxy with {} volumes",
             data_vg_info.volumes.len()
         );
 
         let quorum_config = data_vg_info.quorum.ok_or_else(|| {
-            BlobStorageError::InitializationError(
+            DataVgError::InitializationError(
                 "QuorumConfig is required but not provided in DataVgInfo".to_string(),
             )
         })?;
@@ -63,7 +78,7 @@ impl DataVgProxy {
                             <RpcClientBss as Poolable>::new(bss_node.address.clone())
                                 .await
                                 .map_err(|e| {
-                                    BlobStorageError::InitializationError(format!(
+                                    DataVgError::InitializationError(format!(
                                         "Failed to connect to BSS {}: {}",
                                         bss_node.address, e
                                     ))
@@ -103,17 +118,14 @@ impl DataVgProxy {
     async fn checkout_bss_client(
         &self,
         bss_address: &str,
-    ) -> Result<Arc<RpcClientBss>, BlobStorageError> {
+    ) -> Result<Arc<RpcClientBss>, DataVgError> {
         let pool = self.bss_connection_pools.get(bss_address).ok_or_else(|| {
-            BlobStorageError::InitializationError(format!(
-                "No connection pool for BSS {}",
-                bss_address
-            ))
+            DataVgError::InitializationError(format!("No connection pool for BSS {}", bss_address))
         })?;
 
         let start = Instant::now();
         let client = pool.checkout(bss_address.to_string()).await.map_err(|e| {
-            BlobStorageError::InitializationError(format!(
+            DataVgError::InitializationError(format!(
                 "Failed to checkout BSS client for {}: {}",
                 bss_address, e
             ))
@@ -160,17 +172,14 @@ impl DataVgProxy {
     async fn checkout_bss_client_for_async(
         bss_connection_pools: &HashMap<String, ConnPool<Arc<RpcClientBss>, String>>,
         bss_address: &str,
-    ) -> Result<Arc<RpcClientBss>, BlobStorageError> {
+    ) -> Result<Arc<RpcClientBss>, DataVgError> {
         let pool = bss_connection_pools.get(bss_address).ok_or_else(|| {
-            BlobStorageError::InitializationError(format!(
-                "No connection pool for BSS {}",
-                bss_address
-            ))
+            DataVgError::InitializationError(format!("No connection pool for BSS {}", bss_address))
         })?;
 
         let start = Instant::now();
         let client = pool.checkout(bss_address.to_string()).await.map_err(|e| {
-            BlobStorageError::InitializationError(format!(
+            DataVgError::InitializationError(format!(
                 "Failed to checkout BSS client for {}: {}",
                 bss_address, e
             ))
@@ -251,19 +260,19 @@ impl DataVgProxy {
 
 impl DataVgProxy {
     /// Create a new data blob GUID with a fresh UUID and selected volume
-    pub fn create_data_blob_guid(&self) -> BlobGuid {
+    pub fn create_data_blob_guid(&self) -> DataBlobGuid {
         let blob_id = Uuid::now_v7();
         let volume_id = self.select_volume_for_blob();
-        BlobGuid { blob_id, volume_id }
+        DataBlobGuid { blob_id, volume_id }
     }
 
     /// Multi-BSS put_blob with quorum-based replication
     pub async fn put_blob(
         &self,
-        blob_guid: BlobGuid,
+        blob_guid: DataBlobGuid,
         block_number: u32,
         body: Bytes,
-    ) -> Result<(), BlobStorageError> {
+    ) -> Result<(), DataVgError> {
         let start = Instant::now();
         histogram!("blob_size", "operation" => "put").record(body.len() as f64);
 
@@ -273,7 +282,7 @@ impl DataVgProxy {
             .iter()
             .find(|v| v.volume_id == blob_guid.volume_id)
             .ok_or_else(|| {
-                BlobStorageError::InitializationError(format!(
+                DataVgError::InitializationError(format!(
                     "Volume {} not found in DataVgProxy",
                     blob_guid.volume_id
                 ))
@@ -362,7 +371,7 @@ impl DataVgProxy {
             "Write quorum failed ({}/{}). Errors: {:?}",
             successful_writes, self.quorum_config.w, errors
         );
-        Err(BlobStorageError::QuorumFailure(format!(
+        Err(DataVgError::QuorumFailure(format!(
             "Write quorum failed ({}/{}): {}",
             successful_writes,
             self.quorum_config.w,
@@ -373,10 +382,10 @@ impl DataVgProxy {
     /// Multi-BSS get_blob with quorum-based reads
     pub async fn get_blob(
         &self,
-        blob_guid: BlobGuid,
+        blob_guid: DataBlobGuid,
         block_number: u32,
         body: &mut Bytes,
-    ) -> Result<(), BlobStorageError> {
+    ) -> Result<(), DataVgError> {
         let start = Instant::now();
 
         let blob_id = blob_guid.blob_id;
@@ -390,7 +399,7 @@ impl DataVgProxy {
             .find(|v| v.volume_id == volume_id)
             .ok_or_else(|| {
                 tracing::error!(%blob_id, volume_id, available_volumes=?self.volumes.iter().map(|v| v.volume_id).collect::<Vec<_>>(), "Volume not found in DataVgProxy for get_blob");
-                BlobStorageError::InitializationError(format!("Volume {} not found", volume_id))
+                DataVgError::InitializationError(format!("Volume {} not found", volume_id))
             })?;
 
         // Fast path: try reading from a random BSS node first
@@ -507,7 +516,7 @@ impl DataVgProxy {
             "All read attempts failed for blob {}:{}",
             blob_id, block_number
         );
-        Err(BlobStorageError::QuorumFailure(
+        Err(DataVgError::QuorumFailure(
             "All read attempts failed".to_string(),
         ))
     }
@@ -515,9 +524,9 @@ impl DataVgProxy {
     pub async fn delete_blob(
         &self,
         _tracking_root_blob_name: Option<&str>,
-        blob_guid: BlobGuid,
+        blob_guid: DataBlobGuid,
         block_number: u32,
-    ) -> Result<(), BlobStorageError> {
+    ) -> Result<(), DataVgError> {
         let start = Instant::now();
 
         let volume_id = blob_guid.volume_id;
@@ -526,7 +535,7 @@ impl DataVgProxy {
             .iter()
             .find(|v| v.volume_id == volume_id)
             .ok_or_else(|| {
-                BlobStorageError::InitializationError(format!("Volume {} not found", volume_id))
+                DataVgError::InitializationError(format!("Volume {} not found", volume_id))
             })?;
 
         // Send delete to all replicas (best effort) using stream-based approach
@@ -599,7 +608,7 @@ impl DataVgProxy {
             Ok(())
         } else {
             error!("Delete failed on all replicas: {:?}", errors);
-            Err(BlobStorageError::QuorumFailure(format!(
+            Err(DataVgError::QuorumFailure(format!(
                 "Delete failed on all replicas: {}",
                 errors.join("; ")
             )))

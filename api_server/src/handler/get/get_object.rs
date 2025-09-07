@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{AppState, blob_storage::BlobGuid};
+use crate::{AppState, blob_storage::DataBlobGuid};
 use crate::{
     BlobClient,
     object_layout::{MpuState, ObjectState},
@@ -295,7 +295,7 @@ async fn get_object_range_content(
                 )
                 .await?;
 
-                let mut mpu_blobs: Vec<(BlobGuid, usize, usize)> = Vec::new();
+                let mut mpu_blobs: Vec<(DataBlobGuid, usize, usize)> = Vec::new();
                 let mut obj_offset = 0;
                 for (_mpu_key, mpu_obj) in mpus {
                     let mpu_size = mpu_obj.size()? as usize;
@@ -337,7 +337,7 @@ async fn get_object_range_content(
 
 async fn get_full_blob_stream(
     blob_client: Arc<BlobClient>,
-    blob_guid: BlobGuid,
+    blob_guid: DataBlobGuid,
     num_blocks: usize,
 ) -> Result<impl stream::Stream<Item = Result<Bytes, S3Error>>, S3Error> {
     if num_blocks == 0 {
@@ -380,7 +380,7 @@ async fn get_full_blob_stream(
 
 fn get_range_blob_stream(
     blob_client: Arc<BlobClient>,
-    blob_guid: BlobGuid,
+    blob_guid: DataBlobGuid,
     block_size: usize,
     start: usize,
     end: usize,

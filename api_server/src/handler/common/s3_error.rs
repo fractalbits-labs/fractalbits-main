@@ -904,6 +904,7 @@ impl From<BlobStorageError> for S3Error {
         tracing::error!("blob storage error: {}", err);
         match err {
             BlobStorageError::BssRpc(e) => S3Error::from(e),
+            BlobStorageError::DataVg(_) => S3Error::InternalError,
             BlobStorageError::S3(_) => S3Error::InternalError,
             BlobStorageError::Config(_) => S3Error::InternalError,
             BlobStorageError::Internal(_) => S3Error::InternalError,

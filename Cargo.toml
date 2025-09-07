@@ -7,6 +7,7 @@ members = [
     "common/crates/data_types",
     "cdk/fractalbits-bootstrap",
     "common/crates/data_blob_tracking",
+    "common/crates/volume_group_proxy",
     "ha/multi_az/data_blob_resync_server",
     #"ha/single_az/ebs-failover",
     "ha/nss_role_agent",
@@ -31,6 +32,7 @@ resolver = "2"
 aws_signature = { path = "common/crates/aws_signature" }
 data_types = { path = "common/crates/data_types" }
 data_blob_tracking = { path = "common/crates/data_blob_tracking" }
+volume_group_proxy = { path = "common/crates/volume_group_proxy" }
 rpc_client_common = { path = "common/crates/rpc_clients/client_common" }
 rpc_client_bss = { path = "common/crates/rpc_clients/bss" }
 rpc_client_nss = { path = "common/crates/rpc_clients/nss" }

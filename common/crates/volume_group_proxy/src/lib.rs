@@ -1,5 +1,7 @@
+pub mod metadata_proxy;
 pub mod proxy;
 
+pub use metadata_proxy::{MetadataBlobGuid, MetadataVgProxy};
 pub use proxy::{DataBlobGuid, DataVgProxy};
 
 #[derive(Debug, thiserror::Error)]

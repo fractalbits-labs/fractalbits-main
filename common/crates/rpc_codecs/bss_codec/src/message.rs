@@ -53,11 +53,14 @@ pub struct MessageHeader {
     /// Volume ID for multi-BSS support
     pub volume_id: u8,
 
-    /// Reserved parts for padding
+    /// Version number for quorum protocol
+    pub version: u32,
+
+    /// Reserved parts for padding (reduced by 4 bytes for version field)
     // Note rust arrays of sizes from 0 to 32 (inclusive) implement the Default trait if the element
     // type allows it. As a stopgap, trait implementations are statically generated up to size 32.
     // See [doc](https://doc.rust-lang.org/std/primitive.array.html) for more details.
-    reserved0: [u8; 20],
+    reserved0: [u8; 16],
     reserved1: [u8; 32],
     reserved2: [u8; 32],
     reserved3: [u8; 32],
@@ -71,6 +74,9 @@ pub enum Command {
     PutDataBlob = 1,
     GetDataBlob = 2,
     DeleteDataBlob = 3,
+    PutMetadataBlob = 4,
+    GetMetadataBlob = 5,
+    DeleteMetadataBlob = 6,
 }
 
 #[allow(clippy::derivable_impls)]

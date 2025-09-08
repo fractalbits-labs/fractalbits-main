@@ -56,14 +56,17 @@ pub struct MessageHeader {
     /// Version number for quorum protocol
     pub version: u32,
 
+    /// Client session ID for routing consistency across reconnections
+    pub client_session_id: u64,
+
     /// Flag to indicate if this is a new metadata blob (vs update)
     pub is_new: u8,
 
-    /// Reserved parts for padding (reduced by 5 bytes for version field and is_new flag)
+    /// Reserved parts for padding (reduced by 13 bytes for version, is_new, session_id)
     // Note rust arrays of sizes from 0 to 32 (inclusive) implement the Default trait if the element
     // type allows it. As a stopgap, trait implementations are statically generated up to size 32.
     // See [doc](https://doc.rust-lang.org/std/primitive.array.html) for more details.
-    reserved0: [u8; 15],
+    reserved0: [u8; 7],
     reserved1: [u8; 32],
     reserved2: [u8; 32],
     reserved3: [u8; 32],
@@ -146,5 +149,13 @@ impl MessageHeaderTrait for MessageHeader {
 
     fn get_body_size(&self) -> usize {
         (self.size as usize).saturating_sub(Self::SIZE)
+    }
+
+    fn set_client_session_id(&mut self, session_id: u64) {
+        self.client_session_id = session_id;
+    }
+
+    fn get_client_session_id(&self) -> u64 {
+        self.client_session_id
     }
 }

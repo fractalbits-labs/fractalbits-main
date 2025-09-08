@@ -6,25 +6,6 @@ use rpc_codec_common::MessageHeaderTrait;
 #[repr(C)]
 #[derive(Pod, Debug, Default, Clone, Copy, Zeroable)]
 pub struct MessageHeader {
-    // /// A checksum covering only the remainder of this header.
-    // /// This allows the header to be trusted without having to recv() or read() the associated body.
-    // /// This checksum is enough to uniquely identify a network message or prepare.
-    // checksum: u128,
-
-    // // TODO(zig): When Zig supports u256 in extern-structs, merge this into `checksum`.
-    // checksum_padding: u128,
-
-    // /// A checksum covering only the associated body after this header.
-    // checksum_body: u128,
-
-    // // TODO(zig): When Zig supports u256 in extern-structs, merge this into `checksum_body`.
-    // checksum_body_padding: u128,
-
-    // /// The cluster number binds intention into the header, so that a nss or api_server can indicate
-    // /// the cluster it believes it is speaking to, instead of accidentally talking to the wrong
-    // /// cluster (for example, staging vs production).
-    // cluster: u128,
-    /// role: request, response, broadcast ?
     /// The size of the Header structure (always), plus any associated body.
     pub size: u32,
 
@@ -40,9 +21,12 @@ pub struct MessageHeader {
 
     /// The version of the protocol implementation that originated this message.
     protocol: u16,
-    // /// Reserved for future use
-    // reserved1: u128,
-    // reserved2: u128,
+
+    /// Client session ID for routing consistency across reconnections
+    pub client_session_id: u64,
+
+    /// Reserved for future use
+    reserved: [u8; 8],
 }
 
 // Safety: Command is defined as protobuf enum type (i32), and 0 as Invalid. There is also no padding
@@ -52,7 +36,7 @@ unsafe impl Pod for Command {}
 unsafe impl Zeroable for Command {}
 
 impl MessageHeader {
-    const _SIZE_OK: () = assert!(size_of::<Self>() == 16);
+    const _SIZE_OK: () = assert!(size_of::<Self>() == 32);
     pub const SIZE: usize = size_of::<Self>();
 
     pub fn encode(&self, dst: &mut BytesMut) {
@@ -75,7 +59,7 @@ impl MessageHeader {
 }
 
 impl MessageHeaderTrait for MessageHeader {
-    const SIZE: usize = 16;
+    const SIZE: usize = 32;
 
     fn encode(&self, dst: &mut BytesMut) {
         self.encode(dst)
@@ -102,5 +86,13 @@ impl MessageHeaderTrait for MessageHeader {
 
     fn get_body_size(&self) -> usize {
         (self.size as usize).saturating_sub(Self::SIZE)
+    }
+
+    fn set_client_session_id(&mut self, session_id: u64) {
+        self.client_session_id = session_id;
+    }
+
+    fn get_client_session_id(&self) -> u64 {
+        self.client_session_id
     }
 }

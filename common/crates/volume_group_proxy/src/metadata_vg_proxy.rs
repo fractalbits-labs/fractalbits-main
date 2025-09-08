@@ -716,7 +716,7 @@ mod tests {
 
     #[test]
     fn test_round_robin_volume_selection() {
-        let volumes = vec![0u8, 1u8, 2u8];
+        let volumes = [0u8, 1u8, 2u8];
         let mut counter = 0u64;
 
         let selections: Vec<u8> = (0..10)

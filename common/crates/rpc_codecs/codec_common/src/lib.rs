@@ -10,6 +10,8 @@ pub trait MessageHeaderTrait: Sized + Clone + Copy + Send + Sync + 'static {
     fn get_id(&self) -> u32;
     fn set_id(&mut self, id: u32);
     fn get_body_size(&self) -> usize;
+    fn set_client_session_id(&mut self, session_id: u64);
+    fn get_client_session_id(&self) -> u64;
 }
 
 pub struct MessageFrame<H: MessageHeaderTrait> {

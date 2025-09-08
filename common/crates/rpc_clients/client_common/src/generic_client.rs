@@ -5,6 +5,8 @@ use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 use slotmap_conn_pool::Poolable;
 use socket2::{Socket, TcpKeepalive};
 use std::collections::HashMap;
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::io;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
@@ -35,15 +37,35 @@ use crate::RpcError;
 static CLIENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn generate_unique_client_session_id() -> u64 {
-    let process_id = std::process::id() as u64;
-    let timestamp = SystemTime::now()
+    // Use nanosecond precision for better uniqueness
+    let timestamp_nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_millis() as u64;
-    let counter = CLIENT_COUNTER.fetch_add(1, Ordering::SeqCst);
+        .as_nanos() as u64;
 
-    // Combine: high 32 bits = timestamp, low 32 bits = (process_id << 16) | counter
-    (timestamp << 32) | ((process_id & 0xFFFF) << 16) | (counter & 0xFFFF)
+    // Get process ID and thread ID for additional uniqueness
+    let process_id = std::process::id() as u64;
+    let thread_id = std::thread::current().id();
+
+    // Get a truly random component using RandomState (which uses system entropy)
+    let random_state = RandomState::new();
+    let mut hasher = random_state.build_hasher();
+
+    // Include machine-specific entropy
+    timestamp_nanos.hash(&mut hasher);
+    process_id.hash(&mut hasher);
+    thread_id.hash(&mut hasher);
+
+    // Add counter for additional uniqueness within the same process/thread
+    let counter = CLIENT_COUNTER.fetch_add(1, Ordering::SeqCst);
+    counter.hash(&mut hasher);
+
+    // Also include hostname if available for cross-machine uniqueness
+    if let Ok(hostname) = std::env::var("HOSTNAME") {
+        hostname.hash(&mut hasher);
+    }
+
+    hasher.finish()
 }
 
 type RequestMap<Header> = Arc<Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>>;
@@ -244,6 +266,7 @@ where
 
         let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
         frame.header.set_id(request_id);
+        frame.header.set_client_session_id(self.client_session_id);
 
         let (tx, rx) = oneshot::channel();
         {
@@ -274,7 +297,7 @@ where
     pub async fn send_request(
         &self,
         request_id: u32,
-        frame: MessageFrame<Header>,
+        mut frame: MessageFrame<Header>,
         timeout: Option<std::time::Duration>,
     ) -> Result<MessageFrame<Header>, RpcError> {
         if self.is_closed.load(Ordering::SeqCst) {
@@ -282,6 +305,9 @@ where
                 "Connection is closed".into(),
             ));
         }
+
+        // Set routing fields for session-based routing
+        frame.header.set_client_session_id(self.client_session_id);
 
         let (tx, rx) = oneshot::channel();
         {

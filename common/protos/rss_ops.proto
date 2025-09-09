@@ -6,30 +6,32 @@ import "google/protobuf/empty.proto";
 
 enum Command {
   Invalid = 0;
-  Put = 1;
-  Get = 2;
-  Delete = 3;
-  List = 4;
+  Handshake = 1;
+
+  Put = 16;
+  Get = 17;
+  Delete = 18;
+  List = 19;
 
   // Health agent commands
-  Heartbeat = 5;
+  Heartbeat = 20;
 
   // NSS role management
-  GetNssRole = 6;
+  GetNssRole = 21;
 
   // AZ status management
-  GetAzStatus = 7;
-  SetAzStatus = 8;
+  GetAzStatus = 22;
+  SetAzStatus = 23;
 
   // Bucket management
-  CreateBucket = 9;
-  DeleteBucket = 10;
+  CreateBucket = 24;
+  DeleteBucket = 25;
 
   // Data Volume Group management
-  GetDataVgInfo = 11;
+  GetDataVgInfo = 26;
 
   // Metadata Volume Group management
-  GetMetadataVgInfo = 12;
+  GetMetadataVgInfo = 27;
 }
 
 // Put

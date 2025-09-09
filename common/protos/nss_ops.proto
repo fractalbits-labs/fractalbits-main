@@ -6,13 +6,15 @@ import "google/protobuf/empty.proto";
 
 enum Command {
   Invalid = 0;
-  PutInode = 1;
-  GetInode = 2;
-  ListInodes = 3;
-  DeleteInode = 4;
-  CreateRootInode = 5;
-  DeleteRootInode = 6;
-  Rename = 7;
+  Handshake = 1;  // Reserved for RPC handshake
+  // Application-specific commands start from 16
+  PutInode = 16;
+  GetInode = 17;
+  ListInodes = 18;
+  DeleteInode = 19;
+  CreateRootInode = 20;
+  DeleteRootInode = 21;
+  Rename = 22;
 }
 
 // PutInode

@@ -77,12 +77,14 @@ pub struct MessageHeader {
 #[repr(u32)]
 pub enum Command {
     Invalid = 0,
-    PutDataBlob = 1,
-    GetDataBlob = 2,
-    DeleteDataBlob = 3,
-    PutMetadataBlob = 4,
-    GetMetadataBlob = 5,
-    DeleteMetadataBlob = 6,
+    Handshake = 1, // Reserved for RPC handshake
+    // Application-specific commands start from 16
+    PutDataBlob = 16,
+    GetDataBlob = 17,
+    DeleteDataBlob = 18,
+    PutMetadataBlob = 19,
+    GetMetadataBlob = 20,
+    DeleteMetadataBlob = 21,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -139,6 +141,10 @@ impl MessageHeaderTrait for MessageHeader {
         u32::from_le_bytes(bytes) as usize
     }
 
+    fn set_size(&mut self, size: u32) {
+        self.size = size;
+    }
+
     fn get_id(&self) -> u32 {
         self.id
     }
@@ -147,15 +153,19 @@ impl MessageHeaderTrait for MessageHeader {
         self.id = id;
     }
 
-    fn get_body_size(&self) -> usize {
-        (self.size as usize).saturating_sub(Self::SIZE)
-    }
-
     fn set_client_session_id(&mut self, session_id: u64) {
         self.client_session_id = session_id;
     }
 
     fn get_client_session_id(&self) -> u64 {
         self.client_session_id
+    }
+
+    fn set_handshake_command(&mut self) {
+        self.command = Command::Handshake;
+    }
+
+    fn get_body_size(&self) -> usize {
+        (self.size as usize).saturating_sub(Self::SIZE)
     }
 }

@@ -68,7 +68,25 @@ impl Poolable for RpcClient {
         Self::new_internal(address, Some(session_id)).await
     }
 
+    async fn new_with_session_and_request_id(
+        address: Self::AddrKey,
+        session_id: u64,
+        next_request_id: u32,
+    ) -> Result<Self, Self::Error> {
+        let inner = GenericRpcClient::establish_connection_with_session_state(
+            address,
+            session_id,
+            next_request_id,
+        )
+        .await?;
+        Ok(RpcClient { inner })
+    }
+
     fn is_closed(&self) -> bool {
         self.inner.is_closed()
+    }
+
+    fn get_session_state(&self) -> (u64, u32) {
+        self.inner.get_session_state()
     }
 }

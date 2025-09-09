@@ -128,18 +128,15 @@ macro_rules! rss_rpc_retry {
 
 #[macro_export]
 macro_rules! nss_rpc_retry_with_session {
-    // For methods with stable_request_id support
     ($app_state:expr, $method:ident($($args:expr),*)) => {
         async {
             use $crate::ErrorRetryable;
-            use $crate::generic_client::generate_unique_client_session_id;
             let mut retries = 3;
             let mut backoff = std::time::Duration::from_millis(5);
-            let session_id = generate_unique_client_session_id();
             let mut stable_request_id: Option<u32> = None;
 
             loop {
-                let rpc_client = $app_state.checkout_with_session_nss(session_id).await.unwrap();
+                let rpc_client = $app_state.checkout_rpc_client_nss().await.unwrap();
 
                 // Generate or reuse stable request_id
                 let request_id = stable_request_id.unwrap_or_else(|| {
@@ -203,13 +200,11 @@ macro_rules! rss_rpc_retry_with_session {
     ($app_state:expr, $method:ident($($args:expr),*)) => {
         async {
             use $crate::ErrorRetryable;
-            use $crate::generic_client::generate_unique_client_session_id;
             let mut retries = 3;
             let mut backoff = std::time::Duration::from_millis(5);
-            let session_id = generate_unique_client_session_id();
 
             loop {
-                let rpc_client = $app_state.checkout_with_session_rss(session_id).await.unwrap();
+                let rpc_client = $app_state.checkout_rpc_client_rss().await.unwrap();
 
                 match rpc_client.$method($($args),*).await {
                     Ok(val) => return Ok(val),

@@ -5,16 +5,14 @@ use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 use slotmap_conn_pool::Poolable;
 use socket2::{Socket, TcpKeepalive};
 use std::collections::HashMap;
-use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hash, Hasher};
 use std::io;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::os::fd::RawFd;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::Duration;
 use strum::AsRefStr;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -33,40 +31,6 @@ use tokio_util::codec::FramedRead;
 use tracing::{debug, warn};
 
 use crate::RpcError;
-
-static CLIENT_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-pub fn generate_unique_client_session_id() -> u64 {
-    // Use nanosecond precision for better uniqueness
-    let timestamp_nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64;
-
-    // Get process ID and thread ID for additional uniqueness
-    let process_id = std::process::id() as u64;
-    let thread_id = std::thread::current().id();
-
-    // Get a truly random component using RandomState (which uses system entropy)
-    let random_state = RandomState::new();
-    let mut hasher = random_state.build_hasher();
-
-    // Include machine-specific entropy
-    timestamp_nanos.hash(&mut hasher);
-    process_id.hash(&mut hasher);
-    thread_id.hash(&mut hasher);
-
-    // Add counter for additional uniqueness within the same process/thread
-    let counter = CLIENT_COUNTER.fetch_add(1, Ordering::SeqCst);
-    counter.hash(&mut hasher);
-
-    // Also include hostname if available for cross-machine uniqueness
-    if let Ok(hostname) = std::env::var("HOSTNAME") {
-        hostname.hash(&mut hasher);
-    }
-
-    hasher.finish()
-}
 
 type RequestMap<Header> = Arc<Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>>;
 
@@ -121,15 +85,58 @@ where
         })
     }
 
-    pub async fn new(stream: TcpStream) -> Result<Self, RpcError> {
-        Self::new_internal(stream, None).await
+    pub async fn new(stream: TcpStream) -> Result<Self, RpcError>
+    where
+        Header: Default,
+    {
+        let mut client = Self::new_internal(stream, 0).await?;
+
+        // For new connections, perform handshake if needed based on RPC type
+        let rpc_type = Codec::RPC_TYPE;
+        if rpc_type == "rss" {
+            // RSS doesn't use handshake, just set session_id = 1
+            client.update_session_id(1);
+        } else {
+            // For NSS and BSS, perform handshake as first RPC call
+            let session_id = client.perform_handshake().await?;
+            client.update_session_id(session_id);
+        }
+
+        Ok(client)
     }
 
-    pub async fn new_with_session_id(stream: TcpStream, session_id: u64) -> Result<Self, RpcError> {
-        Self::new_internal(stream, Some(session_id)).await
+    pub async fn new_with_session_id(stream: TcpStream, session_id: u64) -> Result<Self, RpcError>
+    where
+        Header: Default,
+    {
+        let client = Self::new_internal(stream, session_id).await?;
+
+        // For reconnection with existing session_id, perform handshake with that session_id
+        let rpc_type = Codec::RPC_TYPE;
+        if rpc_type != "rss" {
+            // For NSS and BSS, perform handshake with existing session_id for routing
+            client.perform_handshake_with_session_id(session_id).await?;
+        }
+
+        Ok(client)
     }
 
-    async fn new_internal(stream: TcpStream, session_id: Option<u64>) -> Result<Self, RpcError> {
+    /// Create client with existing session state (bypassing handshake for reconnection)
+    pub async fn new_with_session_and_request_id(
+        stream: TcpStream,
+        session_id: u64,
+        next_request_id: u32,
+    ) -> Result<Self, RpcError>
+    where
+        Header: Default,
+    {
+        let client = Self::new_internal(stream, session_id).await?;
+        // Set the next request ID to continue from where we left off
+        client.next_id.store(next_request_id, Ordering::SeqCst);
+        Ok(client)
+    }
+
+    async fn new_internal(stream: TcpStream, session_id: u64) -> Result<Self, RpcError> {
         let rpc_type = Codec::RPC_TYPE;
         let socket_fd = stream.as_raw_fd();
         let (reader, writer) = stream.into_split();
@@ -177,7 +184,7 @@ where
             });
         }
 
-        let client_session_id = session_id.unwrap_or_else(generate_unique_client_session_id);
+        debug!(%socket_fd, %session_id, "Creating RPC client with session ID");
 
         Ok(RpcClient {
             requests,
@@ -186,7 +193,7 @@ where
             tasks,
             socket_fd,
             is_closed,
-            client_session_id,
+            client_session_id: session_id,
             _phantom: PhantomData,
         })
     }
@@ -294,6 +301,76 @@ where
         self.client_session_id
     }
 
+    /// Extract current session state for persistence across reconnections
+    pub fn get_session_state(&self) -> (u64, u32) {
+        (self.client_session_id, self.next_id.load(Ordering::SeqCst))
+    }
+
+    fn update_session_id(&mut self, session_id: u64) {
+        self.client_session_id = session_id;
+    }
+
+    async fn perform_handshake(&self) -> Result<u64, RpcError>
+    where
+        Header: Default,
+    {
+        let response = self.perform_handshake_internal(0).await?;
+
+        // Extract assigned session ID from response
+        let assigned_session_id = response.header.get_client_session_id();
+
+        if assigned_session_id == 0 {
+            return Err(RpcError::InternalResponseError(
+                "Server did not assign valid session ID".into(),
+            ));
+        }
+
+        debug!(socket_fd = %self.socket_fd, session_id = %assigned_session_id, "Received session ID from handshake");
+        Ok(assigned_session_id)
+    }
+
+    async fn perform_handshake_with_session_id(&self, session_id: u64) -> Result<(), RpcError>
+    where
+        Header: Default,
+    {
+        let response = self.perform_handshake_internal(session_id).await?;
+
+        // Verify the server acknowledged the session ID
+        let response_session_id = response.header.get_client_session_id();
+        if response_session_id != session_id {
+            return Err(RpcError::InternalResponseError(format!(
+                "Server returned different session ID: expected {}, got {}",
+                session_id, response_session_id
+            )));
+        }
+
+        debug!(socket_fd = %self.socket_fd, session_id = %session_id, "Handshake completed with existing session ID");
+        Ok(())
+    }
+
+    async fn perform_handshake_internal(
+        &self,
+        session_id: u64,
+    ) -> Result<MessageFrame<Header>, RpcError>
+    where
+        Header: Default,
+    {
+        // Create handshake request with command = 1 (HANDSHAKE)
+        let mut handshake_frame = MessageFrame {
+            header: Header::default(),
+            body: bytes::Bytes::new(),
+        };
+
+        // Set handshake command and session_id (0 for new, existing for reconnection)
+        handshake_frame.header.set_handshake_command();
+        handshake_frame.header.set_client_session_id(session_id);
+        // Set size to header size (no body for handshake)
+        handshake_frame.header.set_size(Header::SIZE as u32);
+
+        // Send handshake request and wait for response
+        self.send_message(handshake_frame).await
+    }
+
     pub async fn send_request(
         &self,
         request_id: u32,
@@ -346,7 +423,10 @@ where
     async fn establish_connection(
         addr_key: String,
         session_id: Option<u64>,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>>
+    where
+        Header: Default,
+    {
         const MAX_CONNECTION_RETRIES: usize = 100 * 3600; // Max attempts to connect to an RPC server
 
         let start = std::time::Instant::now();
@@ -433,9 +513,53 @@ where
         TcpStream::from_std(std_stream)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
+
+    /// Establish connection with existing session state (for reconnection)
+    pub async fn establish_connection_with_session_state(
+        addr_key: String,
+        session_id: u64,
+        next_request_id: u32,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>>
+    where
+        Header: Default,
+    {
+        let address = Self::resolve_address(&addr_key)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
+        let connect_start = tokio::time::Instant::now();
+
+        let stream = TcpStream::connect(address)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
+        let connect_duration = connect_start.elapsed();
+        if connect_duration.as_millis() > 100 {
+            warn!(
+                rpc_type = Codec::RPC_TYPE,
+                addr = %addr_key,
+                duration_ms = %connect_duration.as_millis(),
+                "Slow connection establishment to RPC server"
+            );
+        } else {
+            debug!(
+                rpc_type = Codec::RPC_TYPE,
+                addr = %addr_key,
+                duration_ms = %connect_duration.as_millis(),
+                "Connection established to RPC server"
+            );
+        }
+
+        let configured_stream = Self::configure_tcp_socket(stream)?;
+
+        // Use the new constructor that preserves session state
+        Self::new_with_session_and_request_id(configured_stream, session_id, next_request_id)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
 }
 
-impl<Codec: RpcCodec<Header> + Unpin, Header: MessageHeaderTrait> Poolable
+impl<Codec: RpcCodec<Header> + Unpin, Header: MessageHeaderTrait + Default> Poolable
     for RpcClient<Codec, Header>
 {
     type AddrKey = String;
@@ -452,7 +576,19 @@ impl<Codec: RpcCodec<Header> + Unpin, Header: MessageHeaderTrait> Poolable
         Self::establish_connection(addr_key, Some(session_id)).await
     }
 
+    async fn new_with_session_and_request_id(
+        addr_key: Self::AddrKey,
+        session_id: u64,
+        next_request_id: u32,
+    ) -> Result<Self, Self::Error> {
+        Self::establish_connection_with_session_state(addr_key, session_id, next_request_id).await
+    }
+
     fn is_closed(&self) -> bool {
         self.is_closed()
+    }
+
+    fn get_session_state(&self) -> (u64, u32) {
+        self.get_session_state()
     }
 }

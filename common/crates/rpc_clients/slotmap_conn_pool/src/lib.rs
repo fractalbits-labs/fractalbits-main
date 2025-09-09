@@ -23,7 +23,16 @@ pub trait Poolable: Unpin + Send + Sized + 'static {
         session_id: u64,
     ) -> impl Future<Output = Result<Self, Self::Error>> + Send;
 
+    fn new_with_session_and_request_id(
+        addr_key: Self::AddrKey,
+        session_id: u64,
+        next_request_id: u32,
+    ) -> impl Future<Output = Result<Self, Self::Error>> + Send;
+
     fn is_closed(&self) -> bool;
+
+    /// Extract current session state for persistence across reconnections
+    fn get_session_state(&self) -> (u64, u32);
 }
 
 impl<T: Poolable + Sync> Poolable for Arc<T> {
@@ -32,6 +41,10 @@ impl<T: Poolable + Sync> Poolable for Arc<T> {
 
     fn is_closed(&self) -> bool {
         self.deref().is_closed()
+    }
+
+    fn get_session_state(&self) -> (u64, u32) {
+        self.deref().get_session_state()
     }
 
     async fn new(addr_key: Self::AddrKey) -> Result<Self, Self::Error> {
@@ -43,6 +56,16 @@ impl<T: Poolable + Sync> Poolable for Arc<T> {
         session_id: u64,
     ) -> Result<Self, Self::Error> {
         T::new_with_session_id(addr_key, session_id)
+            .await
+            .map(Arc::new)
+    }
+
+    async fn new_with_session_and_request_id(
+        addr_key: Self::AddrKey,
+        session_id: u64,
+        next_request_id: u32,
+    ) -> Result<Self, Self::Error> {
+        T::new_with_session_and_request_id(addr_key, session_id, next_request_id)
             .await
             .map(Arc::new)
     }
@@ -156,10 +179,32 @@ impl<T: Poolable, K: Key> ConnPool<T, K> {
                     }
 
                     // If we reach here, the connection is still broken and we hold the semaphore.
-                    // Proceed with recreation using provided session_id or generate new one.
-                    let new_conn = match session_id {
-                        Some(id) => T::new_with_session_id(addr_key.clone().into(), id).await,
-                        None => T::new(addr_key.clone().into()).await,
+                    // Extract session state from broken connection before removing it
+                    let (old_session_id, old_next_request_id) = {
+                        let inner = self.inner.read();
+                        if let Some((conn, _)) = inner.connections.get(current_conn_key) {
+                            conn.get_session_state()
+                        } else {
+                            // Connection was already removed, use provided session_id or create new
+                            (session_id.unwrap_or(0), 1)
+                        }
+                    };
+
+                    // Create replacement connection with session state from broken connection
+                    let new_conn = if old_session_id != 0 {
+                        // Use session state from broken connection
+                        T::new_with_session_and_request_id(
+                            addr_key.clone().into(),
+                            old_session_id,
+                            old_next_request_id,
+                        )
+                        .await
+                    } else {
+                        // No previous session state, create new connection
+                        match session_id {
+                            Some(id) => T::new_with_session_id(addr_key.clone().into(), id).await,
+                            None => T::new(addr_key.clone().into()).await,
+                        }
                     }
                     .unwrap_or_else(|e| panic!("Failed to create new connection: {e:?}"));
 

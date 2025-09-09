@@ -7,11 +7,13 @@ pub trait MessageHeaderTrait: Sized + Clone + Copy + Send + Sync + 'static {
     fn encode(&self, dst: &mut BytesMut);
     fn decode(src: &Bytes) -> Self;
     fn get_size(src: &BytesMut) -> usize;
+    fn set_size(&mut self, size: u32);
     fn get_id(&self) -> u32;
     fn set_id(&mut self, id: u32);
-    fn get_body_size(&self) -> usize;
     fn set_client_session_id(&mut self, session_id: u64);
     fn get_client_session_id(&self) -> u64;
+    fn set_handshake_command(&mut self);
+    fn get_body_size(&self) -> usize;
 }
 
 pub struct MessageFrame<H: MessageHeaderTrait> {

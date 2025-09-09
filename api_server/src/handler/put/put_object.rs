@@ -324,21 +324,9 @@ async fn put_object_streaming_internal(
 
     // Await checksum calculation completion
     let calculated_checksum = match checksum_future.await {
-        Ok(Ok(checksums)) => {
+        Ok(Ok(checksum)) => {
             tracing::debug!("Streaming checksum verification completed successfully");
-            // Extract the appropriate checksum value based on what was calculated
-            // For now, we'll try to extract from the first available algorithm
-            if let Some(v) = checksums.crc32 {
-                Some(ChecksumValue::Crc32(v))
-            } else if let Some(v) = checksums.crc32c {
-                Some(ChecksumValue::Crc32c(v))
-            } else if let Some(v) = checksums.crc64nvme {
-                Some(ChecksumValue::Crc64Nvme(v))
-            } else if let Some(v) = checksums.sha1 {
-                Some(ChecksumValue::Sha1(v))
-            } else {
-                checksums.sha256.map(ChecksumValue::Sha256)
-            }
+            checksum
         }
         Ok(Err(e)) => {
             tracing::error!("Checksum verification failed: {:?}", e);

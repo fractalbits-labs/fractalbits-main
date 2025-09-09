@@ -2,18 +2,13 @@ use crate::handler::common::signature::{
     ChunkSignature, ChunkSignatureContext, parse_chunk_signature, verify_chunk_signature,
 };
 use crate::handler::common::{
-    checksum::{
-        ChecksumAlgorithm, ChecksumValue, Checksummer, Checksums, ExpectedChecksums,
-        request_trailer_checksum_algorithm,
-    },
+    checksum::{ChecksumValue, Checksummer, request_trailer_checksum_algorithm, verify_checksum},
     s3_error::S3Error,
 };
 use actix_web::HttpRequest;
 use actix_web::error::PayloadError;
-use aws_signature::{STREAMING_PAYLOAD, UNSIGNED_PAYLOAD};
 use base64::prelude::*;
 use bytes::{Buf, Bytes, BytesMut};
-use data_types::hash::Hash;
 use futures::{Stream, ready};
 use pin_project_lite::pin_project;
 use std::pin::Pin;
@@ -22,7 +17,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 /// Streaming checksum receiver type
-pub type StreamingChecksumReceiver = JoinHandle<Result<Checksums, S3Error>>;
+pub type StreamingChecksumReceiver = JoinHandle<Result<Option<ChecksumValue>, S3Error>>;
 
 /// Message types for communication between streaming payload and checksum calculator
 #[derive(Debug, Clone)]
@@ -36,11 +31,7 @@ pub enum ChecksumMessage {
 /// S3-specific trailer information extracted from HTTP trailers
 #[derive(Debug, Default, Clone)]
 pub struct S3Trailers {
-    pub checksum_crc32: Option<String>,
-    pub checksum_crc32c: Option<String>,
-    pub checksum_crc64nvme: Option<String>,
-    pub checksum_sha1: Option<String>,
-    pub checksum_sha256: Option<String>,
+    pub checksum_value: Option<String>, // The base64 checksum value
     pub trailer_signature: Option<String>,
 }
 
@@ -103,28 +94,32 @@ impl S3StreamingPayload {
     ) -> Result<(Self, StreamingChecksumReceiver), S3Error> {
         tracing::debug!("Using full checksum path (with task spawning)");
 
-        // Extract expected checksums from request headers
-        let expected_checksums = Self::extract_expected_checksums(request, checksum_value)?;
+        // Use the provided checksum value as expected checksum
+        let expected_checksum = checksum_value;
 
         // Extract trailer algorithm if present
-        let trailer_algorithm = Self::extract_trailer_algorithm(request)?;
+        let trailer_algorithm =
+            request_trailer_checksum_algorithm(request.headers()).map_err(|e| {
+                tracing::error!("Failed to extract trailer algorithm: {:?}", e);
+                S3Error::InvalidDigest
+            })?;
 
         // Determine if this is a streaming request or regular content-length request
         let is_streaming = Self::is_streaming_request(request);
         tracing::debug!("Request is streaming: {}", is_streaming);
 
-        // Create checksummer
-        let mut checksummer = Checksummer::init(&expected_checksums, false);
-        if let Some(algo) = trailer_algorithm {
-            checksummer = checksummer.add_algo(Some(algo));
-        }
+        // Get the algorithm we're computing
+        let compute_algo = trailer_algorithm.or_else(|| expected_checksum.map(|c| c.algorithm()));
+
+        // Create checksummer based on the algorithm we need to compute
+        let mut checksummer = compute_algo.map(Checksummer::new);
 
         // Create channel for streaming checksum data
         let (checksum_tx, mut checksum_rx) = mpsc::unbounded_channel::<ChecksumMessage>();
 
         // Spawn checksum calculation task
         let checksum_handle = tokio::spawn(async move {
-            let final_expected = expected_checksums;
+            let final_expected = expected_checksum;
             let mut trailer_checksums: Option<S3Trailers> = None;
 
             // Process messages for checksum calculation
@@ -138,7 +133,9 @@ impl S3StreamingPayload {
                             data.len(),
                             std::str::from_utf8(&data).unwrap_or("<non-utf8>")
                         );
-                        checksummer.update(&data);
+                        if let Some(ref mut cs) = checksummer {
+                            cs.update(&data);
+                        }
                     }
                     ChecksumMessage::Trailers(trailers) => {
                         tracing::trace!("Received trailer checksums: {:?}", trailers);
@@ -148,133 +145,60 @@ impl S3StreamingPayload {
             }
             tracing::debug!("Total bytes processed for checksum: {}", total_bytes);
 
-            // Finalize checksums
-            let checksums = checksummer.finalize();
+            // Finalize checksum
+            let calculated_checksum = checksummer.map(|cs| cs.finalize());
 
-            // Debug: log calculated checksums
-            if let Some(crc32) = checksums.crc32 {
+            // Debug: log calculated checksum
+            if let Some(checksum) = &calculated_checksum {
+                let encoded = match checksum {
+                    ChecksumValue::Crc32(bytes) => base64::prelude::BASE64_STANDARD.encode(bytes),
+                    ChecksumValue::Crc32c(bytes) => base64::prelude::BASE64_STANDARD.encode(bytes),
+                    ChecksumValue::Crc64Nvme(bytes) => {
+                        base64::prelude::BASE64_STANDARD.encode(bytes)
+                    }
+                    ChecksumValue::Sha1(bytes) => base64::prelude::BASE64_STANDARD.encode(bytes),
+                    ChecksumValue::Sha256(bytes) => base64::prelude::BASE64_STANDARD.encode(bytes),
+                };
                 tracing::debug!(
-                    "Calculated CRC32: {:?} (base64: {})",
-                    crc32,
-                    base64::prelude::BASE64_STANDARD.encode(crc32)
-                );
-            }
-            if let Some(crc32c) = checksums.crc32c {
-                tracing::debug!(
-                    "Calculated CRC32C: {:?} (base64: {})",
-                    crc32c,
-                    base64::prelude::BASE64_STANDARD.encode(crc32c)
-                );
-            }
-            if let Some(sha1) = checksums.sha1 {
-                tracing::debug!(
-                    "Calculated SHA1: {:?} (base64: {})",
-                    sha1,
-                    base64::prelude::BASE64_STANDARD.encode(sha1)
-                );
-            }
-            if let Some(sha256) = checksums.sha256 {
-                tracing::debug!(
-                    "Calculated SHA256: {:?} (base64: {})",
-                    sha256,
-                    base64::prelude::BASE64_STANDARD.encode(sha256)
-                );
-            }
-            if let Some(crc64nvme) = checksums.crc64nvme {
-                tracing::debug!(
-                    "Calculated CRC64NVME: {:?} (base64: {})",
-                    crc64nvme,
-                    base64::prelude::BASE64_STANDARD.encode(crc64nvme)
+                    "Calculated {:?}: (base64: {})",
+                    checksum.algorithm(),
+                    encoded
                 );
             }
 
             // Verify trailer checksums if present
-            if let Some(trailers) = trailer_checksums {
-                // Verify CRC32
-                if let Some(trailer_crc32) = trailers.checksum_crc32
-                    && let Some(calculated_crc32) = checksums.crc32
-                {
-                    let calculated_b64 = base64::prelude::BASE64_STANDARD.encode(calculated_crc32);
-                    if trailer_crc32 != calculated_b64 {
-                        tracing::error!(
-                            "CRC32 checksum mismatch: trailer={}, calculated={}",
-                            trailer_crc32,
-                            calculated_b64
-                        );
-                        return Err(S3Error::InvalidDigest);
-                    }
+            if let Some(trailers) = trailer_checksums
+                && let Some(calculated) = &calculated_checksum
+                && let Some(expected_trailer) = &trailers.checksum_value
+            {
+                let calculated_bytes = match calculated {
+                    ChecksumValue::Crc32(bytes) => bytes.as_slice(),
+                    ChecksumValue::Crc32c(bytes) => bytes.as_slice(),
+                    ChecksumValue::Crc64Nvme(bytes) => bytes.as_slice(),
+                    ChecksumValue::Sha1(bytes) => bytes.as_slice(),
+                    ChecksumValue::Sha256(bytes) => bytes.as_slice(),
+                };
+                let calculated_b64 = base64::prelude::BASE64_STANDARD.encode(calculated_bytes);
+
+                if expected_trailer != &calculated_b64 {
+                    tracing::error!(
+                        "{:?} checksum mismatch: trailer={}, calculated={}",
+                        calculated.algorithm(),
+                        expected_trailer,
+                        calculated_b64
+                    );
+                    return Err(S3Error::InvalidDigest);
                 }
 
-                // Verify CRC32C
-                if let Some(trailer_crc32c) = trailers.checksum_crc32c
-                    && let Some(calculated_crc32c) = checksums.crc32c
-                {
-                    let calculated_b64 = base64::prelude::BASE64_STANDARD.encode(calculated_crc32c);
-                    if trailer_crc32c != calculated_b64 {
-                        tracing::error!(
-                            "CRC32C checksum mismatch: trailer={}, calculated={}",
-                            trailer_crc32c,
-                            calculated_b64
-                        );
-                        return Err(S3Error::InvalidDigest);
-                    }
-                }
-
-                // Verify CRC64NVME
-                if let Some(trailer_crc64nvme) = trailers.checksum_crc64nvme
-                    && let Some(calculated_crc64nvme) = checksums.crc64nvme
-                {
-                    let calculated_b64 =
-                        base64::prelude::BASE64_STANDARD.encode(calculated_crc64nvme);
-                    if trailer_crc64nvme != calculated_b64 {
-                        tracing::error!(
-                            "CRC64NVME checksum mismatch: trailer={}, calculated={}",
-                            trailer_crc64nvme,
-                            calculated_b64
-                        );
-                        return Err(S3Error::InvalidDigest);
-                    }
-                }
-
-                // Verify SHA1
-                if let Some(trailer_sha1) = trailers.checksum_sha1
-                    && let Some(calculated_sha1) = checksums.sha1
-                {
-                    let calculated_b64 = base64::prelude::BASE64_STANDARD.encode(calculated_sha1);
-                    if trailer_sha1 != calculated_b64 {
-                        tracing::error!(
-                            "SHA1 checksum mismatch: trailer={}, calculated={}",
-                            trailer_sha1,
-                            calculated_b64
-                        );
-                        return Err(S3Error::InvalidDigest);
-                    }
-                }
-
-                // Verify SHA256
-                if let Some(trailer_sha256) = trailers.checksum_sha256
-                    && let Some(calculated_sha256) = checksums.sha256
-                {
-                    let calculated_b64 = base64::prelude::BASE64_STANDARD.encode(calculated_sha256);
-                    if trailer_sha256 != calculated_b64 {
-                        tracing::error!(
-                            "SHA256 checksum mismatch: trailer={}, calculated={}",
-                            trailer_sha256,
-                            calculated_b64
-                        );
-                        return Err(S3Error::InvalidDigest);
-                    }
-                }
-
-                tracing::debug!("All trailer checksums verified successfully");
+                tracing::debug!("Trailer checksum verified successfully");
             }
 
-            checksums.verify(&final_expected).map_err(|e| {
+            verify_checksum(calculated_checksum, final_expected).map_err(|e| {
                 tracing::error!("Checksum verification failed: {:?}", e);
                 S3Error::InvalidDigest
             })?;
 
-            Ok(checksums)
+            Ok(calculated_checksum)
         });
 
         // Choose initial state based on whether this is a streaming request
@@ -306,48 +230,6 @@ impl S3StreamingPayload {
         };
 
         Ok((streaming_payload, checksum_handle))
-    }
-
-    /// Extract expected checksums from request headers
-    fn extract_expected_checksums(
-        request: &HttpRequest,
-        checksum_value: Option<ChecksumValue>,
-    ) -> Result<ExpectedChecksums, S3Error> {
-        // Extract MD5 from Content-MD5 header
-        let md5 = request
-            .headers()
-            .get("content-md5")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
-
-        // Extract SHA256 from x-amz-content-sha256 header
-        let sha256 = request
-            .headers()
-            .get("x-amz-content-sha256")
-            .and_then(|v| v.to_str().ok())
-            .filter(|s| *s != UNSIGNED_PAYLOAD && *s != STREAMING_PAYLOAD)
-            .and_then(|s| {
-                hex::decode(s).ok().and_then(|bytes| {
-                    let array: Result<[u8; 32], _> = bytes.try_into();
-                    array.ok().map(Hash::from)
-                })
-            });
-
-        Ok(ExpectedChecksums {
-            md5,
-            sha256,
-            extra: checksum_value,
-        })
-    }
-
-    /// Extract trailer algorithm from request headers
-    fn extract_trailer_algorithm(
-        request: &HttpRequest,
-    ) -> Result<Option<ChecksumAlgorithm>, S3Error> {
-        request_trailer_checksum_algorithm(request.headers()).map_err(|e| {
-            tracing::error!("Failed to extract trailer algorithm: {:?}", e);
-            S3Error::InvalidDigest
-        })
     }
 
     /// Determine if this is a streaming request (S3 chunked transfer encoding) or regular content-length
@@ -728,11 +610,17 @@ fn parse_s3_trailers(trailer_data: &[u8]) -> S3Trailers {
             let value = value.trim();
 
             match name.as_str() {
-                "x-amz-checksum-crc32" => trailers.checksum_crc32 = Some(value.to_string()),
-                "x-amz-checksum-crc32c" => trailers.checksum_crc32c = Some(value.to_string()),
-                "x-amz-checksum-crc64nvme" => trailers.checksum_crc64nvme = Some(value.to_string()),
-                "x-amz-checksum-sha1" => trailers.checksum_sha1 = Some(value.to_string()),
-                "x-amz-checksum-sha256" => trailers.checksum_sha256 = Some(value.to_string()),
+                "x-amz-checksum-crc32"
+                | "x-amz-checksum-crc32c"
+                | "x-amz-checksum-crc64nvme"
+                | "x-amz-checksum-sha1"
+                | "x-amz-checksum-sha256" => {
+                    // Since we only support one checksum type, take the first one we find
+                    if trailers.checksum_value.is_none() {
+                        trailers.checksum_value = Some(value.to_string());
+                        tracing::debug!("Found trailer checksum: {} = {}", name, value);
+                    }
+                }
                 "x-amz-trailer-signature" => trailers.trailer_signature = Some(value.to_string()),
                 _ => {
                     // Ignore unknown trailer headers
@@ -755,12 +643,8 @@ mod tests {
             b"x-amz-checksum-sha256: YWJjZGVmZ2g=\r\nx-amz-checksum-crc64nvme: OOJZ0D8xKts=\r\nx-amz-trailer-signature: signature123\r\n";
         let trailers = parse_s3_trailers(trailer_data);
 
-        assert_eq!(trailers.checksum_sha256, Some("YWJjZGVmZ2g=".to_string()));
-        assert_eq!(
-            trailers.checksum_crc64nvme,
-            Some("OOJZ0D8xKts=".to_string())
-        );
+        // Should take the first checksum found (SHA256 in this case)
+        assert_eq!(trailers.checksum_value, Some("YWJjZGVmZ2g=".to_string()));
         assert_eq!(trailers.trailer_signature, Some("signature123".to_string()));
-        assert!(trailers.checksum_crc32.is_none());
     }
 }

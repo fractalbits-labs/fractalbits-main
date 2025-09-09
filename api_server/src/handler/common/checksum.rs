@@ -1,4 +1,3 @@
-use std::convert::{TryFrom, TryInto};
 use std::hash::Hasher;
 
 use crate::handler::common::{s3_error::S3Error, signature::SignatureError, xheader};
@@ -6,10 +5,9 @@ use actix_web::http::header::HeaderMap;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use crc32c::Crc32cHasher as Crc32c;
 use crc32fast::Hasher as Crc32;
-use data_types::hash::Hash;
-use md5::{Digest, Md5};
+use crc64fast_nvme::Digest as Crc64Nvme;
 use serde::{Deserialize, Serialize};
-use sha1::Sha1;
+use sha1::{Digest, Sha1};
 use sha2::Sha256;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Serialize, Deserialize)]
@@ -20,13 +18,6 @@ pub enum ChecksumAlgorithm {
     Sha1,
     Sha256,
 }
-
-pub type Crc32Checksum = [u8; 4];
-pub type Crc32cChecksum = [u8; 4];
-pub type Crc64NvmeChecksum = [u8; 8];
-pub type Md5Checksum = [u8; 16];
-pub type Sha1Checksum = [u8; 20];
-pub type Sha256Checksum = [u8; 32];
 
 #[derive(
     rkyv::Archive,
@@ -62,193 +53,77 @@ impl ChecksumValue {
     }
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct ExpectedChecksums {
-    // base64-encoded md5 (content-md5 header)
-    pub md5: Option<String>,
-    // content_sha256 (as a Hash / FixedBytes32)
-    pub sha256: Option<Hash>,
-    // extra x-amz-checksum-* header
-    pub extra: Option<ChecksumValue>,
-}
-
-#[derive(Default)]
-pub struct Checksummer {
-    pub crc32: Option<Crc32>,
-    pub crc32c: Option<Crc32c>,
-    pub crc64nvme: Option<crc64fast_nvme::Digest>,
-    pub md5: Option<Md5>,
-    pub sha1: Option<Sha1>,
-    pub sha256: Option<Sha256>,
-}
-
-#[derive(Default)]
-pub struct Checksums {
-    pub crc32: Option<Crc32Checksum>,
-    pub crc32c: Option<Crc32cChecksum>,
-    pub crc64nvme: Option<Crc64NvmeChecksum>,
-    pub md5: Option<Md5Checksum>,
-    pub sha1: Option<Sha1Checksum>,
-    pub sha256: Option<Sha256Checksum>,
+pub enum Checksummer {
+    Crc32(Crc32),
+    Crc32c(Crc32c),
+    Crc64Nvme(Crc64Nvme),
+    Sha1(Sha1),
+    Sha256(Sha256),
 }
 
 impl Checksummer {
-    pub fn init(expected: &ExpectedChecksums, add_md5: bool) -> Self {
-        let mut ret = Self::default();
-        ret.add_expected(expected);
-        if add_md5 {
-            ret.add_md5();
-        }
-        ret
-    }
-
-    pub fn add_md5(&mut self) {
-        self.md5 = Some(Md5::new());
-    }
-
-    pub fn add_expected(&mut self, expected: &ExpectedChecksums) {
-        if expected.md5.is_some() {
-            self.md5 = Some(Md5::new());
-        }
-        if expected.sha256.is_some() || matches!(&expected.extra, Some(ChecksumValue::Sha256(_))) {
-            self.sha256 = Some(Sha256::new());
-        }
-        if matches!(&expected.extra, Some(ChecksumValue::Crc32(_))) {
-            self.crc32 = Some(Crc32::new());
-        }
-        if matches!(&expected.extra, Some(ChecksumValue::Crc32c(_))) {
-            self.crc32c = Some(Crc32c::default());
-        }
-        if matches!(&expected.extra, Some(ChecksumValue::Crc64Nvme(_))) {
-            self.crc64nvme = Some(crc64fast_nvme::Digest::new());
-        }
-        if matches!(&expected.extra, Some(ChecksumValue::Sha1(_))) {
-            self.sha1 = Some(Sha1::new());
-        }
-    }
-
-    pub fn add_algo(mut self, algo: Option<ChecksumAlgorithm>) -> Self {
+    pub fn new(algo: ChecksumAlgorithm) -> Self {
         match algo {
-            Some(ChecksumAlgorithm::Crc32) => {
-                self.crc32 = Some(Crc32::new());
-            }
-            Some(ChecksumAlgorithm::Crc32c) => {
-                self.crc32c = Some(Crc32c::default());
-            }
-            Some(ChecksumAlgorithm::Crc64Nvme) => {
-                self.crc64nvme = Some(crc64fast_nvme::Digest::new());
-            }
-            Some(ChecksumAlgorithm::Sha1) => {
-                self.sha1 = Some(Sha1::new());
-            }
-            Some(ChecksumAlgorithm::Sha256) => {
-                self.sha256 = Some(Sha256::new());
-            }
-            None => (),
+            ChecksumAlgorithm::Crc32 => Self::Crc32(Crc32::new()),
+            ChecksumAlgorithm::Crc32c => Self::Crc32c(Crc32c::default()),
+            ChecksumAlgorithm::Crc64Nvme => Self::Crc64Nvme(Crc64Nvme::new()),
+            ChecksumAlgorithm::Sha1 => Self::Sha1(Sha1::new()),
+            ChecksumAlgorithm::Sha256 => Self::Sha256(Sha256::new()),
         }
-        self
     }
 
     pub fn update(&mut self, bytes: &[u8]) {
-        if let Some(crc32) = &mut self.crc32 {
-            crc32.update(bytes);
-        }
-        if let Some(crc32c) = &mut self.crc32c {
-            crc32c.write(bytes);
-        }
-        if let Some(crc64nvme) = &mut self.crc64nvme {
-            crc64nvme.write(bytes);
-        }
-        if let Some(md5) = &mut self.md5 {
-            md5.update(bytes);
-        }
-        if let Some(sha1) = &mut self.sha1 {
-            sha1.update(bytes);
-        }
-        if let Some(sha256) = &mut self.sha256 {
-            sha256.update(bytes);
+        match self {
+            Self::Crc32(hasher) => hasher.update(bytes),
+            Self::Crc32c(hasher) => hasher.write(bytes),
+            Self::Crc64Nvme(hasher) => hasher.write(bytes),
+            Self::Sha1(hasher) => hasher.update(bytes),
+            Self::Sha256(hasher) => hasher.update(bytes),
         }
     }
 
-    pub fn finalize(self) -> Checksums {
-        Checksums {
-            crc32: self.crc32.map(|x| u32::to_be_bytes(x.finalize())),
-            crc32c: self
-                .crc32c
-                .map(|x| u32::to_be_bytes(u32::try_from(x.finish()).unwrap())),
-            crc64nvme: self.crc64nvme.map(|x| u64::to_be_bytes(x.sum64())),
-            md5: self.md5.map(|x| x.finalize()[..].try_into().unwrap()),
-            sha1: self.sha1.map(|x| x.finalize()[..].try_into().unwrap()),
-            sha256: self.sha256.map(|x| x.finalize()[..].try_into().unwrap()),
+    pub fn finalize(self) -> ChecksumValue {
+        match self {
+            Self::Crc32(hasher) => ChecksumValue::Crc32(u32::to_be_bytes(hasher.finalize())),
+            Self::Crc32c(hasher) => {
+                // CRC32C should always fit in u32, but handle gracefully
+                let hash_value = hasher.finish();
+                let truncated = hash_value as u32;
+                ChecksumValue::Crc32c(u32::to_be_bytes(truncated))
+            }
+            Self::Crc64Nvme(hasher) => ChecksumValue::Crc64Nvme(u64::to_be_bytes(hasher.sum64())),
+            Self::Sha1(hasher) => {
+                let digest = hasher.finalize();
+                // SHA1 digest is always 20 bytes
+                let mut result = [0u8; 20];
+                result.copy_from_slice(&digest[..20]);
+                ChecksumValue::Sha1(result)
+            }
+            Self::Sha256(hasher) => {
+                let digest = hasher.finalize();
+                // SHA256 digest is always 32 bytes
+                let mut result = [0u8; 32];
+                result.copy_from_slice(&digest[..32]);
+                ChecksumValue::Sha256(result)
+            }
         }
     }
 }
 
-impl Checksums {
-    pub fn verify(&self, expected: &ExpectedChecksums) -> Result<(), SignatureError> {
-        if let Some(expected_md5) = &expected.md5 {
-            match self.md5 {
-                Some(md5) if BASE64_STANDARD.encode(md5) == expected_md5.trim_matches('"') => (),
-                _ => {
-                    return Err(SignatureError::InvalidDigest(
-                        "MD5 checksum verification failed (from content-md5)".into(),
-                    ));
-                }
-            }
+pub fn verify_checksum(
+    calculated: Option<ChecksumValue>,
+    expected: Option<ChecksumValue>,
+) -> Result<(), SignatureError> {
+    if let Some(expected_checksum) = expected {
+        match calculated {
+            Some(calc) if calc == expected_checksum => Ok(()),
+            _ => Err(SignatureError::InvalidDigest(format!(
+                "Failed to validate checksum for algorithm {:?}",
+                expected_checksum.algorithm()
+            ))),
         }
-        if let Some(expected_sha256) = &expected.sha256 {
-            match self.sha256 {
-                Some(sha256) if &sha256[..] == expected_sha256.as_slice() => (),
-                _ => {
-                    return Err(SignatureError::InvalidDigest(
-                        "SHA256 checksum verification failed (from x-amz-content-sha256)".into(),
-                    ));
-                }
-            }
-        }
-        if let Some(extra) = expected.extra {
-            let algo = extra.algorithm();
-            if self.extract(Some(algo)) != Some(extra) {
-                return Err(SignatureError::InvalidDigest(format!(
-                    "Failed to validate checksum for algorithm {algo:?}"
-                )));
-            }
-        }
+    } else {
         Ok(())
-    }
-
-    pub fn extract(&self, algo: Option<ChecksumAlgorithm>) -> Option<ChecksumValue> {
-        match algo {
-            None => None,
-            Some(ChecksumAlgorithm::Crc32) => Some(ChecksumValue::Crc32(self.crc32.unwrap())),
-            Some(ChecksumAlgorithm::Crc32c) => Some(ChecksumValue::Crc32c(self.crc32c.unwrap())),
-            Some(ChecksumAlgorithm::Crc64Nvme) => {
-                Some(ChecksumValue::Crc64Nvme(self.crc64nvme.unwrap()))
-            }
-            Some(ChecksumAlgorithm::Sha1) => Some(ChecksumValue::Sha1(self.sha1.unwrap())),
-            Some(ChecksumAlgorithm::Sha256) => Some(ChecksumValue::Sha256(self.sha256.unwrap())),
-        }
-    }
-}
-
-pub fn parse_checksum_algorithm(algo: &str) -> Result<ChecksumAlgorithm, SignatureError> {
-    match algo {
-        "CRC32" => Ok(ChecksumAlgorithm::Crc32),
-        "CRC32C" => Ok(ChecksumAlgorithm::Crc32c),
-        "CRC64NVME" => Ok(ChecksumAlgorithm::Crc64Nvme),
-        "SHA1" => Ok(ChecksumAlgorithm::Sha1),
-        "SHA256" => Ok(ChecksumAlgorithm::Sha256),
-        _ => Err(SignatureError::Other("invalid checksum algorithm".into())),
-    }
-}
-
-/// Extract the value of the x-amz-checksum-algorithm header
-pub fn request_checksum_algorithm(
-    headers: &HeaderMap,
-) -> Result<Option<ChecksumAlgorithm>, SignatureError> {
-    match headers.get(xheader::X_AMZ_CHECKSUM_ALGORITHM.as_str()) {
-        None => Ok(None),
-        Some(x) => parse_checksum_algorithm(x.to_str()?).map(Some),
     }
 }
 

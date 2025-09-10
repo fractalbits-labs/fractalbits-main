@@ -362,7 +362,7 @@ fn all_services(data_blob_storage: DataBlobStorage) -> Vec<ServiceName> {
 }
 
 fn get_data_blob_storage_setting() -> DataBlobStorage {
-    if run_cmd!(grep -q multi_az etc/api_server.service).is_ok() {
+    if run_cmd!(grep -q multi_az data/etc/api_server.service).is_ok() {
         DataBlobStorage::S3ExpressMultiAz
     } else {
         DataBlobStorage::S3HybridSingleAz
@@ -480,13 +480,13 @@ fn start_all_services() -> CmdResult {
     info!("Starting supporting services (ddb_local, minio instances)");
     start_service(ServiceName::DdbLocal)?;
     start_service(ServiceName::Minio)?; // Original minio for NSS metadata (port 9000)
-    if run_cmd!(grep -q multi_az etc/api_server.service).is_ok() {
+    if run_cmd!(grep -q multi_az data/etc/api_server.service).is_ok() {
         start_service(ServiceName::MinioAz1)?; // Local AZ data blobs (port 9001)
         start_service(ServiceName::MinioAz2)?; // Remote AZ data blobs (port 9002)
     }
 
     // Start all main services - systemd dependencies will handle ordering
-    if run_cmd!(grep -q single_az etc/api_server.service).is_ok() {
+    if run_cmd!(grep -q single_az data/etc/api_server.service).is_ok() {
         info!("Starting single_az services");
         start_service(ServiceName::Rss)?;
         start_service(ServiceName::Bss0)?;
@@ -763,10 +763,10 @@ WantedBy=multi-user.target
 
     run_cmd! {
         mkdir -p $pwd/data/logs;
-        mkdir -p etc;
-        echo $systemd_unit_content > etc/$service_file;
-        info "Linking ./etc/$service_file into ~/.config/systemd/user";
-        systemctl --user link ./etc/$service_file --force --quiet;
+        mkdir -p data/etc;
+        echo $systemd_unit_content > data/etc/$service_file;
+        info "Linking ./data/etc/$service_file into ~/.config/systemd/user";
+        systemctl --user link ./data/etc/$service_file --force --quiet;
     }?;
     Ok(())
 }
@@ -925,7 +925,7 @@ fn generate_https_certificates() -> CmdResult {
     info!("Generating HTTPS certificates for local development");
 
     // Check if certificates already exist
-    if run_cmd!(test -f etc/cert.pem).is_ok() && run_cmd!(test -f etc/key.pem).is_ok() {
+    if run_cmd!(test -f data/etc/cert.pem).is_ok() && run_cmd!(test -f data/etc/key.pem).is_ok() {
         info!("Certificates already exist, skipping generation");
         return Ok(());
     }
@@ -933,12 +933,12 @@ fn generate_https_certificates() -> CmdResult {
     run_cmd! {
         info "Running mkcert for trusted local certificates...";
         mkcert -install;
-        mkdir -p etc;
-        mkcert -key-file etc/key.pem -cert-file etc/cert.pem 127.0.0.1 localhost;
+        mkdir -p data/etc;
+        mkcert -key-file data/etc/key.pem -cert-file data/etc/cert.pem 127.0.0.1 localhost;
     }?;
 
     info!("HTTPS certificates generated successfully with mkcert:");
-    info!("  Certificate: etc/cert.pem (trusted by system)");
-    info!("  Private key: etc/key.pem (unencrypted)");
+    info!("  Certificate: data/etc/cert.pem (trusted by system)");
+    info!("  Private key: data/etc/key.pem (unencrypted)");
     Ok(())
 }

@@ -84,8 +84,8 @@ impl Default for HttpsConfig {
         Self {
             enabled: true,
             port: 8443,
-            cert_file: "etc/cert.pem".to_string(),
-            key_file: "etc/key.pem".to_string(),
+            cert_file: "data/etc/cert.pem".to_string(),
+            key_file: "data/etc/key.pem".to_string(),
             force_http1_only: false,
         }
     }

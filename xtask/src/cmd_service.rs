@@ -604,6 +604,7 @@ Environment="RUST_LOG=warn""##
             }
         }
     };
+    let minio_bin = run_fun!(bash -c "command -v minio")?;
     let exec_start = match service {
         ServiceName::Bss0 => {
             env_settings += r##"
@@ -706,20 +707,19 @@ Environment="GUI_WEB_ROOT=ui/dist""##;
             env_settings = r##"
 Environment="MINIO_REGION=localdev""##
                 .to_string();
-            "/home/linuxbrew/.linuxbrew/opt/minio/bin/minio server --address :9000 data/s3/"
-                .to_string()
+            format!("{minio_bin} server --address :9000 data/s3/")
         }
         ServiceName::MinioAz1 => {
             env_settings = r##"
 Environment="MINIO_REGION=localdev""##
                 .to_string();
-            "/home/linuxbrew/.linuxbrew/opt/minio/bin/minio server --address :9001 data/s3-localdev-az1/".to_string()
+            format!("{minio_bin} server --address :9001 data/s3-localdev-az1/")
         }
         ServiceName::MinioAz2 => {
             env_settings = r##"
 Environment="MINIO_REGION=localdev""##
                 .to_string();
-            "/home/linuxbrew/.linuxbrew/opt/minio/bin/minio server --address :9002 data/s3-localdev-az2/".to_string()
+            format!("{minio_bin} server --address :9002 data/s3-localdev-az2/")
         }
         _ => unreachable!(),
     };

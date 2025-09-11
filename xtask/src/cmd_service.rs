@@ -749,6 +749,7 @@ LimitNOFILE=1000000
 LimitCORE=infinity
 WorkingDirectory={working_dir}{env_settings}
 ExecStart={exec_start}
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target

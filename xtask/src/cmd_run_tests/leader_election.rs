@@ -43,6 +43,12 @@ pub async fn run_leader_election_tests() -> CmdResult {
         return Err(e);
     }
 
+    println!("{}", "=== Test 5: Manual Leadership Resignation ===".bold());
+    if let Err(e) = test_manual_leadership_resignation().await {
+        eprintln!("{}: {}", "Test 5 FAILED".red().bold(), e);
+        return Err(e);
+    }
+
     println!(
         "{}",
         "=== All Leader Election Tests PASSED ===".green().bold()
@@ -80,6 +86,19 @@ impl TestProcessTracker {
             let _ = run_cmd!(kill $pid);
             // Wait a moment for graceful shutdown
             std::thread::sleep(std::time::Duration::from_secs(2));
+            // Force kill if still running
+            let _ = run_cmd!(kill -9 $pid);
+        }
+        Ok(())
+    }
+
+    fn graceful_kill_process(&mut self, instance_id: &str) -> CmdResult {
+        if let Some(pid) = self.process_pids.remove(instance_id) {
+            info!("Gracefully terminating process {instance_id} with PID {pid}");
+            // Send SIGTERM and wait longer for resignation
+            let _ = run_cmd!(kill -TERM $pid);
+            // Wait longer for graceful shutdown and resignation
+            std::thread::sleep(std::time::Duration::from_secs(8));
             // Force kill if still running
             let _ = run_cmd!(kill -9 $pid);
         }
@@ -523,5 +542,108 @@ fn start_test_root_server_instance(
 
 pub fn cleanup_test_root_server_instances() -> CmdResult {
     run_cmd!(ignore pkill root_server)?;
+    Ok(())
+}
+
+async fn test_manual_leadership_resignation() -> CmdResult {
+    let mut process_tracker = TestProcessTracker::new();
+
+    // Clean up any existing test instances first
+    cleanup_test_root_server_instances()?;
+
+    // DDB local should already be started by the test runner
+    sleep(Duration::from_secs(2)).await;
+
+    let table_name = get_test_table_name("manual_resignation");
+    let client = setup_test_table(&table_name).await;
+
+    // Start first instance
+    start_test_instance(
+        "resignation-instance-1",
+        28091,
+        38091,
+        18092,
+        &table_name,
+        &mut process_tracker,
+    )?;
+
+    // Wait for first instance to become leader
+    println!("Waiting for first instance to become leader...");
+    sleep(Duration::from_secs(15)).await;
+
+    let initial_leader = get_current_leader(&client, &table_name).await;
+    assert_eq!(
+        initial_leader,
+        Some("resignation-instance-1".to_string()),
+        "First instance should become leader"
+    );
+    println!("SUCCESS: First instance became leader");
+
+    // Start second instance (but it won't become leader while first is active)
+    start_test_instance(
+        "resignation-instance-2",
+        28092,
+        38092,
+        18093,
+        &table_name,
+        &mut process_tracker,
+    )?;
+
+    // Wait a moment for second instance to start
+    sleep(Duration::from_secs(5)).await;
+
+    // Leader should still be the first instance
+    let still_first_leader = get_current_leader(&client, &table_name).await;
+    assert_eq!(
+        still_first_leader,
+        Some("resignation-instance-1".to_string()),
+        "First instance should still be leader with second instance running"
+    );
+    println!("SUCCESS: First instance maintained leadership with second instance running");
+
+    // Manually resign leadership by sending SIGTERM to first instance
+    // This should trigger the signal handler we added
+    println!("Sending SIGTERM to first instance to trigger resignation...");
+    process_tracker.graceful_kill_process("resignation-instance-1")?;
+
+    // Wait a short time for resignation to take effect and second instance to acquire leadership
+    // The resignation should be immediate, so we don't need to wait for lease expiration
+    sleep(Duration::from_secs(5)).await;
+
+    // Second instance should now be leader (resignation should enable immediate takeover)
+    let final_leader = get_current_leader(&client, &table_name).await;
+    println!("Final leader after resignation: {:?}", final_leader);
+
+    // Note: We expect either the second instance to be leader, or no leader (if the second instance
+    // hasn't acquired leadership yet). The key test is that it's NOT the first instance anymore.
+    if let Some(ref leader) = final_leader {
+        assert_ne!(
+            leader, "resignation-instance-1",
+            "First instance should not be leader after resignation"
+        );
+
+        // If there's a leader, it should be the second instance
+        if leader == "resignation-instance-2" {
+            println!("SUCCESS: Second instance successfully acquired leadership after resignation");
+        }
+    } else {
+        println!("SUCCESS: No leader in DDB (leadership record was successfully deleted)");
+
+        // Wait a bit more for second instance to acquire leadership
+        sleep(Duration::from_secs(10)).await;
+        let eventual_leader = get_current_leader(&client, &table_name).await;
+        assert_eq!(
+            eventual_leader,
+            Some("resignation-instance-2".to_string()),
+            "Second instance should eventually become leader after resignation cleanup"
+        );
+        println!("SUCCESS: Second instance eventually became leader");
+    }
+
+    // Clean up all remaining processes
+    process_tracker.kill_all()?;
+    cleanup_test_table(&client, &table_name).await;
+
+    println!("SUCCESS: Manual leadership resignation test completed!");
     Ok(())
 }

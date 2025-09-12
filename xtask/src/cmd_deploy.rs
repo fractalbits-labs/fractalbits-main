@@ -44,10 +44,19 @@ pub fn run_cmd_deploy(
     };
     let arch = if target_arm { "aarch64" } else { "x86_64" };
 
+    run_cmd!(mkdir -p data/deploy/$arch)?;
+    if bss_use_i3 && arch != "x86_64" {
+        run_cmd!(mkdir -p data/deploy/x86_64)?;
+    }
     if deploy_mode == DeployMode::Bootstrap {
         // Build fractalbits-bootstrap binary only, in debug mode
         build_bootstrap_only(rust_build_target)?;
-        run_cmd!(aws s3 cp target/$rust_build_target/debug/fractalbits-bootstrap $bucket/$arch/fractalbits-bootstrap)?;
+        run_cmd! {
+            cp target/$rust_build_target/debug/fractalbits-bootstrap
+                data/deploy/$arch/fractalbits-bootstrap;
+            info "Syncing fractalbits-bootstrap to S3";
+            aws s3 sync data/deploy $bucket;
+        }?;
         return Ok(());
     }
 
@@ -107,8 +116,8 @@ pub fn run_cmd_deploy(
             }?;
         }
 
-        // Upload Rust binaries
-        info!("Uploading Rust-built binaries");
+        // Copy Rust binaries to local deploy directory
+        info!("Copying Rust-built binaries to data/deploy");
         let rust_bins = [
             "api_server",
             "root_server",
@@ -120,13 +129,13 @@ pub fn run_cmd_deploy(
         ];
         let build_dir = if release_mode { "release" } else { "debug" };
         for bin in &rust_bins {
-            run_cmd!(aws s3 cp target/$rust_build_target/$build_dir/$bin $bucket/$arch/$bin)?;
+            run_cmd!(cp target/$rust_build_target/$build_dir/$bin data/deploy/$arch/$bin)?;
         }
 
-        // Upload additional x86_64 binaries if bss_use_i3
+        // Copy additional x86_64 binaries if bss_use_i3
         if bss_use_i3 {
-            run_cmd!(aws s3 cp target/x86_64-unknown-linux-gnu/$build_dir/fractalbits-bootstrap $bucket/x86_64/fractalbits-bootstrap)?;
-            run_cmd!(aws s3 cp target/x86_64-unknown-linux-gnu/$build_dir/rewrk_rpc $bucket/x86_64/rewrk_rpc)?;
+            run_cmd!(cp target/x86_64-unknown-linux-gnu/$build_dir/fractalbits-bootstrap data/deploy/x86_64/fractalbits-bootstrap)?;
+            run_cmd!(cp target/x86_64-unknown-linux-gnu/$build_dir/rewrk_rpc data/deploy/x86_64/rewrk_rpc)?;
         }
     }
 
@@ -156,8 +165,8 @@ pub fn run_cmd_deploy(
             }?;
         }
 
-        // Upload Zig binaries
-        info!("Uploading Zig-built binaries");
+        // Copy Zig binaries to local deploy directory
+        info!("Copying Zig-built binaries to data/deploy");
         let zig_bins = [
             "nss_server",
             "mirrord",
@@ -165,22 +174,22 @@ pub fn run_cmd_deploy(
             "s3_blob_client",
         ];
         for bin in &zig_bins {
-            run_cmd!(aws s3 cp zig-out/bin/$bin $bucket/$arch/$bin)?;
+            run_cmd!(cp zig-out/bin/$bin data/deploy/$arch/$bin)?;
         }
 
-        // Upload bss_server
+        // Copy bss_server
         if bss_use_i3 {
-            run_cmd!(aws s3 cp zig-out/bin/bss_server $bucket/x86_64/bss_server)?;
+            run_cmd!(cp zig-out/bin/bss_server data/deploy/x86_64/bss_server)?;
         } else {
-            run_cmd!(aws s3 cp zig-out/bin/bss_server $bucket/$arch/bss_server)?;
+            run_cmd!(cp zig-out/bin/bss_server data/deploy/$arch/bss_server)?;
         }
     }
 
-    // Build and upload UI if mode is ui or all
+    // Build and copy UI if mode is ui or all
     if deploy_mode == DeployMode::Ui || deploy_mode == DeployMode::All {
         let region = run_fun!(aws configure list | grep region | awk r"{print $2}")?;
         cmd_build::build_ui(&region)?;
-        run_cmd!(aws s3 cp ui/dist $bucket/ui --recursive)?;
+        run_cmd!(cp -r ui/dist data/deploy/ui)?;
     }
 
     // Deploy warp binary
@@ -188,14 +197,19 @@ pub fn run_cmd_deploy(
         deploy_warp_binary(target_arm)?;
     }
 
+    // Sync all binaries to S3 at once
+    run_cmd! {
+        info "Syncing all binaries to S3";
+        aws s3 sync data/deploy $bucket;
+        info "Syncing all binaries done";
+    }?;
+
     Ok(())
 }
 
 fn deploy_warp_binary(target_arm: bool) -> CmdResult {
     let arch = if target_arm { "aarch64" } else { "x86_64" };
     let linux_arch = if target_arm { "arm64" } else { "x86_64" };
-    let bucket_name = get_build_bucket_name()?;
-    let bucket = format!("s3://{bucket_name}");
 
     let warp_version = "v1.3.0";
     let warp_file = format!("warp_Linux_{linux_arch}.tar.gz");
@@ -216,12 +230,10 @@ fn deploy_warp_binary(target_arm: bool) -> CmdResult {
         info "Verifying warp binary checksum";
         curl -sL -o warp_checksums.txt $checksums_url;
         grep $warp_file warp_checksums.txt | sha256sum -c --quiet;
-
-        info "Extracting and uploading warp binary";
-        tar -xzf $warp_file warp;
-        aws s3 cp warp $bucket/$arch/warp;
         rm -f warp_checksums.txt;
-        rm -f warp;
+
+        info "Extracting warp binary directly to data/deploy";
+        tar -xzf $warp_file -C ../data/deploy/$arch warp;
     }?;
 
     Ok(())

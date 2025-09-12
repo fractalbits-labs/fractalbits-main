@@ -5,5 +5,4 @@ xtask = "run --manifest-path ./xtask/Cargo.toml --"
 rustflags = ["--cfg", "tokio_unstable"]
 
 [profile.release]
-debug = true
-lto = true
+debug = false

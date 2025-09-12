@@ -16,6 +16,7 @@ import {
   createVpcEndpoints,
   createPrivateLinkNlb,
   addAsgDynamoDbDeregistrationLifecycleHook,
+  getAzNameFromIdAtBuildTime,
 } from "./ec2-utils";
 
 export interface FractalbitsVpcStackProps extends cdk.StackProps {
@@ -39,32 +40,6 @@ export class FractalbitsVpcStack extends cdk.Stack {
 
     // === VPC Configuration ===
     const azPair = props.azPair.split(",");
-
-    // Helper function to dynamically resolve AZ IDs to AZ names at build time
-    const getAzNameFromIdAtBuildTime = (azId: string): string => {
-      try {
-        const region =
-          this.region ||
-          process.env.AWS_REGION ||
-          process.env.AWS_DEFAULT_REGION ||
-          "us-west-2";
-        const result = execSync(
-          `aws ec2 describe-availability-zones --region ${region} --zone-ids ${azId} --query 'AvailabilityZones[0].ZoneName' --output text`,
-          { encoding: "utf-8" },
-        ).trim();
-
-        if (!result || result === "None") {
-          throw new Error(`Could not find AZ name for zone ID: ${azId}`);
-        }
-
-        console.log(`Resolved AZ ID ${azId} to AZ name ${result}`);
-        return result;
-      } catch (error) {
-        console.error(`Failed to resolve AZ ID ${azId}: ${error}`);
-        throw error;
-      }
-    };
-
     // Resolve AZ IDs to actual AZ names
     const az1 = getAzNameFromIdAtBuildTime(azPair[0]);
     // Only resolve second AZ for multi-AZ mode
@@ -317,8 +292,8 @@ export class FractalbitsVpcStack extends cdk.Stack {
         ec2Role,
         props.bssInstanceTypes.split(","),
         bssBootstrapOptions,
-        1,
-        1,
+        6,
+        6,
       );
       // Add lifecycle hook for bss_server ASG
       addAsgDynamoDbDeregistrationLifecycleHook(

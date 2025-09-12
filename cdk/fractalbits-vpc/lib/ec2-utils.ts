@@ -29,7 +29,6 @@ export const getAzNameFromIdAtBuildTime = (
     if (!result || result === "None") {
       throw new Error(`Could not find AZ name for zone ID: ${azId}`);
     }
-    console.log(`Resolved AZ ID ${azId} to AZ name ${result}`);
     return result;
   } catch (error) {
     console.error(`Error resolving AZ ID ${azId}:`, error);

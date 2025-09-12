@@ -44,6 +44,11 @@ pub fn bootstrap(
         // Initialize NSS role states in DynamoDB
         initialize_nss_roles_in_ddb(nss_a_id, nss_b_id)?;
 
+        // Initialize BSS volume group configurations in DynamoDB (only for single-AZ mode)
+        if remote_az.is_none() {
+            initialize_bss_volume_groups_in_ddb()?;
+        }
+
         // Format nss-B first if it exists, then nss-A
         if let (Some(nss_b_id), Some(volume_b_id)) = (nss_b_id, volume_b_id) {
             info!("Formatting NSS instance {nss_b_id} (standby) with volume {volume_b_id}");
@@ -119,6 +124,198 @@ fn initialize_nss_roles_in_ddb(nss_a_id: &str, nss_b_id: Option<&str>) -> CmdRes
 
     info!("NSS roles initialized in service-discovery table");
     Ok(())
+}
+
+fn initialize_bss_volume_groups_in_ddb() -> CmdResult {
+    const DDB_SERVICE_DISCOVERY_TABLE: &str = "fractalbits-service-discovery";
+    const TOTAL_BSS_NODES: usize = 6;
+    const NODES_PER_DATA_VOLUME: usize = 3;
+
+    let region = get_current_aws_region()?;
+
+    info!("Waiting for all BSS nodes to register in service discovery...");
+
+    // Wait for all BSS nodes to register
+    wait_for_all_bss_nodes(&region, TOTAL_BSS_NODES)?;
+
+    // Now retrieve all BSS addresses
+    let bss_instances = get_all_bss_addresses(&region)?;
+
+    // Sort by instance ID to ensure consistent ordering
+    let mut sorted_instances: Vec<_> = bss_instances.into_iter().collect();
+    sorted_instances.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Map to bss0, bss1, etc. based on sorted order
+    let mut bss_addresses = Vec::new();
+    for (i, (_instance_id, address)) in sorted_instances.iter().enumerate() {
+        let bss_id = format!("bss{}", i);
+        info!("Found {} at {}", bss_id, address);
+        bss_addresses.push((bss_id, address.clone()));
+    }
+
+    info!("All BSS nodes registered. Initializing volume group configurations...");
+
+    // Build BSS data volume group configuration dynamically
+    let num_data_volumes = TOTAL_BSS_NODES / NODES_PER_DATA_VOLUME;
+
+    let mut data_volumes = Vec::new();
+    for vol_id in 0..num_data_volumes {
+        let start_idx = vol_id * NODES_PER_DATA_VOLUME;
+        let end_idx = start_idx + NODES_PER_DATA_VOLUME;
+
+        let nodes: Vec<String> = (start_idx..end_idx)
+            .map(|i| {
+                format!(
+                    r#"{{"node_id": "{}", "address": "{}:8088"}}"#,
+                    bss_addresses[i].0, bss_addresses[i].1
+                )
+            })
+            .collect();
+
+        data_volumes.push(format!(
+            r#"{{
+                "volume_id": {},
+                "bss_nodes": [{}]
+            }}"#,
+            vol_id,
+            nodes.join(",")
+        ));
+    }
+
+    let bss_data_vg_config_json = format!(
+        r#"{{
+        "volumes": [{}],
+        "quorum": {{
+            "n": 3,
+            "r": 2,
+            "w": 2
+        }}
+    }}"#,
+        data_volumes.join(",")
+    );
+
+    let bss_data_vg_config_item = format!(
+        r#"{{"service_id":{{"S":"bss_data_vg_config"}},"value":{{"S":"{}"}}}}"#,
+        bss_data_vg_config_json
+            .replace('"', r#"\""#)
+            .replace(['\n', ' '], "")
+    );
+
+    run_cmd! {
+        aws dynamodb put-item
+            --table-name $DDB_SERVICE_DISCOVERY_TABLE
+            --item $bss_data_vg_config_item
+            --region $region
+    }?;
+
+    // Initialize BSS metadata volume group configuration
+    // For metadata, all nodes are in a single volume
+    let metadata_nodes: Vec<String> = bss_addresses
+        .iter()
+        .map(|(node_id, address)| {
+            format!(
+                r#"{{"node_id": "{}", "address": "{}:8088"}}"#,
+                node_id, address
+            )
+        })
+        .collect();
+
+    // Metadata volume contains all nodes but still uses same quorum settings
+    let bss_metadata_vg_config_json = format!(
+        r#"{{
+        "volumes": [
+            {{
+                "volume_id": 0,
+                "bss_nodes": [{}]
+            }}
+        ],
+        "quorum": {{
+            "n": 3,
+            "r": 2,
+            "w": 2
+        }}
+    }}"#,
+        metadata_nodes.join(",")
+    );
+
+    let bss_metadata_vg_config_item = format!(
+        r#"{{"service_id":{{"S":"metadata-vg"}},"value":{{"S":"{}"}}}}"#,
+        bss_metadata_vg_config_json
+            .replace('"', r#"\""#)
+            .replace(['\n', ' '], "")
+    );
+
+    run_cmd! {
+        aws dynamodb put-item
+            --table-name $DDB_SERVICE_DISCOVERY_TABLE
+            --item $bss_metadata_vg_config_item
+            --region $region
+    }?;
+
+    info!("BSS volume group configurations initialized in service-discovery table");
+    Ok(())
+}
+
+fn wait_for_all_bss_nodes(region: &str, expected_count: usize) -> CmdResult {
+    const DDB_SERVICE_DISCOVERY_TABLE: &str = "fractalbits-service-discovery";
+    let mut attempt = 0;
+
+    loop {
+        attempt += 1;
+
+        // Query the service discovery table to check how many BSS nodes are registered
+        let result = run_fun! {
+            aws dynamodb get-item
+                --table-name $DDB_SERVICE_DISCOVERY_TABLE
+                --key "{\"service_id\": {\"S\": \"bss-server\"}}"
+                --region $region
+                2>/dev/null | jq -r ".Item.instances.M | length // 0"
+        };
+
+        match result {
+            Ok(ref count_str) => {
+                let count: usize = count_str.trim().parse().unwrap_or(0);
+                info!("BSS nodes registered: {}/{}", count, expected_count);
+
+                if count >= expected_count {
+                    info!("All {} BSS nodes have registered", expected_count);
+                    return Ok(());
+                }
+            }
+            Err(_) => {
+                info!("No BSS nodes registered yet");
+            }
+        }
+
+        if attempt >= MAX_POLL_ATTEMPTS {
+            cmd_die!("Timed out waiting for all BSS nodes to register in service discovery");
+        }
+
+        std::thread::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECONDS));
+    }
+}
+
+fn get_all_bss_addresses(
+    region: &str,
+) -> Result<std::collections::HashMap<String, String>, std::io::Error> {
+    const DDB_SERVICE_DISCOVERY_TABLE: &str = "fractalbits-service-discovery";
+
+    let result = run_fun! {
+        aws dynamodb get-item
+            --table-name $DDB_SERVICE_DISCOVERY_TABLE
+            --key "{\"service_id\": {\"S\": \"bss-server\"}}"
+            --region $region
+            2>/dev/null | jq -r ".Item.instances.M | to_entries | map(\"\\(.key)=\\(.value.S)\") | .[]"
+    }?;
+
+    let mut addresses = std::collections::HashMap::new();
+    for line in result.lines() {
+        if let Some((instance_id, address)) = line.split_once('=') {
+            addresses.insert(instance_id.to_string(), address.to_string());
+        }
+    }
+
+    Ok(addresses)
 }
 
 fn initialize_az_status_in_ddb(remote_az: &str) -> CmdResult {

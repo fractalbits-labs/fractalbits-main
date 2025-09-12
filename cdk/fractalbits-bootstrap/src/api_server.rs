@@ -9,11 +9,9 @@ pub fn bootstrap(
 ) -> CmdResult {
     download_binaries(&["api_server"])?;
 
-    // Check if we're using S3 Express by checking if remote_az is provided
-    let is_s3_express = remote_az.is_some();
-
-    let bss_ip = if is_s3_express {
-        info!("Using S3 Express One Zone storage, skipping BSS server");
+    let is_multi_az = remote_az.is_some();
+    let bss_ip = if remote_az.is_some() {
+        info!("Using S3 Express multi-az setup, skipping BSS server");
         String::new()
     } else {
         info!("Waiting for bss");
@@ -32,8 +30,8 @@ pub fn bootstrap(
         bss_ip
     };
 
-    // For S3 Express, only wait for RSS and NSS
-    if is_s3_express {
+    // For S3 Express multi-az setup, only wait for RSS and NSS
+    if is_multi_az {
         for (role, ip) in [("rss", rss_endpoint), ("nss", nss_endpoint)] {
             info!("Waiting for {role} node {ip} to be ready");
             while run_cmd!(nc -z $ip 8088 &>/dev/null).is_err() {

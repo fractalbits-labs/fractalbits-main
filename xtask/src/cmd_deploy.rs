@@ -215,16 +215,16 @@ fn deploy_warp_binary(target_arm: bool) -> CmdResult {
         }?;
     }
     run_cmd! {
-        info "Verifying warp binary checksum";
-        curl -sL -o third_party/warp_checksums.txt $checksums_url;
         cd third_party;
-        grep $warp_file warp_checksums.txt | sha256sum -c;
+        info "Verifying warp binary checksum";
+        curl -sL -o warp_checksums.txt $checksums_url;
+        grep $warp_file warp_checksums.txt | sha256sum -c --quiet;
 
         info "Extracting and uploading warp binary";
-        tar -xzf $warp_path -C third_party/ warp;
-        aws s3 cp third_party/warp $bucket/$arch/warp;
-        rm third_party/warp_checksums.txt;
-        rm third_party/warp;
+        tar -xzf $warp_file warp;
+        aws s3 cp warp $bucket/$arch/warp;
+        rm -f warp_checksums.txt;
+        rm -f warp;
     }?;
 
     Ok(())

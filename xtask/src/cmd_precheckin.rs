@@ -35,7 +35,8 @@ pub fn run_cmd_precheckin(
     }?;
     run_cmd! {
         info "Running zig unit tests";
-        zig build test --summary all 2>&1;
+        cd ./core;
+        zig build -p ../zig-out test --summary all 2>&1;
     }?;
 
     run_s3_api_tests(false, data_blob_storage)?;
@@ -119,7 +120,8 @@ fn run_zig_unit_tests(data_blob_storage: DataBlobStorage) -> CmdResult {
 
     run_cmd! {
         info "Running zig unit tests";
-        zig build test --summary all 2>&1;
+        cd ./core;
+        zig build -p ../zig-out test --summary all 2>&1;
     }?;
 
     info!("Zig unit tests completed successfully");

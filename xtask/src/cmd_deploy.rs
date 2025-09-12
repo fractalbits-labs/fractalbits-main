@@ -127,7 +127,8 @@ pub fn run_cmd_deploy(
     if deploy_mode == DeployMode::Zig || deploy_mode == DeployMode::All {
         run_cmd! {
             info "Building Zig projects";
-            zig build
+            cd ./core;
+            zig build -p ../zig-out
                 -Duse_s3_backend=$use_s3_backend
                 -Denable_dev_mode=$enable_dev_mode
                 -Dbuild_info=$build_info
@@ -139,7 +140,8 @@ pub fn run_cmd_deploy(
             let zig_build_target = ["-Dtarget=x86_64-linux-gnu", &format!("-Dcpu={target_cpu}")];
             run_cmd! {
                 info "Building bss_server for x86_64";
-                zig build
+                cd ./core;
+                zig build -p ../zig-out
                     -Duse_s3_backend=$use_s3_backend
                     -Denable_dev_mode=$enable_dev_mode
                     -Dbuild_info=$build_info

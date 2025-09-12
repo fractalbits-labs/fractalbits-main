@@ -96,7 +96,6 @@
             echo "Available commands:"
             echo "  cargo xtask build    - Build the project"
             echo "  cargo xtask service  - Manage services"
-            echo "  zig build           - Build Zig components"
             echo ""
             echo "Nix environment ready!"
           '';

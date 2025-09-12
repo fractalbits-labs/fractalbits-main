@@ -3,7 +3,8 @@ use crate::*;
 pub fn run_cmd_nightly() -> CmdResult {
     run_cmd! {
         info "Building ...";
-        zig build 2>&1;
+        cd ./core;
+        zig build -p ../zig-out 2>&1;
     }?;
 
     let nightly_log = "test_art_nightly.log";

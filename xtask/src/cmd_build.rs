@@ -56,7 +56,8 @@ pub fn build_zig_servers(mode: BuildMode) -> CmdResult {
     };
     run_cmd! {
         info "Building zig-based servers ...";
-        zig build -Dbuild_info=$build_info $opts 2>&1;
+        cd ./core;
+        zig build -p ../zig-out -Dbuild_info=$build_info $opts 2>&1;
         info "Building bss and nss server done";
     }
 }

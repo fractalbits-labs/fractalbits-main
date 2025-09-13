@@ -19,4 +19,4 @@ jobs:
       with:
         version: 0.13.0
     - name: Build
-      run: zig build && cargo build
+      run: cargo xtask build

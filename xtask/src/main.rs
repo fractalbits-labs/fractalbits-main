@@ -116,23 +116,21 @@ enum Cmd {
 #[clap(rename_all = "snake_case")]
 pub enum BuildCommand {
     #[clap(about = "Build all components")]
-    All {
-        #[clap(long, long_help = "release build or not")]
-        release: bool,
-    },
+    All,
     #[clap(about = "Build only zig components")]
     Zig {
-        #[clap(long, long_help = "release build or not")]
-        release: bool,
-
-        #[clap(long, long_help = "run zig unit tests")]
-        test: bool,
+        #[clap(subcommand)]
+        command: Option<ZigCommand>,
     },
     #[clap(about = "Build only rust components")]
-    Rust {
-        #[clap(long, long_help = "release build or not")]
-        release: bool,
-    },
+    Rust,
+}
+
+#[derive(Parser, Clone)]
+#[clap(rename_all = "snake_case")]
+pub enum ZigCommand {
+    #[clap(about = "Run zig unit tests")]
+    Test,
 }
 
 #[derive(Clone, AsRefStr, EnumString, clap::ValueEnum)]
@@ -300,16 +298,15 @@ async fn main() -> CmdResult {
     match Cmd::parse() {
         Cmd::Build { command, release } => match command {
             Some(build_cmd) => match build_cmd {
-                BuildCommand::All { release } => cmd_build::build_all(release)?,
-                BuildCommand::Zig { release, test } => {
-                    if test {
-                        cmd_build::run_zig_unit_tests()?;
-                    } else {
+                BuildCommand::All => cmd_build::build_all(release)?,
+                BuildCommand::Zig { command } => match command {
+                    Some(ZigCommand::Test) => cmd_build::run_zig_unit_tests()?,
+                    None => {
                         let build_mode = cmd_build::build_mode(release);
                         cmd_build::build_zig_servers(build_mode)?;
                     }
-                }
-                BuildCommand::Rust { release } => {
+                },
+                BuildCommand::Rust => {
                     let build_mode = cmd_build::build_mode(release);
                     cmd_build::build_rust_servers(build_mode)?;
                 }

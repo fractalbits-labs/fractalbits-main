@@ -1865,16 +1865,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "describe-stack"
-version = "0.1.0"
-dependencies = [
- "cmd_lib",
- "comfy-table",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "deunicode"
 version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6148,6 +6138,7 @@ dependencies = [
  "clap 4.5.46",
  "cmd_lib",
  "colored",
+ "comfy-table",
  "env_logger",
  "rlimit",
  "serde",

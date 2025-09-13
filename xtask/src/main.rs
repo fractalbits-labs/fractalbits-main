@@ -77,9 +77,9 @@ enum Cmd {
     #[command(subcommand)]
     Service(ServiceCommand),
 
-    #[clap(about = "Run tool related commands (gen_uuids only for now)")]
+    #[clap(about = "Run tool related commands")]
     #[command(subcommand)]
-    Tool(ToolKind),
+    Tools(ToolKind),
 
     #[clap(about = "Deploy binaries to s3 builds bucket")]
     Deploy {
@@ -291,6 +291,10 @@ enum ToolKind {
         #[clap(short = 'f', long_help = "File output", default_value = "uuids.data")]
         file: String,
     },
+    DescribeStack {
+        #[clap(long_help = "CloudFormation stack name", default_value = "FractalbitsVpcStack")]
+        stack_name: String,
+    },
 }
 
 #[tokio::main]
@@ -383,7 +387,7 @@ async fn main() -> CmdResult {
                 cmd_service::show_service_status(service)?;
             }
         },
-        Cmd::Tool(tool_kind) => cmd_tool::run_cmd_tool(tool_kind)?,
+        Cmd::Tools(tool_kind) => cmd_tool::run_cmd_tool(tool_kind)?,
         Cmd::Deploy {
             command,
             use_s3_backend,

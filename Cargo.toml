@@ -6,7 +6,6 @@ members = [
     "common/crates/aws_signature",
     "common/crates/data_types",
     "cdk/fractalbits-bootstrap",
-    "cdk/fractalbits-vpc/tools/describe-stack",
     "common/crates/data_blob_tracking",
     "common/crates/volume_group_proxy",
     "ha/multi_az/data_blob_resync_server",

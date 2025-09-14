@@ -250,12 +250,12 @@ pub fn init_service(
         match build_mode {
             BuildMode::Debug => run_cmd! {
                 info "formatting nss_server with default configs";
-                ${pwd}/zig-out/bin/nss_server format --init_test_tree
+                ${pwd}/$ZIG_DEBUG_OUT/bin/nss_server format --init_test_tree
                     |& ts -m $TS_FMT >$format_log;
             }?,
             BuildMode::Release => run_cmd! {
                 info "formatting nss_server for benchmarking";
-                ${pwd}/zig-out/bin/nss_server format --init_test_tree
+                ${pwd}/$ZIG_DEBUG_OUT/bin/nss_server format --init_test_tree
                     |& ts -m $TS_FMT >$format_log;
             }?,
         }
@@ -278,12 +278,12 @@ pub fn init_service(
         match build_mode {
             BuildMode::Debug => run_cmd! {
                 info "formatting mirrord with default configs";
-                WORKING_DIR="./data/nss-B" ${pwd}/zig-out/bin/nss_server format
+                WORKING_DIR="./data/nss-B" ${pwd}/$ZIG_DEBUG_OUT/bin/nss_server format
                     |& ts -m $TS_FMT >$format_log;
             }?,
             BuildMode::Release => run_cmd! {
                 info "formatting mirrord for benchmarking";
-                WORKING_DIR="./data/nss-B" ${pwd}/zig-out/bin/nss_server format
+                WORKING_DIR="./data/nss-B" ${pwd}/$ZIG_DEBUG_OUT/bin/nss_server format
                     |& ts -m $TS_FMT >$format_log;
             }?,
         }
@@ -638,45 +638,45 @@ Environment="RUST_LOG=warn""##
             env_settings += r##"
 Environment="BSS_WORKING_DIR=./data/bss0"
 Environment="BSS_PORT=8088""##;
-            format!("{pwd}/zig-out/bin/bss_server")
+            format!("{pwd}/{ZIG_DEBUG_OUT}/bin/bss_server")
         }
         ServiceName::Bss1 => {
             env_settings += r##"
 Environment="BSS_WORKING_DIR=./data/bss1"
 Environment="BSS_PORT=8089""##;
-            format!("{pwd}/zig-out/bin/bss_server")
+            format!("{pwd}/{ZIG_DEBUG_OUT}/bin/bss_server")
         }
         ServiceName::Bss2 => {
             env_settings += r##"
 Environment="BSS_WORKING_DIR=./data/bss2"
 Environment="BSS_PORT=8090""##;
-            format!("{pwd}/zig-out/bin/bss_server")
+            format!("{pwd}/{ZIG_DEBUG_OUT}/bin/bss_server")
         }
         ServiceName::Bss3 => {
             env_settings += r##"
 Environment="BSS_WORKING_DIR=./data/bss3"
 Environment="BSS_PORT=8091""##;
-            format!("{pwd}/zig-out/bin/bss_server")
+            format!("{pwd}/{ZIG_DEBUG_OUT}/bin/bss_server")
         }
         ServiceName::Bss4 => {
             env_settings += r##"
 Environment="BSS_WORKING_DIR=./data/bss4"
 Environment="BSS_PORT=8092""##;
-            format!("{pwd}/zig-out/bin/bss_server")
+            format!("{pwd}/{ZIG_DEBUG_OUT}/bin/bss_server")
         }
         ServiceName::Bss5 => {
             env_settings += r##"
 Environment="BSS_WORKING_DIR=./data/bss5"
 Environment="BSS_PORT=8093""##;
-            format!("{pwd}/zig-out/bin/bss_server")
+            format!("{pwd}/{ZIG_DEBUG_OUT}/bin/bss_server")
         }
         ServiceName::Nss => match build_mode {
-            BuildMode::Debug => format!("{pwd}/zig-out/bin/nss_server serve"),
+            BuildMode::Debug => format!("{pwd}/{ZIG_DEBUG_OUT}/bin/nss_server serve"),
             BuildMode::Release => {
-                format!("{pwd}/zig-out/bin/nss_server serve")
+                format!("{pwd}/{ZIG_DEBUG_OUT}/bin/nss_server serve")
             }
         },
-        ServiceName::Mirrord => format!("{pwd}/zig-out/bin/mirrord"),
+        ServiceName::Mirrord => format!("{pwd}/{ZIG_DEBUG_OUT}/bin/mirrord"),
         ServiceName::NssRoleAgentA => {
             env_settings += env_rust_log(build_mode);
             env_settings += "\nEnvironment=\"INSTANCE_ID=nss-A\"";

@@ -144,7 +144,7 @@ pub fn run_cmd_deploy(
         run_cmd! {
             info "Building Zig projects";
             cd ./core;
-            zig build -p ../zig-out
+            zig build -p ../$ZIG_RELEASE_OUT_AARCH64
                 -Duse_s3_backend=$use_s3_backend
                 -Denable_dev_mode=$enable_dev_mode
                 -Dbuild_info=$build_info
@@ -157,7 +157,7 @@ pub fn run_cmd_deploy(
             run_cmd! {
                 info "Building bss_server for x86_64";
                 cd ./core;
-                zig build -p ../zig-out
+                zig build -p ../$ZIG_RELEASE_OUT_X86_64
                     -Duse_s3_backend=$use_s3_backend
                     -Denable_dev_mode=$enable_dev_mode
                     -Dbuild_info=$build_info
@@ -174,14 +174,14 @@ pub fn run_cmd_deploy(
             "s3_blob_client",
         ];
         for bin in &zig_bins {
-            run_cmd!(cp zig-out/bin/$bin data/deploy/$arch/$bin)?;
+            run_cmd!(cp $ZIG_RELEASE_OUT_AARCH64/bin/$bin data/deploy/$arch/$bin)?;
         }
 
         // Copy bss_server
         if bss_use_i3 {
-            run_cmd!(cp zig-out/bin/bss_server data/deploy/x86_64/bss_server)?;
+            run_cmd!(cp $ZIG_RELEASE_OUT_X86_64/bin/bss_server data/deploy/x86_64/bss_server)?;
         } else {
-            run_cmd!(cp zig-out/bin/bss_server data/deploy/$arch/bss_server)?;
+            run_cmd!(cp $ZIG_RELEASE_OUT_AARCH64/bin/bss_server data/deploy/$arch/bss_server)?;
         }
     }
 

@@ -66,33 +66,33 @@ fn run_art_tests() -> CmdResult {
     run_cmd! {
         mkdir -p data/logs;
         info "Running art tests (random) with log $rand_log";
-        $working_dir/zig-out/bin/nss_server format |& $[ts] >$format_log;
-        $working_dir/zig-out/bin/test_art --tests random
+        $working_dir/$ZIG_DEBUG_OUT/bin/nss_server format |& $[ts] >$format_log;
+        $working_dir/$ZIG_DEBUG_OUT/bin/test_art --tests random
             --size 400000 --ops 1000000 --threads 20 |& $[ts] >$rand_log;
     }?;
 
     let fat_log = "data/logs/test_art_fat.log";
     run_cmd! {
         info "Running art tests (fat) with log $fat_log";
-        $working_dir/zig-out/bin/nss_server format |& $[ts] >$format_log;
-        $working_dir/zig-out/bin/test_art --tests fat --ops 1000000 |& $[ts] >$fat_log;
+        $working_dir/$ZIG_DEBUG_OUT/bin/nss_server format |& $[ts] >$format_log;
+        $working_dir/$ZIG_DEBUG_OUT/bin/test_art --tests fat --ops 1000000 |& $[ts] >$fat_log;
     }?;
 
     let async_art_log = "data/logs/test_async_art_rename.log";
     run_cmd! {
         info "Running async art rename tests with log $async_art_log";
-        $working_dir/zig-out/bin/nss_server format --init_test_tree |& $[ts] >$format_log;
-        $working_dir/zig-out/bin/test_async_art --prefill 100000 --tests rename
+        $working_dir/$ZIG_DEBUG_OUT/bin/nss_server format --init_test_tree |& $[ts] >$format_log;
+        $working_dir/$ZIG_DEBUG_OUT/bin/test_async_art --prefill 100000 --tests rename
             --ops 10000 --parallelism 1000 --debug |& $[ts] >$async_art_log;
     }?;
 
     let async_art_log = "data/logs/test_async_art.log";
     run_cmd! {
         info "Running async art tests with log $async_art_log";
-        $working_dir/zig-out/bin/nss_server format --init_test_tree |& $[ts] >$format_log;
-        $working_dir/zig-out/bin/test_async_art -p 20 |& $[ts] >$async_art_log;
-        $working_dir/zig-out/bin/test_async_art -p 20 |& $[ts] >>$async_art_log;
-        $working_dir/zig-out/bin/test_async_art -p 20 |& $[ts] >>$async_art_log;
+        $working_dir/$ZIG_DEBUG_OUT/bin/nss_server format --init_test_tree |& $[ts] >$format_log;
+        $working_dir/$ZIG_DEBUG_OUT/bin/test_async_art -p 20 |& $[ts] >$async_art_log;
+        $working_dir/$ZIG_DEBUG_OUT/bin/test_async_art -p 20 |& $[ts] >>$async_art_log;
+        $working_dir/$ZIG_DEBUG_OUT/bin/test_async_art -p 20 |& $[ts] >>$async_art_log;
     }?;
 
     Ok(())

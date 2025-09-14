@@ -57,7 +57,7 @@ pub fn build_zig_servers(mode: BuildMode) -> CmdResult {
     run_cmd! {
         info "Building zig-based servers ...";
         cd ./core;
-        zig build -p ../zig-out -Dbuild_info=$build_info $opts 2>&1;
+        zig build -p ../$ZIG_DEBUG_OUT -Dbuild_info=$build_info $opts 2>&1;
         info "Building bss and nss server done";
     }
 }
@@ -109,13 +109,13 @@ pub fn run_zig_unit_tests() -> CmdResult {
 
     run_cmd! {
         info "Formatting nss_server";
-        $working_dir/zig-out/bin/nss_server format;
+        $working_dir/$ZIG_DEBUG_OUT/bin/nss_server format;
     }?;
 
     run_cmd! {
         info "Running zig unit tests";
         cd ./core;
-        zig build -p ../zig-out test --summary all 2>&1;
+        zig build -p ../$ZIG_DEBUG_OUT test --summary all 2>&1;
     }?;
 
     info!("Zig unit tests completed successfully");

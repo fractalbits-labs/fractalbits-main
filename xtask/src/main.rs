@@ -15,6 +15,9 @@ use strum::{AsRefStr, EnumString};
 pub const TS_FMT: &str = "%b %d %H:%M:%.S";
 // Need to match with api_server's default config to make authentication work
 pub const UI_DEFAULT_REGION: &str = "localdev";
+pub const ZIG_DEBUG_OUT: &str = "target/debug/zig-out";
+pub const ZIG_RELEASE_OUT_AARCH64: &str = "target/aarch64-unknown-linux-gnu/release/zig-out";
+pub const ZIG_RELEASE_OUT_X86_64: &str = "target/x86_64-unknown-linux-gnu/release/zig-out";
 
 #[derive(Parser)]
 #[command(rename_all = "snake_case")]

@@ -1,6 +1,7 @@
 use crate::*;
 use cmd_lib::*;
 use comfy_table::{Cell, Color, Table, presets};
+use std::path::Path;
 
 #[derive(Clone)]
 struct Repo {
@@ -17,7 +18,7 @@ const GIT_REPOS: &[Repo] = &[
         branch: "main",
     },
     Repo {
-        path: "core",
+        path: cmd_build::ZIG_REPO_PATH,
         url: "https://github.com/fractalbits-labs/fractalbits-core.git",
         branch: "main",
     },
@@ -37,7 +38,7 @@ const GIT_REPOS: &[Repo] = &[
         branch: "main",
     },
     Repo {
-        path: "ui",
+        path: cmd_build::UI_REPO_PATH,
         url: "https://github.com/fractalbits-labs/fractalbits-ui.git",
         branch: "main",
     },
@@ -113,7 +114,7 @@ fn show_repos_status() -> CmdResult {
         let exists = if path == "." {
             true
         } else {
-            std::path::Path::new(path).exists()
+            Path::new(path).exists()
         };
 
         if !exists {
@@ -209,7 +210,7 @@ fn init_repos() -> CmdResult {
         let branch = repo.branch;
         let url = repo.url;
 
-        if !std::path::Path::new(path).exists() {
+        if !Path::new(path).exists() {
             run_cmd! {
                 info "Cloning repo: $path";
                 git clone -b $branch $url $path;
@@ -234,7 +235,7 @@ fn run_foreach_repo(command: &[String]) -> CmdResult {
         let path = repo.path;
 
         // Check if directory exists
-        if path != "." && !std::path::Path::new(path).exists() {
+        if path != "." && !Path::new(path).exists() {
             warn!("Skipping non-existent repo: {}", path);
             continue;
         }

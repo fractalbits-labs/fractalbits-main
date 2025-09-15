@@ -1,8 +1,11 @@
 use crate::*;
+use std::path::Path;
 use std::sync::OnceLock;
 use strum::{AsRefStr, EnumString};
 
 pub static BUILD_INFO: OnceLock<String> = OnceLock::new();
+pub const ZIG_REPO_PATH: &str = "core";
+pub const UI_REPO_PATH: &str = "ui";
 
 #[derive(Copy, Clone, AsRefStr, EnumString)]
 #[strum(serialize_all = "snake_case")]
@@ -40,6 +43,10 @@ pub fn build_rewrk_rpc() -> CmdResult {
 }
 
 pub fn build_zig_servers(mode: BuildMode) -> CmdResult {
+    if !Path::new(ZIG_REPO_PATH).exists() {
+        return Ok(());
+    }
+
     let build_info = BUILD_INFO.get().unwrap();
     let opts = match mode {
         BuildMode::Debug => "",
@@ -47,7 +54,7 @@ pub fn build_zig_servers(mode: BuildMode) -> CmdResult {
     };
     run_cmd! {
         info "Building zig-based servers ...";
-        cd ./core;
+        cd $ZIG_REPO_PATH;
         zig build -p ../$ZIG_DEBUG_OUT -Dbuild_info=$build_info $opts 2>&1;
         info "Building bss and nss server done";
     }
@@ -75,9 +82,13 @@ pub fn build_rust_servers(mode: BuildMode) -> CmdResult {
 }
 
 pub fn build_ui(region: &str) -> CmdResult {
+    if !Path::new(UI_REPO_PATH).exists() {
+        return Ok(());
+    }
+
     run_cmd! {
         info "Building ui ...";
-        cd ./ui;
+        cd $UI_REPO_PATH;
         npm install;
         VITE_AWS_REGION=$region npm run build;
     }
@@ -105,7 +116,7 @@ pub fn run_zig_unit_tests() -> CmdResult {
 
     run_cmd! {
         info "Running zig unit tests";
-        cd ./core;
+        cd $ZIG_REPO_PATH;
         zig build -p ../$ZIG_DEBUG_OUT test --summary all 2>&1;
     }?;
 

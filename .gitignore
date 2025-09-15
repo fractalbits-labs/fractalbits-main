@@ -6,6 +6,7 @@
 .DS_Store
 .idea/
 *.iml
+Cargo.lock
 
 # Build artifacts and cache directories
 .zig-cache/

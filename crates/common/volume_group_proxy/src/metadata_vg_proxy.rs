@@ -26,7 +26,7 @@ pub struct MetadataBlobGuid {
 
 impl std::fmt::Display for MetadataBlobGuid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.blob_id, self.volume_id)
+        write!(f, "{}:m{}", self.blob_id, self.volume_id)
     }
 }
 

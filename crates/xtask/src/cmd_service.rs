@@ -113,17 +113,17 @@ pub fn init_service(
                 {
                     "volume_id": 0,
                     "bss_nodes": [
-                        {"node_id": "bss0", "address": "127.0.0.1:8088"},
-                        {"node_id": "bss1", "address": "127.0.0.1:8089"},
-                        {"node_id": "bss2", "address": "127.0.0.1:8090"}
+                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088},
+                        {"node_id": "bss1", "ip": "127.0.0.1", "port": 8089},
+                        {"node_id": "bss2", "ip": "127.0.0.1", "port": 8090}
                     ]
                 },
                 {
                     "volume_id": 1,
                     "bss_nodes": [
-                        {"node_id": "bss3", "address": "127.0.0.1:8091"},
-                        {"node_id": "bss4", "address": "127.0.0.1:8092"},
-                        {"node_id": "bss5", "address": "127.0.0.1:8093"}
+                        {"node_id": "bss3", "ip": "127.0.0.1", "port": 8091},
+                        {"node_id": "bss4", "ip": "127.0.0.1", "port": 8092},
+                        {"node_id": "bss5", "ip": "127.0.0.1", "port": 8093}
                     ]
                 }
             ],
@@ -157,12 +157,12 @@ pub fn init_service(
                 {
                     "volume_id": 0,
                     "bss_nodes": [
-                        {"node_id": "bss0", "address": "127.0.0.1:8088"},
-                        {"node_id": "bss1", "address": "127.0.0.1:8089"},
-                        {"node_id": "bss2", "address": "127.0.0.1:8090"},
-                        {"node_id": "bss3", "address": "127.0.0.1:8091"},
-                        {"node_id": "bss4", "address": "127.0.0.1:8092"},
-                        {"node_id": "bss5", "address": "127.0.0.1:8093"}
+                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088},
+                        {"node_id": "bss1", "ip": "127.0.0.1", "port": 8089},
+                        {"node_id": "bss2", "ip": "127.0.0.1", "port": 8090},
+                        {"node_id": "bss3", "ip": "127.0.0.1", "port": 8091},
+                        {"node_id": "bss4", "ip": "127.0.0.1", "port": 8092},
+                        {"node_id": "bss5", "ip": "127.0.0.1", "port": 8093}
                     ]
                 }
             ],

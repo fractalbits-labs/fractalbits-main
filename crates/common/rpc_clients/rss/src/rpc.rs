@@ -2,85 +2,13 @@ use std::time::{Duration, Instant};
 
 use crate::client::RpcClient;
 use bytes::{Bytes, BytesMut};
-use data_types::{BssNode, DataVgInfo, DataVolume, QuorumConfig};
+use data_types::DataVgInfo;
 use metrics::histogram;
 use prost::Message as PbMessage;
 use rpc_client_common::{ErrorRetryable, InflightRpcGuard, RpcError};
 use rpc_codec_common::MessageFrame;
 use rss_codec::*;
 use tracing::{error, warn};
-
-fn parse_data_vg_info_from_json(json_str: &str) -> Result<DataVgInfo, String> {
-    let json_value: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| format!("Failed to parse JSON: {}", e))?;
-
-    let volumes_array = json_value
-        .get("volumes")
-        .and_then(|v| v.as_array())
-        .ok_or("volumes field not found or not an array")?;
-
-    let mut volumes = Vec::new();
-    for volume_json in volumes_array {
-        let volume_id = volume_json
-            .get("volume_id")
-            .and_then(|v| v.as_u64())
-            .ok_or("volume_id not found or not a number")? as u16;
-
-        let bss_nodes_array = volume_json
-            .get("bss_nodes")
-            .and_then(|v| v.as_array())
-            .ok_or("bss_nodes field not found or not an array")?;
-
-        let mut bss_nodes = Vec::new();
-        for node_json in bss_nodes_array {
-            let node_id = node_json
-                .get("node_id")
-                .and_then(|v| v.as_str())
-                .ok_or("node_id not found or not a string")?
-                .to_string();
-
-            let address = node_json
-                .get("address")
-                .and_then(|v| v.as_str())
-                .ok_or("address not found or not a string")?
-                .to_string();
-
-            bss_nodes.push(BssNode { node_id, address });
-        }
-
-        volumes.push(DataVolume {
-            volume_id,
-            bss_nodes,
-        });
-    }
-
-    let quorum = if let Some(quorum_json) = json_value.get("quorum") {
-        if !quorum_json.is_null() {
-            let n = quorum_json
-                .get("n")
-                .and_then(|v| v.as_u64())
-                .ok_or("n not found or not a number")? as u32;
-
-            let r = quorum_json
-                .get("r")
-                .and_then(|v| v.as_u64())
-                .ok_or("r not found or not a number")? as u32;
-
-            let w = quorum_json
-                .get("w")
-                .and_then(|v| v.as_u64())
-                .ok_or("w not found or not a number")? as u32;
-
-            Some(QuorumConfig { n, r, w })
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    Ok(DataVgInfo { volumes, quorum })
-}
 
 impl RpcClient {
     pub async fn put(
@@ -616,7 +544,7 @@ impl RpcClient {
         let duration = start.elapsed();
         match resp.result.unwrap() {
             rss_codec::get_data_vg_info_response::Result::InfoJson(info_json) => {
-                match parse_data_vg_info_from_json(&info_json) {
+                match serde_json::from_str::<DataVgInfo>(&info_json) {
                     Ok(info) => {
                         histogram!("rss_rpc_nanos", "status" => "GetDataVgInfo_Ok")
                             .record(duration.as_nanos() as f64);

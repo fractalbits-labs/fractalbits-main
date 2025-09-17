@@ -56,11 +56,9 @@ impl DataVgProxy {
 
         for volume in &data_vg_info.volumes {
             for bss_node in &volume.bss_nodes {
-                if !bss_connection_pools.contains_key(&bss_node.address) {
-                    info!(
-                        "Creating connection pool for BSS node: {}",
-                        bss_node.address
-                    );
+                let address = format!("{}:{}", bss_node.ip, bss_node.port);
+                if !bss_connection_pools.contains_key(&address) {
+                    info!("Creating connection pool for BSS node: {}", address);
                     let pool = ConnPool::new();
 
                     // Create connections to this BSS node
@@ -70,22 +68,22 @@ impl DataVgProxy {
                             "Creating connection {}/{} to BSS {}",
                             i + 1,
                             bss_conn_num,
-                            bss_node.address
+                            address
                         );
                         let client = Arc::new(
-                            <RpcClientBss as Poolable>::new(bss_node.address.clone())
+                            <RpcClientBss as Poolable>::new(address.clone())
                                 .await
                                 .map_err(|e| {
                                     DataVgError::InitializationError(format!(
                                         "Failed to connect to BSS {}: {}",
-                                        bss_node.address, e
+                                        address, e
                                     ))
                                 })?,
                         );
-                        pool.pooled(bss_node.address.clone(), client);
+                        pool.pooled(address.clone(), client);
                     }
 
-                    bss_connection_pools.insert(bss_node.address.clone(), pool);
+                    bss_connection_pools.insert(address.clone(), pool);
                 }
             }
         }
@@ -290,7 +288,7 @@ impl DataVgProxy {
         // Spawn all write tasks immediately
         let mut write_futures = FuturesUnordered::new();
         for bss_node in bss_nodes {
-            let address = bss_node.address.clone();
+            let address = format!("{}:{}", bss_node.ip, bss_node.port);
             let body_clone = body.clone();
             let bss_pools = bss_connection_pools.clone();
 
@@ -396,12 +394,10 @@ impl DataVgProxy {
 
         // Fast path: try reading from a random BSS node first
         if let Some(random_node) = volume.bss_nodes.first() {
-            debug!(
-                "Attempting fast path read from BSS node: {}",
-                random_node.address
-            );
+            let node_address = format!("{}:{}", random_node.ip, random_node.port);
+            debug!("Attempting fast path read from BSS node: {}", node_address);
             match self
-                .get_blob_from_node_instance(&random_node.address, blob_id, block_number, volume_id)
+                .get_blob_from_node_instance(&node_address, blob_id, block_number, volume_id)
                 .await
             {
                 Ok(blob_data) => {
@@ -413,7 +409,7 @@ impl DataVgProxy {
                 Err(e) => {
                     warn!(
                         "Fast path read failed from {}: {}, falling back to quorum read",
-                        random_node.address, e
+                        node_address, e
                     );
                 }
             }
@@ -433,7 +429,7 @@ impl DataVgProxy {
         // Spawn all read tasks immediately
         let mut read_futures = FuturesUnordered::new();
         for bss_node in bss_nodes {
-            let address = bss_node.address.clone();
+            let address = format!("{}:{}", bss_node.ip, bss_node.port);
             let bss_pools = bss_connection_pools.clone();
 
             let read_task = tokio::spawn(async move {
@@ -537,7 +533,7 @@ impl DataVgProxy {
 
         let delete_results: Vec<(String, Result<_, _>)> = futures::stream::iter(bss_nodes)
             .map(|bss_node| {
-                let address = bss_node.address.clone();
+                let address = format!("{}:{}", bss_node.ip, bss_node.port);
                 let bss_pools = bss_connection_pools.clone();
 
                 async move {

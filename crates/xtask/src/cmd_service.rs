@@ -292,6 +292,13 @@ pub fn init_service(
             init_minio_dev_az2()?;
         }
     }
+
+    run_cmd! {
+        info "systemctl daemon-reload";
+        systemctl --user daemon-reload;
+        systemctl --user reset-failed;
+    }?;
+
     Ok(())
 }
 
@@ -776,7 +783,7 @@ Environment="MINIO_REGION=localdev""##
 Description={service_name} Service
 {dependencies}
 StartLimitIntervalSec=600
-StartLimitBurst=3
+StartLimitBurst=1
 [Service]
 LimitNOFILE=1000000
 LimitCORE=infinity

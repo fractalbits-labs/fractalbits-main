@@ -1,6 +1,6 @@
 use crate::DataVgError;
 use bytes::Bytes;
-use data_types::QuorumConfig;
+use data_types::{MetadataBlobGuid, QuorumConfig};
 use futures::stream::{FuturesUnordered, StreamExt};
 use metrics::histogram;
 use rpc_client_bss::RpcClientBss;
@@ -14,21 +14,6 @@ use std::{
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-
-/// MetadataBlobGuid combines blob_id (UUID) with volume_id for multi-BSS metadata support
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Deserialize, rkyv::Serialize,
-)]
-pub struct MetadataBlobGuid {
-    pub blob_id: Uuid,
-    pub volume_id: u16,
-}
-
-impl std::fmt::Display for MetadataBlobGuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:m{}", self.blob_id, self.volume_id)
-    }
-}
 
 /// MetadataVgInfo is similar to DataVgInfo but for metadata volumes
 #[derive(Debug, Clone)]

@@ -1,12 +1,13 @@
 use crate::{
     blob_storage::{
-        BlobLocation, BlobStorageError, BlobStorageImpl, DataBlobGuid, S3ExpressMultiAzStorage,
+        BlobLocation, BlobStorageError, BlobStorageImpl, S3ExpressMultiAzStorage,
         S3HybridSingleAzStorage,
     },
     config::{BlobStorageBackend, BlobStorageConfig},
 };
 use bytes::Bytes;
 use data_blob_tracking::DataBlobTracker;
+use data_types::DataBlobGuid;
 use moka::future::Cache;
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};

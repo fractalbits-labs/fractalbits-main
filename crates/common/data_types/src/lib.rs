@@ -1,4 +1,5 @@
 mod api_key;
+mod blob_guid;
 mod bucket;
 pub mod hash;
 mod permission;
@@ -6,6 +7,7 @@ mod volume;
 
 // Re-export the main types for convenience
 pub use api_key::ApiKey;
+pub use blob_guid::{DataBlobGuid, MetadataBlobGuid};
 pub use bucket::Bucket;
 pub use permission::BucketKeyPerm;
 pub use volume::{BssNode, DataVgInfo, DataVolume, QuorumConfig};

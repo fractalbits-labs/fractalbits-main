@@ -1,3 +1,4 @@
+use data_types::DataBlobGuid;
 use metrics::histogram;
 use rpc_client_common::nss_rpc_retry;
 use std::hash::Hasher;
@@ -17,7 +18,6 @@ use super::block_data_stream::BlockDataStream;
 use super::s3_streaming::S3StreamingPayload;
 use crate::{
     blob_client::BlobDeletionRequest,
-    blob_storage::DataBlobGuid,
     handler::{
         ObjectRequestContext,
         common::{

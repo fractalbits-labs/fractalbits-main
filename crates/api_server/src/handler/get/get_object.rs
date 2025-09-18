@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use crate::{
-    AppState,
-    blob_storage::{BlobLocation, DataBlobGuid},
-};
+use crate::{AppState, blob_storage::BlobLocation};
 use crate::{
     BlobClient,
     object_layout::{MpuState, ObjectState},
@@ -25,6 +22,7 @@ use actix_web::{
 };
 use bytes::Bytes;
 use data_types::Bucket;
+use data_types::DataBlobGuid;
 use futures::{StreamExt, TryStreamExt, stream};
 use metrics::histogram;
 use serde::Deserialize;

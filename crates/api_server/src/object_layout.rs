@@ -1,5 +1,6 @@
-use crate::blob_storage::{BlobLocation, DataBlobGuid};
+use crate::blob_storage::BlobLocation;
 use crate::handler::common::{checksum::ChecksumValue, s3_error::S3Error};
+use data_types::DataBlobGuid;
 use rkyv::{Archive, Deserialize, Serialize};
 use uuid::Uuid;
 

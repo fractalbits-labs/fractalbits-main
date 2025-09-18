@@ -1,10 +1,8 @@
-use super::{
-    BlobStorageError, DataBlobGuid, S3ClientWrapper, S3RetryConfig, blob_key,
-    create_s3_client_wrapper,
-};
+use super::{BlobStorageError, S3ClientWrapper, S3RetryConfig, blob_key, create_s3_client_wrapper};
 use crate::s3_retry;
 use bytes::Bytes;
 use data_blob_tracking::{DataBlobTracker, DataBlobTrackingError};
+use data_types::DataBlobGuid;
 use metrics::{counter, histogram};
 use moka::future::Cache;
 use std::sync::Arc;

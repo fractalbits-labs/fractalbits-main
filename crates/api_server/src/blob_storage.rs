@@ -3,10 +3,11 @@ mod s3_express_multi_az_storage;
 mod s3_hybrid_single_az_storage;
 
 pub use crate::config::RatelimitConfig;
+pub use data_types::DataBlobGuid;
 pub use retry::S3RetryConfig;
 pub use s3_express_multi_az_storage::S3ExpressMultiAzStorage;
 pub use s3_hybrid_single_az_storage::S3HybridSingleAzStorage;
-pub use volume_group_proxy::{DataBlobGuid, DataVgProxy};
+pub use volume_group_proxy::DataVgProxy;
 
 /// Specifies where a blob should be stored/retrieved from
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -16,3 +16,5 @@ metrics.workspace = true
 sha2.workspace = true
 blake2.workspace = true
 xxhash-rust.workspace = true
+uuid.workspace = true
+rkyv.workspace = true

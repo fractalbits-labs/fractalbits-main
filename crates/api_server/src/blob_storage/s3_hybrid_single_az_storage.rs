@@ -1,9 +1,8 @@
-use super::{
-    BlobLocation, BlobStorageError, DataBlobGuid, DataVgProxy, blob_key, create_s3_client,
-};
+use super::{BlobLocation, BlobStorageError, DataVgProxy, blob_key, create_s3_client};
 use crate::{config::S3HybridSingleAzConfig, object_layout::ObjectLayout};
 use aws_sdk_s3::Client as S3Client;
 use bytes::Bytes;
+use data_types::DataBlobGuid;
 use metrics::histogram;
 use std::{
     sync::Arc,

@@ -25,8 +25,11 @@ pub struct MessageHeader {
     /// Client session ID for routing consistency across reconnections
     pub client_session_id: u64,
 
+    /// Number of retry attempts for this request (0 = first attempt)
+    pub retry_count: u32,
+
     /// Reserved for future use
-    reserved: [u8; 8],
+    reserved: [u8; 4],
 }
 
 // Safety: Command is defined as protobuf enum type (i32), and 0 as Invalid. There is also no padding
@@ -102,5 +105,13 @@ impl MessageHeaderTrait for MessageHeader {
 
     fn get_body_size(&self) -> usize {
         (self.size as usize).saturating_sub(Self::SIZE)
+    }
+
+    fn get_retry_count(&self) -> u32 {
+        self.retry_count
+    }
+
+    fn set_retry_count(&mut self, retry_count: u32) {
+        self.retry_count = retry_count;
     }
 }

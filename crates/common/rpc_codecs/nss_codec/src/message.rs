@@ -6,6 +6,9 @@ use rpc_codec_common::MessageHeaderTrait;
 #[repr(C)]
 #[derive(Pod, Debug, Default, Clone, Copy, Zeroable)]
 pub struct MessageHeader {
+    /// Client session ID for routing consistency across reconnections
+    pub client_session_id: u64,
+
     /// The size of the Header structure (always), plus any associated body.
     pub size: u32,
 
@@ -16,17 +19,17 @@ pub struct MessageHeader {
     /// i32 size, defined as protobuf enum type
     pub command: Command,
 
+    /// Number of retry attempts for this request (0 = first attempt)
+    pub retry_count: u32,
+
     /// The message type: Request=0, Response=1, Notify=2
     message_type: u16,
 
     /// The version of the protocol implementation that originated this message.
     protocol: u16,
 
-    /// Client session ID for routing consistency across reconnections
-    pub client_session_id: u64,
-
     /// Reserved for future use
-    reserved: [u8; 8],
+    reserved: [u8; 4],
 }
 
 // Safety: Command is defined as protobuf enum type (i32), and 0 as Invalid. There is also no padding
@@ -102,5 +105,13 @@ impl MessageHeaderTrait for MessageHeader {
 
     fn get_body_size(&self) -> usize {
         (self.size as usize).saturating_sub(Self::SIZE)
+    }
+
+    fn get_retry_count(&self) -> u32 {
+        self.retry_count
+    }
+
+    fn set_retry_count(&mut self, retry_count: u32) {
+        self.retry_count = retry_count;
     }
 }

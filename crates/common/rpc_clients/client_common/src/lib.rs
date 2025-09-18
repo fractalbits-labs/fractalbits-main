@@ -80,13 +80,18 @@ macro_rules! rpc_retry {
             use $crate::ErrorRetryable;
             let mut retries = 3;
             let mut backoff = std::time::Duration::from_millis(5);
+            let mut retry_count = 0u32;
             loop {
                 let rpc_client = $pool.$checkout($($addr),*).await.unwrap();
-                match rpc_client.$method($($args),*).await {
-                    Ok(val) => return Ok(val),
+
+                match rpc_client.$method($($args,)* retry_count).await {
+                    Ok(val) => {
+                        return Ok(val);
+                    },
                     Err(e) => {
                         if e.retryable() && retries > 0 {
                             retries -= 1;
+                            retry_count += 1;  // Increment for next retry
                             tokio::time::sleep(backoff).await;
                             backoff = backoff.saturating_mul(2);
                         } else {
@@ -134,6 +139,7 @@ macro_rules! nss_rpc_retry_with_session {
             let mut retries = 3;
             let mut backoff = std::time::Duration::from_millis(5);
             let mut stable_request_id: Option<u32> = None;
+            let mut retry_count = 0u32;
 
             loop {
                 let rpc_client = $app_state.checkout_rpc_client_nss().await.unwrap();
@@ -149,11 +155,14 @@ macro_rules! nss_rpc_retry_with_session {
                 let method_name = stringify!($method);
                 match method_name {
                     "put_inode" => {
-                        match rpc_client.put_inode_with_stable_request_id($($args,)* Some(request_id)).await {
-                            Ok(val) => return Ok(val),
+                        match rpc_client.put_inode_with_stable_request_id_and_retry($($args,)* Some(request_id), retry_count).await {
+                            Ok(val) => {
+                                return Ok(val);
+                            },
                             Err(e) => {
                                 if e.retryable() && retries > 0 {
                                     retries -= 1;
+                                    retry_count += 1;
                                     tokio::time::sleep(backoff).await;
                                     backoff = backoff.saturating_mul(2);
                                 } else {
@@ -171,10 +180,13 @@ macro_rules! nss_rpc_retry_with_session {
                     _ => {
                         // Fallback to regular method call for methods without stable_request_id support
                         match rpc_client.$method($($args),*).await {
-                            Ok(val) => return Ok(val),
+                            Ok(val) => {
+                                return Ok(val);
+                            },
                             Err(e) => {
                                 if e.retryable() && retries > 0 {
                                     retries -= 1;
+                                    retry_count += 1;
                                     tokio::time::sleep(backoff).await;
                                     backoff = backoff.saturating_mul(2);
                                 } else {
@@ -202,15 +214,19 @@ macro_rules! rss_rpc_retry_with_session {
             use $crate::ErrorRetryable;
             let mut retries = 3;
             let mut backoff = std::time::Duration::from_millis(5);
+            let mut retry_count = 0u32;
 
             loop {
                 let rpc_client = $app_state.checkout_rpc_client_rss().await.unwrap();
 
                 match rpc_client.$method($($args),*).await {
-                    Ok(val) => return Ok(val),
+                    Ok(val) => {
+                        return Ok(val);
+                    },
                     Err(e) => {
                         if e.retryable() && retries > 0 {
                             retries -= 1;
+                            retry_count += 1;
                             tokio::time::sleep(backoff).await;
                             backoff = backoff.saturating_mul(2);
                         } else {

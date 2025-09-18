@@ -263,6 +263,14 @@ where
 
     pub async fn send_message(
         &self,
+        frame: MessageFrame<Header>,
+    ) -> Result<MessageFrame<Header>, RpcError> {
+        self.send_message_with_retry_count(0, frame).await
+    }
+
+    pub async fn send_message_with_retry_count(
+        &self,
+        retry_count: u32,
         mut frame: MessageFrame<Header>,
     ) -> Result<MessageFrame<Header>, RpcError> {
         if self.is_closed.load(Ordering::SeqCst) {
@@ -274,6 +282,7 @@ where
         let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
         frame.header.set_id(request_id);
         frame.header.set_client_session_id(self.client_session_id);
+        frame.header.set_retry_count(retry_count);
 
         let (tx, rx) = oneshot::channel();
         {
@@ -374,6 +383,17 @@ where
     pub async fn send_request(
         &self,
         request_id: u32,
+        frame: MessageFrame<Header>,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<MessageFrame<Header>, RpcError> {
+        self.send_request_with_retry_count(0, request_id, frame, timeout)
+            .await
+    }
+
+    pub async fn send_request_with_retry_count(
+        &self,
+        retry_count: u32,
+        request_id: u32,
         mut frame: MessageFrame<Header>,
         timeout: Option<std::time::Duration>,
     ) -> Result<MessageFrame<Header>, RpcError> {
@@ -385,6 +405,7 @@ where
 
         // Set routing fields for session-based routing
         frame.header.set_client_session_id(self.client_session_id);
+        frame.header.set_retry_count(retry_count);
 
         let (tx, rx) = oneshot::channel();
         {

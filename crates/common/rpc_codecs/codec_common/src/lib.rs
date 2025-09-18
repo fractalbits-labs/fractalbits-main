@@ -14,6 +14,8 @@ pub trait MessageHeaderTrait: Sized + Clone + Copy + Send + Sync + 'static {
     fn get_client_session_id(&self) -> u64;
     fn set_handshake_command(&mut self);
     fn get_body_size(&self) -> usize;
+    fn get_retry_count(&self) -> u32;
+    fn set_retry_count(&mut self, retry_count: u32);
 }
 
 pub struct MessageFrame<H: MessageHeaderTrait> {

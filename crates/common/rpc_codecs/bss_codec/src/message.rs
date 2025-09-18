@@ -23,6 +23,15 @@ pub struct MessageHeader {
     /// Client session ID for routing consistency across reconnections
     pub client_session_id: u64,
 
+    /// Version number for quorum protocol
+    pub version: u64,
+
+    /// Bucket Id
+    pub bucket_id: [u8; 16],
+
+    /// Blob Id
+    pub blob_id: [u8; 16],
+
     /// The size of the Header structure (always), plus any associated body.
     pub size: u32,
 
@@ -40,22 +49,16 @@ pub struct MessageHeader {
     pub command: Command,
 
     /// 4k aligned size (header included), to use for direct-io
-    pub align_size: u32,
+    pub aligned_size: u32,
 
-    /// Version number for quorum protocol
-    pub version: u64,
+    /// Number of retry attempts for this request (0 = first attempt)
+    pub retry_count: u32,
 
     /// Volume ID for multi-BSS support
     pub volume_id: u16,
 
     /// The version of the protocol implementation that originated this message.
     pub protocol: u16,
-
-    /// Bucket Id
-    pub bucket_id: [u8; 16],
-
-    /// Blob Id
-    pub blob_id: [u8; 16],
 
     pub checksum_algo: u8,
 
@@ -66,11 +69,10 @@ pub struct MessageHeader {
     // Note rust arrays of sizes from 0 to 32 (inclusive) implement the Default trait if the element
     // type allows it. As a stopgap, trait implementations are statically generated up to size 32.
     // See [doc](https://doc.rust-lang.org/std/primitive.array.html) for more details.
-    reserved0: [u8; 2],
     reserved1: [u8; 32],
     reserved2: [u8; 32],
     reserved3: [u8; 32],
-    reserved4: [u8; 32],
+    reserved4: [u8; 30],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -167,5 +169,13 @@ impl MessageHeaderTrait for MessageHeader {
 
     fn get_body_size(&self) -> usize {
         (self.size as usize).saturating_sub(Self::SIZE)
+    }
+
+    fn get_retry_count(&self) -> u32 {
+        self.retry_count
+    }
+
+    fn set_retry_count(&mut self, retry_count: u32) {
+        self.retry_count = retry_count;
     }
 }

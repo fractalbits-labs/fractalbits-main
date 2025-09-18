@@ -27,6 +27,18 @@ impl RpcClient {
     ) -> Result<MessageFrame<bss_codec::MessageHeader>, RpcError> {
         self.inner.send_request(request_id, frame, timeout).await
     }
+
+    pub async fn send_request_with_retry_count(
+        &self,
+        retry_count: u32,
+        request_id: u32,
+        frame: MessageFrame<bss_codec::MessageHeader>,
+        timeout: Option<Duration>,
+    ) -> Result<MessageFrame<bss_codec::MessageHeader>, RpcError> {
+        self.inner
+            .send_request_with_retry_count(retry_count, request_id, frame, timeout)
+            .await
+    }
 }
 
 impl RpcClient {

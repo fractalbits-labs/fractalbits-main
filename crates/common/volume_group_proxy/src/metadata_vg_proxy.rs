@@ -188,6 +188,7 @@ impl MetadataVgProxy {
                 is_new,
                 body,
                 Some(rpc_timeout),
+                0,
             )
             .await
     }
@@ -199,7 +200,7 @@ impl MetadataVgProxy {
         block_number: u32,
         volume_id: u16,
         version: u64,
-        _rpc_timeout: Duration,
+        rpc_timeout: Duration,
     ) -> Result<(Bytes, u64), RpcError> {
         let client = Self::checkout_bss_client_for_async(bss_connection_pools, bss_address)
             .await
@@ -207,7 +208,15 @@ impl MetadataVgProxy {
 
         let mut body = Bytes::new();
         let actual_version = client
-            .get_metadata_blob(blob_id, block_number, volume_id, version, &mut body)
+            .get_metadata_blob(
+                blob_id,
+                block_number,
+                volume_id,
+                version,
+                &mut body,
+                Some(rpc_timeout),
+                0,
+            )
             .await?;
         Ok((body, actual_version))
     }
@@ -225,7 +234,7 @@ impl MetadataVgProxy {
             .map_err(|e| RpcError::InternalResponseError(e.to_string()))?;
 
         client
-            .delete_metadata_blob(blob_id, block_number, volume_id, Some(rpc_timeout))
+            .delete_metadata_blob(blob_id, block_number, volume_id, Some(rpc_timeout), 0)
             .await
     }
 }

@@ -17,6 +17,7 @@ impl RpcClient {
         key: &str,
         value: &str,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "put");
         let start = Instant::now();
@@ -31,6 +32,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::Put;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -74,6 +76,7 @@ impl RpcClient {
         &self,
         key: &str,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(i64, String), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get");
         let start = Instant::now();
@@ -86,6 +89,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::Get;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -125,7 +129,12 @@ impl RpcClient {
         }
     }
 
-    pub async fn delete(&self, key: &str, timeout: Option<Duration>) -> Result<(), RpcError> {
+    pub async fn delete(
+        &self,
+        key: &str,
+        timeout: Option<Duration>,
+        retry_count: u32,
+    ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "delete");
         let start = Instant::now();
         let body = DeleteRequest {
@@ -137,6 +146,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::Delete;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -172,6 +182,7 @@ impl RpcClient {
         &self,
         instance_id: &str,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<String, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get_nss_role");
         let start = Instant::now();
@@ -184,6 +195,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::GetNssRole;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -221,6 +233,7 @@ impl RpcClient {
         &self,
         prefix: &str,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<Vec<String>, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "list");
         let start = Instant::now();
@@ -233,6 +246,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::List;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -272,6 +286,7 @@ impl RpcClient {
         &self,
         instance_id: &str,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "send_heartbeat");
         let start = Instant::now();
@@ -284,6 +299,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::Heartbeat;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -317,7 +333,11 @@ impl RpcClient {
         }
     }
 
-    pub async fn get_az_status(&self, timeout: Option<Duration>) -> Result<AzStatusMap, RpcError> {
+    pub async fn get_az_status(
+        &self,
+        timeout: Option<Duration>,
+        retry_count: u32,
+    ) -> Result<AzStatusMap, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get_az_status");
         let start = Instant::now();
 
@@ -326,6 +346,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::GetAzStatus;
         header.size = MessageHeader::SIZE as u32;
+        header.retry_count = retry_count;
 
         let frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
@@ -360,6 +381,7 @@ impl RpcClient {
         az_id: &str,
         status: &str,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "set_az_status");
         let start = Instant::now();
@@ -373,6 +395,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::SetAzStatus;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -412,6 +435,7 @@ impl RpcClient {
         api_key_id: &str,
         is_multi_az: bool,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "create_bucket");
         let start = Instant::now();
@@ -427,6 +451,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::CreateBucket;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -574,6 +599,7 @@ impl RpcClient {
     pub async fn get_metadata_vg_info_json(
         &self,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<String, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get_metadata_vg_info_json");
         let start = Instant::now();
@@ -583,6 +609,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::GetMetadataVgInfo;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
             .map_err(|e| RpcError::EncodeError(e.to_string()))?;

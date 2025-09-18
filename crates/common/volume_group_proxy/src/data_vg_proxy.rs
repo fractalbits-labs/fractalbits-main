@@ -159,6 +159,7 @@ impl DataVgProxy {
                 volume_id,
                 &mut body,
                 Some(self.rpc_timeout),
+                0,
             )
             .await;
 
@@ -205,7 +206,7 @@ impl DataVgProxy {
             .map_err(|e| RpcError::InternalResponseError(e.to_string()))?;
 
         client
-            .put_data_blob(blob_id, block_number, volume_id, body, Some(rpc_timeout))
+            .put_data_blob(blob_id, block_number, volume_id, body, Some(rpc_timeout), 0)
             .await
     }
 
@@ -229,6 +230,7 @@ impl DataVgProxy {
                 volume_id,
                 &mut body,
                 Some(rpc_timeout),
+                0,
             )
             .await?;
         Ok(body)
@@ -247,7 +249,7 @@ impl DataVgProxy {
             .map_err(|e| RpcError::InternalResponseError(e.to_string()))?;
 
         client
-            .delete_data_blob(blob_id, block_number, volume_id, Some(rpc_timeout))
+            .delete_data_blob(blob_id, block_number, volume_id, Some(rpc_timeout), 0)
             .await
     }
 }

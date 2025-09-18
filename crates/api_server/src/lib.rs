@@ -354,7 +354,7 @@ impl AppState {
             RpcError::InternalRequestError(format!("Failed to checkout RSS client: {}", e))
         })?;
         let kvs = client
-            .list(&prefix, Some(self.config.rpc_timeout()))
+            .list(&prefix, Some(self.config.rpc_timeout()), 0)
             .await?;
         Ok(kvs
             .iter()

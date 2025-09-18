@@ -15,18 +15,27 @@ impl RpcClient {
         key: &str,
         value: Bytes,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<PutInodeResponse, RpcError> {
-        self.put_inode_with_stable_request_id(root_blob_name, key, value, timeout, None)
-            .await
+        self.put_inode_with_stable_request_id_and_retry(
+            root_blob_name,
+            key,
+            value,
+            timeout,
+            None,
+            retry_count,
+        )
+        .await
     }
 
-    pub async fn put_inode_with_stable_request_id(
+    pub async fn put_inode_with_stable_request_id_and_retry(
         &self,
         root_blob_name: &str,
         key: &str,
         value: Bytes,
         timeout: Option<Duration>,
         stable_request_id: Option<u32>,
+        retry_count: u32,
     ) -> Result<PutInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "put_inode");
         let mut nss_key = key.to_string();
@@ -42,6 +51,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::PutInode;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -62,11 +72,31 @@ impl RpcClient {
         Ok(resp)
     }
 
+    pub async fn put_inode_with_stable_request_id(
+        &self,
+        root_blob_name: &str,
+        key: &str,
+        value: Bytes,
+        timeout: Option<Duration>,
+        stable_request_id: Option<u32>,
+    ) -> Result<PutInodeResponse, RpcError> {
+        self.put_inode_with_stable_request_id_and_retry(
+            root_blob_name,
+            key,
+            value,
+            timeout,
+            stable_request_id,
+            0,
+        )
+        .await
+    }
+
     pub async fn get_inode(
         &self,
         root_blob_name: &str,
         key: &str,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<GetInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "get_inode");
         let mut nss_key = key.to_string();
@@ -81,6 +111,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::GetInode;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -101,7 +132,6 @@ impl RpcClient {
         Ok(resp)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn list_inodes(
         &self,
         root_blob_name: &str,
@@ -111,6 +141,7 @@ impl RpcClient {
         start_after: &str,
         skip_mpu_parts: bool,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<ListInodesResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "list_inodes");
         let mut start_after_owned = start_after.to_string();
@@ -131,6 +162,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::ListInodes;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -156,6 +188,7 @@ impl RpcClient {
         root_blob_name: &str,
         key: &str,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<DeleteInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "delete_inode");
         let mut nss_key = key.to_string();
@@ -170,6 +203,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::DeleteInode;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -268,6 +302,7 @@ impl RpcClient {
         src_path: &str,
         dst_path: &str,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("nss", "rename_folder");
         let body = RenameRequest {
@@ -281,6 +316,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::Rename;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)
@@ -314,6 +350,7 @@ impl RpcClient {
         src_path: &str,
         dst_path: &str,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(), RpcError> {
         let mut nss_src_path = src_path.to_string();
         nss_src_path.push('\0');
@@ -332,6 +369,7 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::Rename;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.retry_count = retry_count;
 
         let mut body_bytes = BytesMut::new();
         body.encode(&mut body_bytes)

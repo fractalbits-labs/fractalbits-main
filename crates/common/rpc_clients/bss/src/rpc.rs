@@ -16,6 +16,7 @@ impl RpcClient {
         volume_id: u16,
         body: Bytes,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "put_data_blob");
         let mut header = MessageHeader::default();
@@ -26,6 +27,7 @@ impl RpcClient {
         header.volume_id = volume_id;
         header.command = Command::PutDataBlob;
         header.size = (MessageHeader::SIZE + body.len()) as u32;
+        header.retry_count = retry_count;
 
         let msg_frame = MessageFrame::new(header, body);
         self
@@ -47,6 +49,7 @@ impl RpcClient {
         volume_id: u16,
         body: &mut Bytes,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "get_data_blob");
         let mut header = MessageHeader::default();
@@ -57,6 +60,7 @@ impl RpcClient {
         header.volume_id = volume_id;
         header.command = Command::GetDataBlob;
         header.size = MessageHeader::SIZE as u32;
+        header.retry_count = retry_count;
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
@@ -78,6 +82,7 @@ impl RpcClient {
         block_number: u32,
         volume_id: u16,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "delete_data_blob");
         let mut header = MessageHeader::default();
@@ -88,6 +93,7 @@ impl RpcClient {
         header.volume_id = volume_id;
         header.command = Command::DeleteDataBlob;
         header.size = MessageHeader::SIZE as u32;
+        header.retry_count = retry_count;
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         self
@@ -113,6 +119,7 @@ impl RpcClient {
         is_new: bool,
         body: Bytes,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "put_metadata_blob");
         let mut header = MessageHeader::default();
@@ -125,6 +132,7 @@ impl RpcClient {
         header.is_new = if is_new { 1 } else { 0 };
         header.command = Command::PutMetadataBlob;
         header.size = (MessageHeader::SIZE + body.len()) as u32;
+        header.retry_count = retry_count;
 
         let msg_frame = MessageFrame::new(header, body);
         self
@@ -146,6 +154,8 @@ impl RpcClient {
         volume_id: u16,
         version: u64,
         body: &mut Bytes,
+        timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<u64, RpcError> {
         let _guard = InflightRpcGuard::new("bss", "get_metadata_blob");
         let mut header = MessageHeader::default();
@@ -157,10 +167,11 @@ impl RpcClient {
         header.version = version;
         header.command = Command::GetMetadataBlob;
         header.size = MessageHeader::SIZE as u32;
+        header.retry_count = retry_count;
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
-            .send_request(header.id, msg_frame, None)
+            .send_request(header.id, msg_frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -178,6 +189,7 @@ impl RpcClient {
         block_number: u32,
         volume_id: u16,
         timeout: Option<Duration>,
+        retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "delete_metadata_blob");
         let mut header = MessageHeader::default();
@@ -188,6 +200,7 @@ impl RpcClient {
         header.volume_id = volume_id;
         header.command = Command::DeleteMetadataBlob;
         header.size = MessageHeader::SIZE as u32;
+        header.retry_count = retry_count;
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         self

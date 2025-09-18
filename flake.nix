@@ -77,6 +77,9 @@
 
           # Formatting tools
           nixpkgs-fmt
+
+          # Command runner
+          just
         ];
 
         nativeBuildInputs = with pkgs; [

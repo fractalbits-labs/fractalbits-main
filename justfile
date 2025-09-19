@@ -11,7 +11,7 @@ deploy *args:
   cargo xtask deploy {{args}}
 
 describe-stack:
-  cargo xtask tools describe_stack
+  cargo xtask tools describe-stack
 
 repo *args:
   cargo xtask git {{args}}

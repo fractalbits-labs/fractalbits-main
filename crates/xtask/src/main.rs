@@ -21,7 +21,6 @@ pub const ZIG_RELEASE_OUT_AARCH64: &str = "target/aarch64-unknown-linux-gnu/rele
 pub const ZIG_RELEASE_OUT_X86_64: &str = "target/x86_64-unknown-linux-gnu/release/zig-out";
 
 #[derive(Parser)]
-#[command(rename_all = "snake_case")]
 #[clap(name = "xtask", about = "Misc project related tasks")]
 enum Cmd {
     #[clap(about = "Run benchmark")]
@@ -121,7 +120,6 @@ enum Cmd {
 }
 
 #[derive(Parser, Clone)]
-#[clap(rename_all = "snake_case")]
 pub enum BuildCommand {
     #[clap(about = "Build all components")]
     All,
@@ -135,37 +133,30 @@ pub enum BuildCommand {
 }
 
 #[derive(Parser, Clone)]
-#[clap(rename_all = "snake_case")]
 pub enum ZigCommand {
     #[clap(about = "Run zig unit tests")]
     Test,
 }
 
 #[derive(Parser, Clone)]
-#[clap(rename_all = "snake_case")]
 pub enum DeployCommand {
     #[clap(about = "Cleanup builds bucket (empty and delete)")]
     Cleanup,
 }
 
 #[derive(Clone, AsRefStr, EnumString, clap::ValueEnum)]
-#[strum(serialize_all = "snake_case")]
-#[clap(rename_all = "snake_case")]
 enum BenchWorkload {
     Read,
     Write,
 }
 
 #[derive(Clone, EnumString, clap::ValueEnum)]
-#[strum(serialize_all = "snake_case")]
-#[clap(rename_all = "snake_case")]
 enum BenchService {
     NssRpc,
     BssRpc,
 }
 
 #[derive(Parser, Clone, EnumString, PartialEq)]
-#[strum(serialize_all = "snake_case")]
 pub enum ServiceAction {
     Init,
     Stop,
@@ -233,8 +224,6 @@ pub enum DataBlobStorage {
 }
 
 #[derive(AsRefStr, EnumString, Copy, Clone, Default, PartialEq, clap::ValueEnum)]
-#[strum(serialize_all = "snake_case")]
-#[clap(rename_all = "snake_case")]
 pub enum DeployMode {
     #[default]
     All,
@@ -245,7 +234,6 @@ pub enum DeployMode {
 }
 
 #[derive(AsRefStr, EnumString, Copy, Clone, Default)]
-#[strum(serialize_all = "snake_case")]
 pub enum NssRole {
     #[default]
     Active,
@@ -259,7 +247,6 @@ pub struct InitConfig {
 }
 
 #[derive(Parser, Clone)]
-#[clap(rename_all = "snake_case")]
 pub enum ServiceCommand {
     Init {
         #[clap(default_value = "all", value_enum)]
@@ -294,7 +281,6 @@ pub enum ServiceCommand {
 }
 
 #[derive(Parser, Clone)]
-#[clap(rename_all = "snake_case")]
 pub enum TestType {
     All,
     MultiAz {
@@ -305,8 +291,6 @@ pub enum TestType {
 }
 
 #[derive(Parser, Clone, EnumString)]
-#[strum(serialize_all = "snake_case")]
-#[clap(rename_all = "snake_case")]
 pub enum MultiAzTestType {
     All,
     DataBlobTracking,
@@ -314,7 +298,6 @@ pub enum MultiAzTestType {
 }
 
 #[derive(Parser, Clone)]
-#[clap(rename_all = "snake_case")]
 pub enum GitCommand {
     #[clap(about = "List all configured git repos")]
     List,
@@ -327,13 +310,12 @@ pub enum GitCommand {
 
     #[clap(about = "Run a command in each git repo")]
     Foreach {
-        #[clap(required = true, num_args = 1.., value_name = "COMMAND")]
+        #[clap(required = true, num_args = 1.., value_name = "COMMAND", allow_hyphen_values = true)]
         command: Vec<String>,
     },
 }
 
 #[derive(Parser, Clone)]
-#[clap(rename_all = "snake_case")]
 enum ToolKind {
     GenUuids {
         #[clap(short = 'n', long_help = "Number of uuids", default_value = "1000000")]

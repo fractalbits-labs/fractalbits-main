@@ -888,7 +888,7 @@ pub fn wait_for_service_ready(service: ServiceName, timeout_secs: u32) -> CmdRes
 }
 
 fn check_port_ready(port: u16) -> bool {
-    run_cmd!(nc -z localhost $port).is_ok()
+    run_cmd!(nc -z localhost $port &>/dev/null).is_ok()
 }
 
 fn register_local_api_server() -> CmdResult {

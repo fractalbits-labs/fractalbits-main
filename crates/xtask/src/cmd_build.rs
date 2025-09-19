@@ -68,7 +68,7 @@ pub fn build_rust_servers(mode: BuildMode) -> CmdResult {
                 info "Building rust-based servers in debug mode ...";
                 BUILD_INFO=$build_info cargo build --workspace
                     --exclude fractalbits-bootstrap
-                    --exclude bench*;
+                    --exclude rewrk*;
             }
         }
         BuildMode::Release => {

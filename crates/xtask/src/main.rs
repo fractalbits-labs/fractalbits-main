@@ -61,6 +61,9 @@ enum Cmd {
         #[clap(long, long_help = "Run art tests in addition to other tests")]
         with_art_tests: bool,
 
+        #[clap(long, long_help = "Enable HTTPS tests")]
+        with_https: bool,
+
         #[clap(long, value_enum)]
         #[arg(default_value_t)]
         data_blob_storage: DataBlobStorage,
@@ -245,6 +248,7 @@ pub enum NssRole {
 pub struct InitConfig {
     pub for_gui: bool,
     pub data_blob_storage: DataBlobStorage,
+    pub with_https: bool,
 }
 
 #[derive(Parser, Clone)]
@@ -262,6 +266,9 @@ pub enum ServiceCommand {
         #[clap(long, value_enum)]
         #[arg(default_value_t)]
         data_blob_storage: DataBlobStorage,
+
+        #[clap(long, long_help = "enable HTTPS certificates generation")]
+        with_https: bool,
     },
     Stop {
         #[clap(default_value = "all", value_enum)]
@@ -369,13 +376,15 @@ async fn main() -> CmdResult {
             zig_unit_tests_only,
             debug_api_server,
             with_art_tests,
+            with_https,
             data_blob_storage,
         } => cmd_precheckin::run_cmd_precheckin(
+            data_blob_storage,
             s3_api_only,
             zig_unit_tests_only,
             debug_api_server,
             with_art_tests,
-            data_blob_storage,
+            with_https,
         )?,
         Cmd::Nightly => cmd_nightly::run_cmd_nightly()?,
         Cmd::Bench {
@@ -403,10 +412,12 @@ async fn main() -> CmdResult {
                 release,
                 for_gui,
                 data_blob_storage,
+                with_https,
             } => {
                 let init_config = InitConfig {
                     for_gui,
                     data_blob_storage,
+                    with_https,
                 };
                 cmd_service::init_service(service, cmd_build::build_mode(release), init_config)?;
             }

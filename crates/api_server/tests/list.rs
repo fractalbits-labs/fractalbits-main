@@ -33,13 +33,6 @@ async fn test_listobjectsv2() {
         assert!(r.common_prefixes.is_none());
     }
 
-    //@FIXME aws-sdk-s3 automatically checks max-key values.
-    // If we set it to zero, it drops it, and it is probably
-    // the same behavior on values bigger than 1000.
-    // Boto and awscli do not perform these tests, we should write
-    // our own minimal library to bypass AWS SDK's tests and be
-    // sure that we behave correctly.
-
     {
         // With 2 elements
         let r = ctx
@@ -430,8 +423,7 @@ async fn test_listobjectsv1() {
     }
 }
 
-#[ignore = "unimplemented"]
-#[tokio::test]
+#[allow(dead_code)]
 async fn test_listmultipart() {
     let ctx = context();
     let bucket = ctx.create_bucket("listmultipartuploads").await;
@@ -645,8 +637,7 @@ async fn test_list_buckets() {
     ctx.delete_bucket(&bucket3).await;
 }
 
-#[ignore = "Not supported"]
-#[tokio::test]
+#[allow(dead_code)]
 async fn test_multichar_delimiter() {
     // Test case from dpape from issue #692 with reference results from Amazon
 

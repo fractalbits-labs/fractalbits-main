@@ -255,7 +255,9 @@ pub fn init_service(
 
     match service {
         ServiceName::ApiServer | ServiceName::GuiServer => {
-            generate_https_certificates()?;
+            if init_config.with_https {
+                generate_https_certificates()?;
+            }
         }
         ServiceName::DdbLocal => init_ddb_local()?,
         ServiceName::Minio => init_minio()?,
@@ -276,7 +278,9 @@ pub fn init_service(
         ServiceName::NssRoleAgentA | ServiceName::NssRoleAgentB => {}
         ServiceName::Mirrord => init_mirrord()?,
         ServiceName::All => {
-            generate_https_certificates()?;
+            if init_config.with_https {
+                generate_https_certificates()?;
+            }
             init_rss()?;
             for bss_service in ServiceName::all_bss_services() {
                 if let Some(id) = bss_service.bss_id() {

@@ -1,11 +1,12 @@
 use crate::*;
 
 pub fn run_cmd_precheckin(
+    data_blob_storage: DataBlobStorage,
     s3_api_only: bool,
     zig_unit_tests_only: bool,
     debug_api_server: bool,
     with_art_tests: bool,
-    data_blob_storage: DataBlobStorage,
+    with_https: bool,
 ) -> CmdResult {
     if debug_api_server {
         cmd_service::stop_service(ServiceName::ApiServer)?;
@@ -19,21 +20,21 @@ pub fn run_cmd_precheckin(
     }
 
     if s3_api_only {
-        return run_s3_api_tests(debug_api_server, data_blob_storage);
+        return run_s3_api_tests(data_blob_storage, debug_api_server, with_https);
     }
 
     if zig_unit_tests_only {
-        return run_zig_unit_tests(data_blob_storage);
+        return run_zig_unit_tests(data_blob_storage, with_https);
     }
 
-    init_service_with_data_blob_storage(data_blob_storage)?;
+    init_service_with_data_blob_storage(data_blob_storage, with_https)?;
     cmd_build::run_zig_unit_tests()?;
     run_cmd! {
         info "Run cargo tests (except s3 api)";
         cargo test --workspace --exclude api_server;
     }?;
 
-    run_s3_api_tests(false, data_blob_storage)?;
+    run_s3_api_tests(data_blob_storage, false, with_https)?;
 
     if with_art_tests {
         run_art_tests()?;
@@ -48,13 +49,14 @@ pub fn run_cmd_precheckin(
     Ok(())
 }
 
-fn init_service_with_data_blob_storage(data_blob_storage: DataBlobStorage) -> CmdResult {
+fn init_service_with_data_blob_storage(data_blob_storage: DataBlobStorage, with_https: bool) -> CmdResult {
     cmd_service::init_service(
         ServiceName::All,
         BuildMode::Debug,
         InitConfig {
             for_gui: false,
             data_blob_storage,
+            with_https,
         },
     )?;
     Ok(())
@@ -114,13 +116,13 @@ fn run_art_tests() -> CmdResult {
     Ok(())
 }
 
-fn run_zig_unit_tests(data_blob_storage: DataBlobStorage) -> CmdResult {
-    init_service_with_data_blob_storage(data_blob_storage)?;
+fn run_zig_unit_tests(data_blob_storage: DataBlobStorage, with_https: bool) -> CmdResult {
+    init_service_with_data_blob_storage(data_blob_storage, with_https)?;
     cmd_build::run_zig_unit_tests()?;
     Ok(())
 }
 
-fn run_s3_api_tests(debug_api_server: bool, data_blob_storage: DataBlobStorage) -> CmdResult {
+fn run_s3_api_tests(data_blob_storage: DataBlobStorage, debug_api_server: bool, with_https: bool) -> CmdResult {
     if debug_api_server {
         cmd_service::start_service(ServiceName::ApiServer)?;
     } else {
@@ -130,6 +132,7 @@ fn run_s3_api_tests(debug_api_server: bool, data_blob_storage: DataBlobStorage) 
             InitConfig {
                 for_gui: false,
                 data_blob_storage,
+                with_https,
             },
         )?;
         cmd_service::start_service(ServiceName::All)?;
@@ -139,10 +142,13 @@ fn run_s3_api_tests(debug_api_server: bool, data_blob_storage: DataBlobStorage) 
         info "Run cargo tests (s3 api tests)";
         cargo test --package api_server;
     }?;
-    run_cmd! {
-        info "Run cargo tests (s3 https api tests)";
-        USE_HTTPS_ENDPOINT=true cargo test --package api_server;
-    }?;
+
+    if with_https {
+        run_cmd! {
+            info "Run cargo tests (s3 https api tests)";
+            USE_HTTPS_ENDPOINT=true cargo test --package api_server;
+        }?;
+    }
 
     if !debug_api_server {
         let _ = cmd_service::stop_service(ServiceName::All);

@@ -13,6 +13,7 @@ pub async fn run_multi_az_tests(test_type: MultiAzTestType) -> CmdResult {
             InitConfig {
                 data_blob_storage: crate::DataBlobStorage::S3ExpressMultiAz,
                 for_gui: false,
+                with_https: false,
             },
         )?;
         cmd_service::start_service(ServiceName::All)

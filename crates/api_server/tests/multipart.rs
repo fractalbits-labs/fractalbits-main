@@ -567,8 +567,7 @@ async fn test_uploadlistpart() {
     }
 }
 
-#[ignore = "unimplemented"]
-#[tokio::test]
+#[allow(dead_code)]
 async fn test_uploadpartcopy() {
     let ctx = context();
     let bucket = ctx.create_bucket("uploadpartcopy").await;

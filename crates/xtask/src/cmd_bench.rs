@@ -52,8 +52,9 @@ pub fn run_cmd_bench(
                 *service_name,
                 build_mode,
                 InitConfig {
-                    for_gui: false,
                     data_blob_storage: DataBlobStorage::S3HybridSingleAz,
+                    for_gui: false,
+                    with_https: false,
                 },
             )?;
             start_service(ServiceName::Bss0)?;

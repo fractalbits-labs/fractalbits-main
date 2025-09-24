@@ -11,6 +11,9 @@ pub fn run_cmd_tool(tool_kind: ToolKind) -> CmdResult {
         ToolKind::DescribeStack { stack_name } => {
             describe_stack(&stack_name)?;
         }
+        ToolKind::DumpVgConfig { localdev } => {
+            dump_vg_config(localdev)?;
+        }
     }
     Ok(())
 }
@@ -166,5 +169,81 @@ fn describe_stack(stack_name: &str) -> CmdResult {
     }
 
     println!("{table}");
+    Ok(())
+}
+
+fn dump_vg_config(localdev: bool) -> CmdResult {
+    // AWS cli environment variables based on localdev flag
+    let env_vars: &[&str] = if localdev {
+        &[
+            "AWS_DEFAULT_REGION=fakeRegion",
+            "AWS_ACCESS_KEY_ID=fakeMyKeyId",
+            "AWS_SECRET_ACCESS_KEY=fakeSecretAccessKey",
+            "AWS_ENDPOINT_URL_DYNAMODB=http://localhost:8000",
+        ]
+    } else {
+        &[]
+    };
+
+    // Query BSS data volume group configuration
+    let data_vg_result = run_fun! {
+        $[env_vars]
+        aws dynamodb get-item
+            --table-name "fractalbits-service-discovery"
+            --key "{\"service_id\": {\"S\": \"bss-data-vg-config\"}}"
+            --query "Item.value.S"
+            --output text
+    };
+
+    // Query BSS metadata volume group configuration
+    let metadata_vg_result = run_fun! {
+        $[env_vars]
+        aws dynamodb get-item
+            --table-name "fractalbits-service-discovery"
+            --key "{\"service_id\": {\"S\": \"bss-metadata-vg-config\"}}"
+            --query "Item.value.S"
+            --output text
+    };
+
+    // JSON output - output raw JSON strings that can be used as environment variables
+    let mut output = serde_json::Map::new();
+
+    // Add data VG config if available
+    if let Ok(json_str) = data_vg_result
+        && !json_str.trim().is_empty()
+        && json_str.trim() != "None"
+    {
+        match serde_json::from_str::<serde_json::Value>(&json_str) {
+            Ok(json_value) => {
+                output.insert("data_vg_config".to_string(), json_value);
+            }
+            Err(e) => {
+                error!("Failed to parse data VG config JSON: {}", e);
+            }
+        }
+    }
+
+    // Add metadata VG config if available
+    if let Ok(json_str) = metadata_vg_result
+        && !json_str.trim().is_empty()
+        && json_str.trim() != "None"
+    {
+        match serde_json::from_str::<serde_json::Value>(&json_str) {
+            Ok(json_value) => {
+                output.insert("metadata_vg_config".to_string(), json_value);
+            }
+            Err(e) => {
+                error!("Failed to parse metadata VG config JSON: {}", e);
+            }
+        }
+    }
+
+    // Output the combined JSON
+    let combined_json = serde_json::Value::Object(output);
+    match serde_json::to_string(&combined_json) {
+        Ok(json_string) => println!("{}", json_string),
+        Err(e) => error!("Failed to serialize combined JSON: {}", e),
+    }
+
     Ok(())
 }

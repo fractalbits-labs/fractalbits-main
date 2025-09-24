@@ -329,6 +329,13 @@ enum ToolKind {
         )]
         stack_name: String,
     },
+    DumpVgConfig {
+        #[clap(
+            long,
+            long_help = "Use localhost DynamoDB instead of AWS (for local development)"
+        )]
+        localdev: bool,
+    },
 }
 
 #[tokio::main]

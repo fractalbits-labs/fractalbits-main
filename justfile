@@ -1,4 +1,3 @@
-# Public commands
 build *args:
   cargo xtask build {{args}}
 
@@ -11,13 +10,14 @@ precheckin *args:
 deploy *args:
   cargo xtask deploy {{args}}
 
-describe-stack:
-  cargo xtask tools describe-stack
+describe-stack *args:
+  cargo xtask tools describe-stack {{args}}
 
-# Internal commands
+dump-vg-config *args:
+  cargo xtask tools dump-vg-config {{args}}
+
 repo *args:
   cargo xtask git {{args}}
 
 git *args:
   cargo xtask git foreach git {{args}}
-

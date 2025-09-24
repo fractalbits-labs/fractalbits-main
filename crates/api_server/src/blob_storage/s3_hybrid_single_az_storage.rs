@@ -74,19 +74,17 @@ impl S3HybridSingleAzStorage {
         histogram!("blob_size", "operation" => "put").record(body.len() as f64);
         let start = Instant::now();
 
-        // Create BlobGuid with provided volume_id
-        let blob_guid = DataBlobGuid { blob_id, volume_id };
-
         // Determine location based on size (single block and small size)
         let is_small = block_number == 0 && body.len() < ObjectLayout::DEFAULT_BLOCK_SIZE as usize;
 
         if is_small {
-            // Small blob - only store in DataVgProxy
+            // Small blob - store in DataVgProxy with original volume_id
+            let blob_guid = DataBlobGuid { blob_id, volume_id };
             self.data_vg_proxy
                 .put_blob(blob_guid, block_number, body)
                 .await?;
         } else {
-            // Large blob - only store in S3
+            // Large blob - store in S3 (volume_id doesn't matter for S3 storage, but we'll use S3_VOLUME for metadata consistency)
             let s3_key = blob_key(blob_id, block_number);
             self.client_s3
                 .put_object()

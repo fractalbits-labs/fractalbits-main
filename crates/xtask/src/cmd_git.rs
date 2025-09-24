@@ -42,6 +42,11 @@ const GIT_REPOS: &[Repo] = &[
         url: "https://github.com/fractalbits-labs/fractalbits-ui.git",
         branch: "main",
     },
+    Repo {
+        path: "prebuilt",
+        url: "https://github.com/fractalbits-labs/fractalbits-prebuilt.git",
+        branch: "main",
+    },
 ];
 
 pub fn run_cmd_git(git_cmd: GitCommand) -> CmdResult {
@@ -196,10 +201,17 @@ fn init_repos() -> CmdResult {
         let url = repo.url;
 
         if !Path::new(path).exists() {
-            run_cmd! {
-                info "Cloning repo: $path";
-                git clone -b $branch $url $path;
-            }?;
+            if path == "prebuilt" {
+                run_cmd! {
+                    info "Cloning repo: prebuilt (depth=1)";
+                    git clone --depth=1 -b $branch $url $path;
+                }?;
+            } else {
+                run_cmd! {
+                    info "Cloning repo: $path";
+                    git clone -b $branch $url $path;
+                }?;
+            }
         } else {
             info!("Git repo already exists: {}", path);
         }

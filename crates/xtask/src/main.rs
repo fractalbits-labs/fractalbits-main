@@ -16,8 +16,10 @@ use strum::{AsRefStr, EnumString};
 pub const TS_FMT: &str = "%b %d %H:%M:%.S";
 // Need to match with api_server's default config to make authentication work
 pub const UI_DEFAULT_REGION: &str = "localdev";
+pub const UI_REPO_PATH: &str = "ui";
 pub const ZIG_DEBUG_OUT: &str = "target/debug/zig-out";
 pub const ZIG_RELEASE_OUT: &str = "target/release/zig-out";
+pub const ZIG_REPO_PATH: &str = "core";
 
 #[derive(Parser)]
 #[clap(name = "xtask", about = "Misc project related tasks")]

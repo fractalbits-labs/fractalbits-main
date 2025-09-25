@@ -1,5 +1,4 @@
 use crate::*;
-use cmd_build::ZIG_REPO_PATH;
 
 pub fn run_cmd_precheckin(
     init_config: InitConfig,

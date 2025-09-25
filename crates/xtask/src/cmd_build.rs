@@ -10,8 +10,6 @@ pub static BUILD_ENVS: LazyLock<Vec<String>> =
 pub fn get_build_envs() -> &'static Vec<String> {
     &BUILD_ENVS
 }
-pub const ZIG_REPO_PATH: &str = "core";
-pub const UI_REPO_PATH: &str = "ui";
 
 #[derive(Copy, Clone, AsRefStr, EnumString)]
 #[strum(serialize_all = "snake_case")]
@@ -162,12 +160,10 @@ pub fn build_prebuilt(_release: bool) -> CmdResult {
     let build_dir = format!("target/{build_target}/release");
     let build_envs = get_build_envs();
 
-    run_cmd! {
-        info "Building Rust binaries for x86_64_v3 (size-optimized release mode with zigbuild)...";
-        RUSTFLAGS="-C target-cpu=x86-64-v3 -C opt-level=z -C codegen-units=1 -C strip=symbols"
-        $[build_envs] cargo zigbuild --release --target $build_target
-            --workspace --exclude fractalbits-bootstrap --exclude rewrk*;
-    }?;
+    if !Path::new(&format!("{ZIG_REPO_PATH}/.git/")).exists() {
+        warn!("No core repo found, skip building prebuilt");
+        return Ok(());
+    }
 
     run_cmd! {
         info "Building Zig binaries for x86_64_v3 (release mode)...";
@@ -177,6 +173,13 @@ pub fn build_prebuilt(_release: bool) -> CmdResult {
             -Dtarget=x86_64-linux-gnu
             -Dcpu=x86_64_v3 2>&1;
         info "Zig build complete";
+    }?;
+
+    run_cmd! {
+        info "Building Rust binaries for x86_64_v3 (size-optimized release mode with zigbuild)...";
+        RUSTFLAGS="-C target-cpu=x86-64-v3 -C opt-level=z -C codegen-units=1 -C strip=symbols"
+        $[build_envs] cargo zigbuild --release --target $build_target
+            --workspace --exclude fractalbits-bootstrap --exclude rewrk*;
     }?;
 
     info!("Copying binaries to prebuilt directory...");

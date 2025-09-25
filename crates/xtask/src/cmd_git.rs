@@ -18,7 +18,7 @@ const GIT_REPOS: &[Repo] = &[
         branch: "main",
     },
     Repo {
-        path: cmd_build::ZIG_REPO_PATH,
+        path: ZIG_REPO_PATH,
         url: "https://github.com/fractalbits-labs/fractalbits-core.git",
         branch: "main",
     },
@@ -38,7 +38,7 @@ const GIT_REPOS: &[Repo] = &[
         branch: "main",
     },
     Repo {
-        path: cmd_build::UI_REPO_PATH,
+        path: UI_REPO_PATH,
         url: "https://github.com/fractalbits-labs/fractalbits-ui.git",
         branch: "main",
     },

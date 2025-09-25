@@ -102,14 +102,18 @@ pub fn build(deploy_target: DeployTarget, release_mode: bool) -> CmdResult {
                 if *bin != "fractalbits-bootstrap" {
                     let src_path = format!("target/{}/{}/{}", rust_target, build_dir, bin);
                     let dst_path = format!("{}/{}", deploy_dir, bin);
-                    run_cmd!(cp $src_path $dst_path)?;
+                    if Path::new(&src_path).exists() {
+                        run_cmd!(cp $src_path $dst_path)?;
+                    }
                 }
             }
         }
     }
 
     // Build Zig projects for all CPU targets
-    if deploy_target == DeployTarget::Zig || deploy_target == DeployTarget::All {
+    if (deploy_target == DeployTarget::Zig || deploy_target == DeployTarget::All)
+        && Path::new(ZIG_REPO_PATH).exists()
+    {
         info!("Building Zig projects for all CPU targets");
         let build_envs = cmd_build::get_build_envs();
 
@@ -124,7 +128,7 @@ pub fn build(deploy_target: DeployTarget, release_mode: bool) -> CmdResult {
             let zig_cpu = target.zig_cpu;
             run_cmd! {
                 info "Building Zig projects for $zig_target ($zig_cpu)";
-                cd ./core;
+                cd $ZIG_REPO_PATH;
                 $[build_envs] zig build
                     -p ../$zig_out_dir
                     -Dtarget=$zig_target -Dcpu=$zig_cpu $zig_build_opt 2>&1;
@@ -141,14 +145,21 @@ pub fn build(deploy_target: DeployTarget, release_mode: bool) -> CmdResult {
     }
 
     // Build and copy UI
-    if deploy_target == DeployTarget::Ui || deploy_target == DeployTarget::All {
+    if (deploy_target == DeployTarget::Ui || deploy_target == DeployTarget::All)
+        && Path::new(UI_REPO_PATH).exists()
+    {
         let region = run_fun!(aws configure list | grep region | awk r"{print $2}")?;
         cmd_build::build_ui(&region)?;
-        run_cmd!(cp -r ui/dist prebuilt/deploy/ui)?;
+        run_cmd! {
+            rm -rf prebuilt/deploy/ui;
+            cp -r ui/dist prebuilt/deploy/ui
+        }?;
     }
 
     // Build (extract) warp binary for each architecture
     build_warp_binaries()?;
+
+    info!("Deploy build is done");
 
     Ok(())
 }
@@ -209,7 +220,7 @@ pub fn upload() -> CmdResult {
     run_cmd! {
         info "Syncing all binaries to S3 bucket $bucket";
         aws s3 sync prebuilt/deploy $bucket;
-        info "Syncing all binaries done";
+        info "Syncing all binaries is done";
     }?;
     Ok(())
 }

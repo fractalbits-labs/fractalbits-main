@@ -134,7 +134,7 @@ fn describe_stack(stack_name: &str) -> CmdResult {
 
     // Create and populate the table
     let mut table = Table::new();
-    table.load_preset(presets::ASCII_BORDERS_ONLY_CONDENSED);
+    table.load_preset(presets::NOTHING);
     table.set_header(vec![
         "Name",
         "InstanceId",

@@ -257,3 +257,45 @@ pub fn cleanup() -> CmdResult {
     info!("Successfully cleaned up builds bucket: {bucket}");
     Ok(())
 }
+
+pub fn deploy_vpc() -> CmdResult {
+    let cdk_dir = "cdk/fractalbits-vpc";
+
+    // Check if node_modules exists, if not run npm install
+    let node_modules_path = format!("{}/node_modules/", cdk_dir);
+    if !Path::new(&node_modules_path).exists() {
+        run_cmd! {
+            info "Node modules not found. Installing dependencies...";
+            cd $cdk_dir;
+            npm install;
+            info "Dependencies installed successfully";
+        }?;
+    }
+
+    // Check if CDK has been bootstrapped
+    let bootstrap_cdk_exists = run_cmd! {
+        aws cloudformation describe-stacks
+            --stack-name CDKToolkit &>/dev/null
+    }
+    .is_ok();
+    if !bootstrap_cdk_exists {
+        run_cmd! {
+            info "CDK bootstrap stack not found. Running CDK bootstrap...";
+            cd $cdk_dir;
+            npx cdk bootstrap 2>&1;
+            info "CDK bootstrap completed successfully";
+        }?;
+    }
+
+    // Deploy the VPC stack
+    run_cmd! {
+        info "Deploying FractalbitsVpcStack...";
+        cd $cdk_dir;
+        npx cdk deploy FractalbitsVpcStack
+            --context benchType=external
+            --require-approval never 2>&1;
+        info "VPC deployment completed successfully";
+    }?;
+
+    Ok(())
+}

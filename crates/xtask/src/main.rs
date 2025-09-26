@@ -140,6 +140,9 @@ pub enum DeployCommand {
 
     #[clap(about = "Cleanup s3 builds bucket (empty and delete)")]
     Cleanup,
+
+    #[clap(about = "Deploy VPC infrastructure using CDK")]
+    Vpc,
 }
 
 #[derive(Clone, AsRefStr, EnumString, clap::ValueEnum)]
@@ -450,6 +453,7 @@ async fn main() -> CmdResult {
             DeployCommand::Build { target, release } => cmd_deploy::build(target, release)?,
             DeployCommand::Upload => cmd_deploy::upload()?,
             DeployCommand::Cleanup => cmd_deploy::cleanup()?,
+            DeployCommand::Vpc => cmd_deploy::deploy_vpc()?,
         },
         Cmd::RunTests { test_type } => {
             let test_type = test_type.unwrap_or(TestType::All);

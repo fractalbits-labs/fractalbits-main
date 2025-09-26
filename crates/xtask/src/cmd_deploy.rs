@@ -259,7 +259,7 @@ pub fn cleanup() -> CmdResult {
 }
 
 pub fn deploy_vpc() -> CmdResult {
-    let cdk_dir = "cdk/fractalbits-vpc";
+    let cdk_dir = "vpc/fractalbits-vpc";
 
     // Check if node_modules exists, if not run npm install
     let node_modules_path = format!("{}/node_modules/", cdk_dir);

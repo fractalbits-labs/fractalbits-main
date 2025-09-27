@@ -214,26 +214,15 @@ fn init_repos(all: bool) -> CmdResult {
 }
 
 fn run_foreach_repo(command: &[String]) -> CmdResult {
-    if command.is_empty() {
-        cmd_die!("No command specified for foreach");
-    }
-
     info!("Running command in each repo: {command:?} ...");
 
     for repo in all_repos() {
         let path = repo.path;
-        if path == "." {
-            run_cmd! {
-                info "Running in main repo";
-                $[command] 2>&1;
-            }?;
-        } else {
-            run_cmd! {
-                info "Running in repo: $path";
-                cd $path;
-                $[command] 2>&1;
-            }?;
-        }
+        run_cmd! {
+            info "Running in repo: $path";
+            cd $path;
+            $[command] 2>&1;
+        }?;
     }
 
     Ok(())

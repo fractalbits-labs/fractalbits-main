@@ -77,8 +77,10 @@ pub fn build(deploy_target: DeployTarget, release_mode: bool) -> CmdResult {
             // Copy fractalbits-bootstrap to arch-level directory
             let src_path = format!("target/{}/{}/fractalbits-bootstrap", rust_target, build_dir);
             let dst_path = format!("prebuilt/deploy/{}/fractalbits-bootstrap", arch);
-            run_cmd!(mkdir -p prebuilt/deploy/$arch)?;
-            run_cmd!(cp $src_path $dst_path)?;
+            run_cmd! {
+                mkdir -p prebuilt/deploy/$arch;
+                cp $src_path $dst_path;
+            }?;
         }
     }
 
@@ -153,7 +155,7 @@ pub fn build(deploy_target: DeployTarget, release_mode: bool) -> CmdResult {
         cmd_build::build_ui(&region)?;
         run_cmd! {
             rm -rf prebuilt/deploy/ui;
-            cp -r ui/dist prebuilt/deploy/ui
+            cp -r ui/dist prebuilt/deploy/ui;
         }?;
     }
 
@@ -214,7 +216,7 @@ pub fn upload() -> CmdResult {
     if !bucket_exists {
         run_cmd! {
             info "Creating bucket $bucket";
-            aws s3 mb $bucket
+            aws s3 mb $bucket;
         }?;
     }
 
@@ -276,19 +278,15 @@ fn cleanup_builds_bucket() -> CmdResult {
         return Ok(());
     }
 
-    // Empty the bucket first (delete all objects)
     run_cmd! {
-        info "Emptying bucket $bucket";
+        info "Emptying bucket $bucket (delete all objects)";
         aws s3 rm $bucket --recursive;
-    }?;
 
-    // Delete the bucket
-    run_cmd! {
         info "Deleting bucket $bucket";
         aws s3 rb $bucket;
+        info "Successfully cleaned up builds bucket: $bucket";
     }?;
 
-    info!("Successfully cleaned up builds bucket: {bucket}");
     Ok(())
 }
 

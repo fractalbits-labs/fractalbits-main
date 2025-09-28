@@ -3,7 +3,9 @@ use cmd_lib::*;
 use std::io::Error;
 
 const BLOB_DRAM_MEM_PERCENT: f64 = 0.8;
-const EBS_SPACE_PERCENT: f64 = 0.9;
+// AWS EBS has 500 IOPS/GB limit, so we need to have 20GB 
+// space for 10K IOPS. but journal size is much smaller.
+const EBS_SPACE_PERCENT: f64 = 0.2;
 
 /// Calculate art_journal_segment_size based on EBS volume size
 fn calculate_art_journal_segment_size(volume_dev: &str) -> Result<u64, Error> {

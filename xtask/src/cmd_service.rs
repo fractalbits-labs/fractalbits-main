@@ -928,7 +928,7 @@ fn create_dirs_for_bss_server(bss_id: u32) -> CmdResult {
     }?;
 
     // Data volume
-    let data_volume_id = bss_id / 3;
+    let data_volume_id = (bss_id / 3) + 1;
     run_cmd!(mkdir -p data/bss$bss_id/local/blobs/data_volume$data_volume_id)?;
     for i in 0..256 {
         run_cmd!(mkdir -p data/bss$bss_id/local/blobs/data_volume$data_volume_id/dir$i)?;

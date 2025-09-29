@@ -157,7 +157,7 @@ fn initialize_bss_volume_groups_in_ddb() -> CmdResult {
     let num_data_volumes = TOTAL_BSS_NODES / NODES_PER_DATA_VOLUME;
 
     let mut data_volumes = Vec::new();
-    for vol_id in 0..num_data_volumes {
+    for vol_id in 1..num_data_volumes + 1 {
         let start_idx = vol_id * NODES_PER_DATA_VOLUME;
         let end_idx = start_idx + NODES_PER_DATA_VOLUME;
 
@@ -224,7 +224,7 @@ fn initialize_bss_volume_groups_in_ddb() -> CmdResult {
         r#"{{
         "volumes": [
             {{
-                "volume_id": 0,
+                "volume_id": 1,
                 "bss_nodes": [{}]
             }}
         ],

@@ -440,7 +440,9 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
         service.as_ref()
     );
     for service in services {
-        if service == ServiceName::Bss {
+        if service == ServiceName::Nss || service == ServiceName::Mirrord {
+            // skip stopping managed services directly
+        } else if service == ServiceName::Bss {
             // Handle BSS template instances using helper function
             for_each_bss_service(|service_name| {
                 if run_cmd!(systemctl --user is-active --quiet $service_name.service).is_err() {

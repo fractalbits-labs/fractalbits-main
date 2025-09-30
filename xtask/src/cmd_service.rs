@@ -456,6 +456,8 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
                 }
                 Ok(())
             })?;
+            // In case someone removes the whole data directory before issuing stop command
+            run_cmd!(ignore killall bss_server &>/dev/null)?;
         } else {
             let service_name = service.as_ref();
             if run_cmd!(systemctl --user is-active --quiet $service_name.service).is_err() {

@@ -826,14 +826,9 @@ Environment="MINIO_REGION=localdev""##
             "After=rss.service\nWants=rss.service\n"
         }
         ServiceName::Rss => "After=ddb_local.service\nWants=ddb_local.service\n",
-        ServiceName::Nss => "After=minio.service\nWants=minio.service\n",
         ServiceName::ApiServer | ServiceName::GuiServer => {
-            "After=rss.service nss.service\nWants=rss.service nss.service\n"
+            "After=rss.service nss.service minio.service\nWants=rss.service nss.service minio.service\n"
         }
-        ServiceName::DdbLocal
-        | ServiceName::Minio
-        | ServiceName::MinioAz1
-        | ServiceName::MinioAz2 => "",
         _ => "",
     };
 

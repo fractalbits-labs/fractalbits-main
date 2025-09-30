@@ -45,7 +45,7 @@ pub trait RpcCodec<Header: MessageHeaderTrait>:
     const RPC_TYPE: &'static str;
 }
 
-pub struct RpcClient<Codec, Header: MessageHeaderTrait> {
+pub struct RpcClient<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> {
     requests: RequestMap<Header>,
     sender: Sender<MessageFrame<Header>>,
     next_id: AtomicU32,
@@ -62,6 +62,15 @@ pub struct RpcClient<Codec, Header: MessageHeaderTrait> {
 enum DrainFrom {
     SendTask,
     ReceiveTask,
+    RpcClient,
+}
+
+impl<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> Drop for RpcClient<Codec, Header> {
+    fn drop(&mut self) {
+        debug!(rpc_type = Codec::RPC_TYPE, socket_fd = %self.socket_fd, "RpcClient dropped");
+        // Just try to make metrics (`rpc_request_pending_in_resp_map`) accurate
+        Self::drain_pending_requests(self.socket_fd, &self.requests, DrainFrom::RpcClient);
+    }
 }
 
 impl<Codec, Header> RpcClient<Codec, Header>
@@ -158,28 +167,28 @@ where
         // Send task
         {
             let sender_requests = requests.clone();
-            let sender_is_closed = is_closed.clone();
+            let is_closed = is_closed.clone();
             tasks.spawn(async move {
                 if let Err(e) = Self::send_task(writer, receiver, socket_fd, rpc_type).await {
                     warn!(%rpc_type, %socket_fd, %e, "send task failed");
                 }
-                sender_is_closed.store(true, Ordering::SeqCst);
-                Self::drain_requests(&sender_requests, DrainFrom::SendTask);
+                is_closed.store(true, Ordering::SeqCst);
+                Self::drain_pending_requests(socket_fd, &sender_requests, DrainFrom::SendTask);
             });
         }
 
         // Receive task
         {
             let receiver_requests = requests.clone();
-            let receiver_is_closed = is_closed.clone();
+            let is_closed = is_closed.clone();
             tasks.spawn(async move {
                 if let Err(e) =
                     Self::receive_task(reader, &receiver_requests, socket_fd, rpc_type).await
                 {
                     warn!(%rpc_type, %socket_fd, %e, "receive task failed");
                 }
-                receiver_is_closed.store(true, Ordering::SeqCst);
-                Self::drain_requests(&receiver_requests, DrainFrom::ReceiveTask);
+                is_closed.store(true, Ordering::SeqCst);
+                Self::drain_pending_requests(socket_fd, &receiver_requests, DrainFrom::ReceiveTask);
             });
         }
 
@@ -249,10 +258,23 @@ where
         Ok(())
     }
 
-    fn drain_requests(requests: &RequestMap<Header>, drain_from: DrainFrom) {
-        let drained_requests = std::mem::take(&mut *requests.lock());
-        for (request_id, _tx) in drained_requests {
-            debug!(rpc_type = Codec::RPC_TYPE, %request_id, drain_from = %drain_from.as_ref(), "dropping pending request");
+    fn drain_pending_requests(
+        socket_fd: RawFd,
+        requests: &RequestMap<Header>,
+        drain_from: DrainFrom,
+    ) {
+        let mut requests = requests.lock();
+        let pending_count = requests.len();
+        if pending_count > 0 {
+            warn!(
+                rpc_type = %Codec::RPC_TYPE,
+                %socket_fd,
+                "draining {pending_count} pending requests from {} on connection close",
+                drain_from.as_ref()
+            );
+            gauge!("rpc_request_pending_in_resp_map", "type" => Codec::RPC_TYPE)
+                .decrement(pending_count as f64);
+            requests.clear(); // This drops the senders, notifying receivers of an error.
         }
     }
 
@@ -445,21 +467,21 @@ where
         })
         .await
         .map_err(|e| {
-            warn!(rpc_type = Codec::RPC_TYPE, addr = %addr_key, error = %e, "failed to connect RPC server");
+            warn!(rpc_type = %Codec::RPC_TYPE, addr = %addr_key, error = %e, "failed to connect RPC server");
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         let connect_duration = start.elapsed();
         if connect_duration > Duration::from_secs(1) {
             warn!(
-                rpc_type = Codec::RPC_TYPE,
+                rpc_type = %Codec::RPC_TYPE,
                 addr = %addr_key,
                 duration_ms = %connect_duration.as_millis(),
                 "Slow connection establishment to RPC server"
             );
         } else if connect_duration > Duration::from_millis(100) {
             debug!(
-                rpc_type = Codec::RPC_TYPE,
+                rpc_type = %Codec::RPC_TYPE,
                 addr = %addr_key,
                 duration_ms = %connect_duration.as_millis(),
                 "Connection established to RPC server"
@@ -540,14 +562,14 @@ where
         let connect_duration = connect_start.elapsed();
         if connect_duration.as_millis() > 100 {
             warn!(
-                rpc_type = Codec::RPC_TYPE,
+                rpc_type = %Codec::RPC_TYPE,
                 addr = %addr_key,
                 duration_ms = %connect_duration.as_millis(),
                 "Slow connection establishment to RPC server"
             );
         } else {
             debug!(
-                rpc_type = Codec::RPC_TYPE,
+                rpc_type = %Codec::RPC_TYPE,
                 addr = %addr_key,
                 duration_ms = %connect_duration.as_millis(),
                 "Connection established to RPC server"

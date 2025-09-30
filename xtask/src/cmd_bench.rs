@@ -31,10 +31,7 @@ pub fn run_cmd_bench(
             *service_name = ServiceName::Nss;
             build_bench_rpc()?;
             init_service(*service_name, build_mode, InitConfig::default())?;
-            for id in 0..6 {
-                start_bss_instance(id)?;
-            }
-
+            start_service(ServiceName::Bss)?;
             start_service(ServiceName::Nss)?;
             uri = "127.0.0.1:8087";
             bench_exe = "./target/release/rewrk_rpc";
@@ -112,7 +109,9 @@ pub fn run_cmd_bench(
     }
 
     // stop service after benchmark to save cpu power
-    stop_service(*service_name)?;
-    stop_service(ServiceName::Bss)?;
+    run_cmd! {
+        ignore killall nss_server &>/dev/null;
+        ignore killall bss_server &>/dev/null;
+    }?;
     Ok(())
 }

@@ -104,31 +104,7 @@ pub fn init_service(
         }?;
 
         // Initialize BSS data volume group configuration in service-discovery table
-        let bss_data_vg_config_json = r#"{
-            "volumes": [
-                {
-                    "volume_id": 1,
-                    "bss_nodes": [
-                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088},
-                        {"node_id": "bss1", "ip": "127.0.0.1", "port": 8089},
-                        {"node_id": "bss2", "ip": "127.0.0.1", "port": 8090}
-                    ]
-                },
-                {
-                    "volume_id": 2,
-                    "bss_nodes": [
-                        {"node_id": "bss3", "ip": "127.0.0.1", "port": 8091},
-                        {"node_id": "bss4", "ip": "127.0.0.1", "port": 8092},
-                        {"node_id": "bss5", "ip": "127.0.0.1", "port": 8093}
-                    ]
-                }
-            ],
-            "quorum": {
-                "n": 3,
-                "r": 2,
-                "w": 2
-            }
-        }"#;
+        let bss_data_vg_config_json = generate_bss_data_vg_config(init_config.bss_count);
         let bss_data_vg_config_item = format!(
             r#"{{"service_id":{{"S":"bss-data-vg-config"}},"value":{{"S":"{}"}}}}"#,
             bss_data_vg_config_json
@@ -148,26 +124,7 @@ pub fn init_service(
         }?;
 
         // Initialize BSS metadata volume group configuration in service-discovery table
-        let bss_metadata_vg_config_json = r#"{
-            "volumes": [
-                {
-                    "volume_id": 1,
-                    "bss_nodes": [
-                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088},
-                        {"node_id": "bss1", "ip": "127.0.0.1", "port": 8089},
-                        {"node_id": "bss2", "ip": "127.0.0.1", "port": 8090},
-                        {"node_id": "bss3", "ip": "127.0.0.1", "port": 8091},
-                        {"node_id": "bss4", "ip": "127.0.0.1", "port": 8092},
-                        {"node_id": "bss5", "ip": "127.0.0.1", "port": 8093}
-                    ]
-                }
-            ],
-            "quorum": {
-                "n": 6,
-                "r": 4,
-                "w": 4
-            }
-        }"#;
+        let bss_metadata_vg_config_json = generate_bss_metadata_vg_config(init_config.bss_count);
         let bss_metadata_vg_config_item = format!(
             r#"{{"service_id":{{"S":"bss-metadata-vg-config"}},"value":{{"S":"{}"}}}}"#,
             bss_metadata_vg_config_json
@@ -468,7 +425,7 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
                 continue;
             }
 
-            if service == ServiceName::Mirrord {
+            if service == ServiceName::NssRoleAgentB {
                 while run_cmd!(systemctl --user is-active --quiet nss.service).is_ok() {
                     // waiting for nss to stop at first, or it may crash nss due to journal mirroring failure
                     std::thread::sleep(Duration::from_secs(1));
@@ -1129,4 +1086,95 @@ fn generate_https_certificates() -> CmdResult {
     info!("  Certificate: data/etc/cert.pem (trusted by system)");
     info!("  Private key: data/etc/key.pem (unencrypted)");
     Ok(())
+}
+
+fn generate_bss_data_vg_config(bss_count: u32) -> String {
+    match bss_count {
+        1 => r#"{
+            "volumes": [
+                {
+                    "volume_id": 1,
+                    "bss_nodes": [
+                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088}
+                    ]
+                }
+            ],
+            "quorum": {
+                "n": 1,
+                "r": 1,
+                "w": 1
+            }
+        }"#
+        .to_string(),
+        6 => r#"{
+            "volumes": [
+                {
+                    "volume_id": 1,
+                    "bss_nodes": [
+                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088},
+                        {"node_id": "bss1", "ip": "127.0.0.1", "port": 8089},
+                        {"node_id": "bss2", "ip": "127.0.0.1", "port": 8090}
+                    ]
+                },
+                {
+                    "volume_id": 2,
+                    "bss_nodes": [
+                        {"node_id": "bss3", "ip": "127.0.0.1", "port": 8091},
+                        {"node_id": "bss4", "ip": "127.0.0.1", "port": 8092},
+                        {"node_id": "bss5", "ip": "127.0.0.1", "port": 8093}
+                    ]
+                }
+            ],
+            "quorum": {
+                "n": 3,
+                "r": 2,
+                "w": 2
+            }
+        }"#
+        .to_string(),
+        _ => unreachable!("bss_count validated in main.rs"),
+    }
+}
+
+fn generate_bss_metadata_vg_config(bss_count: u32) -> String {
+    match bss_count {
+        1 => r#"{
+            "volumes": [
+                {
+                    "volume_id": 1,
+                    "bss_nodes": [
+                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088}
+                    ]
+                }
+            ],
+            "quorum": {
+                "n": 1,
+                "r": 1,
+                "w": 1
+            }
+        }"#
+        .to_string(),
+        6 => r#"{
+            "volumes": [
+                {
+                    "volume_id": 1,
+                    "bss_nodes": [
+                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088},
+                        {"node_id": "bss1", "ip": "127.0.0.1", "port": 8089},
+                        {"node_id": "bss2", "ip": "127.0.0.1", "port": 8090},
+                        {"node_id": "bss3", "ip": "127.0.0.1", "port": 8091},
+                        {"node_id": "bss4", "ip": "127.0.0.1", "port": 8092},
+                        {"node_id": "bss5", "ip": "127.0.0.1", "port": 8093}
+                    ]
+                }
+            ],
+            "quorum": {
+                "n": 6,
+                "r": 4,
+                "w": 4
+            }
+        }"#
+        .to_string(),
+        _ => unreachable!("bss_count validated in main.rs"),
+    }
 }

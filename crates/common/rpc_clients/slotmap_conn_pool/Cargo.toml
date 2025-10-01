@@ -9,3 +9,4 @@ edition = "2024"
 slotmap.workspace = true
 tokio.workspace = true
 parking_lot.workspace = true
+tracing.workspace = true

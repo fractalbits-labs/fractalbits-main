@@ -446,14 +446,11 @@ where
     Codec: RpcCodec<Header>,
     Header: MessageHeaderTrait + Clone + Send + Sync + 'static,
 {
-    async fn establish_connection(
-        addr_key: String,
-        session_id: Option<u64>,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>>
-    where
-        Header: Default,
-    {
-        const MAX_CONNECTION_RETRIES: usize = 100 * 3600; // Max attempts to connect to an RPC server
+    async fn connect_with_retry(
+        addr_key: &str,
+    ) -> Result<TcpStream, Box<dyn std::error::Error + Send + Sync>> {
+        debug!("Trying to connect to {addr_key}");
+        const MAX_CONNECTION_RETRIES: usize = 100 * 3600;
 
         let start = std::time::Instant::now();
         let retry_strategy = FixedInterval::from_millis(10)
@@ -461,8 +458,7 @@ where
             .take(MAX_CONNECTION_RETRIES);
 
         let stream = Retry::spawn(retry_strategy, || async {
-            // Resolve DNS name to socket address for each connection attempt
-            let socket_addr = Self::resolve_address(&addr_key).await?;
+            let socket_addr = Self::resolve_address(addr_key).await?;
             TcpStream::connect(socket_addr).await
         })
         .await
@@ -488,6 +484,17 @@ where
             );
         }
 
+        Ok(stream)
+    }
+
+    async fn establish_connection(
+        addr_key: String,
+        session_id: Option<u64>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>>
+    where
+        Header: Default,
+    {
+        let stream = Self::connect_with_retry(&addr_key).await?;
         let configured_stream = Self::configure_tcp_socket(stream)?;
 
         match session_id {
@@ -549,36 +556,9 @@ where
     where
         Header: Default,
     {
-        let address = Self::resolve_address(&addr_key)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-
-        let connect_start = tokio::time::Instant::now();
-
-        let stream = TcpStream::connect(address)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-
-        let connect_duration = connect_start.elapsed();
-        if connect_duration.as_millis() > 100 {
-            warn!(
-                rpc_type = %Codec::RPC_TYPE,
-                addr = %addr_key,
-                duration_ms = %connect_duration.as_millis(),
-                "Slow connection establishment to RPC server"
-            );
-        } else {
-            debug!(
-                rpc_type = %Codec::RPC_TYPE,
-                addr = %addr_key,
-                duration_ms = %connect_duration.as_millis(),
-                "Connection established to RPC server"
-            );
-        }
-
+        let stream = Self::connect_with_retry(&addr_key).await?;
         let configured_stream = Self::configure_tcp_socket(stream)?;
 
-        // Use the new constructor that preserves session state
         Self::new_with_session_and_request_id(configured_stream, session_id, next_request_id)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)

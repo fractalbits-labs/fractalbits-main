@@ -9,6 +9,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Semaphore;
+use tracing::debug;
 
 new_key_type! { struct ConnectionKey; }
 
@@ -193,6 +194,7 @@ impl<T: Poolable, K: Key> ConnPool<T, K> {
                     // Create replacement connection with session state from broken connection
                     let new_conn = if old_session_id != 0 {
                         // Use session state from broken connection
+                        debug!("creating new connection {addr_key:?} with old session id {old_session_id}");
                         T::new_with_session_and_request_id(
                             addr_key.clone().into(),
                             old_session_id,
@@ -202,8 +204,14 @@ impl<T: Poolable, K: Key> ConnPool<T, K> {
                     } else {
                         // No previous session state, create new connection
                         match session_id {
-                            Some(id) => T::new_with_session_id(addr_key.clone().into(), id).await,
-                            None => T::new(addr_key.clone().into()).await,
+                            Some(id) => {
+                                debug!("create new connection {addr_key:?} with session id {id}");
+                                T::new_with_session_id(addr_key.clone().into(), id).await
+                            }
+                            None => {
+                                debug!("create new connection {addr_key:?}");
+                                T::new(addr_key.clone().into()).await
+                            }
                         }
                     }
                     .unwrap_or_else(|e| panic!("Failed to create new connection: {e:?}"));

@@ -19,8 +19,6 @@ pub fn run_cmd_tool(tool_kind: ToolKind) -> CmdResult {
 }
 
 fn describe_stack(stack_name: &str) -> CmdResult {
-    println!("=== All EC2 Instances in Stack: {} ===", stack_name);
-
     // Get direct EC2 instance IDs from the CloudFormation stack
     let direct_instance_ids = run_fun! {
         aws cloudformation describe-stack-resources

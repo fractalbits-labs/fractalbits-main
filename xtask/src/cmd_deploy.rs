@@ -229,7 +229,7 @@ pub fn upload() -> CmdResult {
 }
 
 fn get_build_bucket_name() -> FunResult {
-    let region = run_fun!(aws configure list | grep region | awk r"{print $2}")?;
+    let region = run_fun!(aws configure get region)?;
     let account_id = run_fun!(aws sts get-caller-identity --query Account --output text)?;
     Ok(format!("fractalbits-builds-{region}-{account_id}"))
 }

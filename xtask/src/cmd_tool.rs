@@ -130,6 +130,34 @@ fn describe_stack(stack_name: &str) -> CmdResult {
             --output text
     }?;
 
+    // Collect instance data for sorting
+    let mut instances: Vec<(String, String, String, String, String, String, String)> = Vec::new();
+    for line in instance_details.lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 6 {
+            let name = if parts[0] == "None" { "" } else { parts[0] };
+            let instance_id = parts[1];
+            let state = parts[2];
+            let instance_type = parts[3];
+            let az = parts[4];
+            let private_ip = if parts[5] == "None" { "-" } else { parts[5] };
+            let zone_id = zone_map.get(az).map(|s| s.as_str()).unwrap_or("N/A");
+
+            instances.push((
+                name.to_string(),
+                instance_id.to_string(),
+                state.to_string(),
+                instance_type.to_string(),
+                az.to_string(),
+                zone_id.to_string(),
+                private_ip.to_string(),
+            ));
+        }
+    }
+
+    // Sort by name (first column)
+    instances.sort_by(|a, b| a.0.cmp(&b.0));
+
     // Create and populate the table
     let mut table = Table::new();
     table.load_preset(presets::NOTHING);
@@ -143,27 +171,16 @@ fn describe_stack(stack_name: &str) -> CmdResult {
         "PrivateIP",
     ]);
 
-    for line in instance_details.lines() {
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() >= 6 {
-            let name = if parts[0] == "None" { "" } else { parts[0] };
-            let instance_id = parts[1];
-            let state = parts[2];
-            let instance_type = parts[3];
-            let az = parts[4];
-            let private_ip = if parts[5] == "None" { "-" } else { parts[5] };
-            let zone_id = zone_map.get(az).map(|s| s.as_str()).unwrap_or("N/A");
-
-            table.add_row(vec![
-                name,
-                instance_id,
-                state,
-                instance_type,
-                az,
-                zone_id,
-                private_ip,
-            ]);
-        }
+    for (name, instance_id, state, instance_type, az, zone_id, private_ip) in instances {
+        table.add_row(vec![
+            name,
+            instance_id,
+            state,
+            instance_type,
+            az,
+            zone_id,
+            private_ip,
+        ]);
     }
 
     println!("{table}");

@@ -487,13 +487,12 @@ pub fn setup_cloudwatch_agent() -> CmdResult {
 }
 
 pub fn create_ddb_register_and_deregister_service(service_id: &str) -> CmdResult {
-    run_cmd!(echo $service_id > ${ETC_PATH}service_id)?;
-    create_ddb_register_service()?;
-    create_ddb_deregister_service()?;
+    create_ddb_register_service(service_id)?;
+    create_ddb_deregister_service(service_id)?;
     Ok(())
 }
 
-fn create_ddb_register_service() -> CmdResult {
+fn create_ddb_register_service(service_id: &str) -> CmdResult {
     let ddb_register_script = format!("{BIN_PATH}ddb-register.sh");
     let systemd_unit_content = format!(
         r##"[Unit]
@@ -512,7 +511,7 @@ WantedBy=multi-user.target
     let register_script_content = format!(
         r##"#!/bin/bash
 set -e
-service_id=$(cat {ETC_PATH}service_id) || exit 0 # not registered yet
+service_id={service_id}
 instance_id=$(ec2-metadata -i | awk '{{print $2}}')
 private_ip=$(ec2-metadata -o | awk '{{print $2}}')
 
@@ -573,7 +572,7 @@ echo "Done" >&2
     Ok(())
 }
 
-fn create_ddb_deregister_service() -> CmdResult {
+fn create_ddb_deregister_service(service_id: &str) -> CmdResult {
     let ddb_deregister_script = format!("{BIN_PATH}ddb-deregister.sh");
     let systemd_unit_content = format!(
         r##"[Unit]
@@ -596,7 +595,7 @@ WantedBy=reboot.target halt.target poweroff.target kexec.target
     let deregister_script_content = format!(
         r##"#!/bin/bash
 set -e
-service_id=$(cat {ETC_PATH}service_id) || exit 0 # not registered yet
+service_id={service_id}
 instance_id=$(ec2-metadata -i | awk '{{print $2}}')
 private_ip=$(ec2-metadata -o | awk '{{print $2}}')
 

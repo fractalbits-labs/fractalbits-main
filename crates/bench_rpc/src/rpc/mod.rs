@@ -24,7 +24,7 @@ mod user_input;
 
 pub type Handle = JoinHandle<anyhow::Result<WorkerResult>>;
 
-const TEST_BUCKET_ROOT_BLOB_NAME: &str = "12345678-1234567890abcdef-0001";
+const TEST_BUCKET_ROOT_BLOB_NAME: &str = "12345678-1234567890abcdef-0001-1234";
 const INODE_SIZE: usize = 187;
 
 fn read_keys(filename: &str, num_tasks: usize, keys_limit: usize) -> Vec<VecDeque<String>> {

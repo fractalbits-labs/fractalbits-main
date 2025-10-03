@@ -212,15 +212,25 @@ where
         socket_fd: RawFd,
         rpc_type: &'static str,
     ) -> Result<(), RpcError> {
+        let mut header_buf = BytesMut::with_capacity(Header::SIZE);
         while let Some(frame) = receiver.recv().await {
             let request_id = frame.header.get_id();
             debug!(%rpc_type, %socket_fd, %request_id, "sending request:");
-            let mut buf = BytesMut::new();
-            // Encode header first
-            frame.header.encode(&mut buf);
-            // Then append body
-            buf.extend_from_slice(&frame.body);
-            writer.write_all(&buf).await.map_err(RpcError::IoError)?;
+
+            header_buf.clear();
+            frame.header.encode(&mut header_buf);
+
+            writer
+                .write_all(header_buf.as_ref())
+                .await
+                .map_err(RpcError::IoError)?;
+
+            if !frame.body.is_empty() {
+                writer
+                    .write_all(&frame.body)
+                    .await
+                    .map_err(RpcError::IoError)?;
+            }
             counter!("rpc_request_sent", "type" => rpc_type, "name" => "all").increment(1);
         }
         warn!(%rpc_type, %socket_fd, "sender closed, send message task quit");

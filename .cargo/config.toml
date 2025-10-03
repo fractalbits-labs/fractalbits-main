@@ -8,3 +8,4 @@ rustflags = ["--cfg", "tokio_unstable"]
 debug = true
 lto = "thin"
 codegen-units = 1
+panic = "abort"

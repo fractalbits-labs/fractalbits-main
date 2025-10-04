@@ -6,6 +6,15 @@ const COMMAND_TIMEOUT_SECONDS: u64 = 300;
 const POLL_INTERVAL_SECONDS: u64 = 5;
 const MAX_POLL_ATTEMPTS: u64 = 60;
 
+// Volume group quorum vpc configuration constants
+const TOTAL_BSS_NODES: usize = 6;
+const DATA_VG_QUORUM_N: usize = 3;
+const DATA_VG_QUORUM_R: usize = 2;
+const DATA_VG_QUORUM_W: usize = 2;
+const META_DATA_VG_QUORUM_N: usize = 6;
+const META_DATA_VG_QUORUM_R: usize = 4;
+const META_DATA_VG_QUORUM_W: usize = 4;
+
 #[allow(clippy::too_many_arguments)]
 pub fn bootstrap(
     nss_endpoint: &str,
@@ -128,14 +137,6 @@ fn initialize_nss_roles_in_ddb(nss_a_id: &str, nss_b_id: Option<&str>) -> CmdRes
 }
 
 fn initialize_bss_volume_groups_in_ddb() -> CmdResult {
-    const TOTAL_BSS_NODES: usize = 6;
-    const DATA_VG_QUORUM_N: usize = 3;
-    const DATA_VG_QUORUM_R: usize = 2;
-    const DATA_VG_QUORUM_W: usize = 2;
-    const META_DATA_VG_QUORUM_N: usize = 6;
-    const META_DATA_VG_QUORUM_R: usize = 4;
-    const META_DATA_VG_QUORUM_W: usize = 4;
-
     let region = get_current_aws_region()?;
 
     info!("Waiting for all BSS nodes to register in service discovery...");

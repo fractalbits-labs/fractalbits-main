@@ -5,6 +5,14 @@ use crate::InitConfig;
 use crate::*;
 use colored::*;
 
+// Volume group quorum configuration constants
+const METADATA_VG_QUORUM_N: u32 = 6;
+const METADATA_VG_QUORUM_R: u32 = 4;
+const METADATA_VG_QUORUM_W: u32 = 4;
+const DATA_VG_QUORUM_N: u32 = 3;
+const DATA_VG_QUORUM_R: u32 = 2;
+const DATA_VG_QUORUM_W: u32 = 2;
+
 pub fn init_service(
     service: ServiceName,
     build_mode: BuildMode,
@@ -189,7 +197,7 @@ pub fn init_service(
     let init_all_bss = |count: u32| -> CmdResult {
         create_bss_service_symlinks(count)?;
         for id in 0..count {
-            create_dirs_for_bss_server(id)?;
+            create_dirs_for_bss_server(count, id)?;
         }
         Ok(())
     };
@@ -901,7 +909,7 @@ fn create_nss_dirs(dir_name: &str) -> CmdResult {
     Ok(())
 }
 
-fn create_dirs_for_bss_server(bss_id: u32) -> CmdResult {
+fn create_dirs_for_bss_server(bss_count: u32, bss_id: u32) -> CmdResult {
     info!("Creating necessary directories for bss{} server", bss_id);
     run_cmd! {
         mkdir -p data/bss$bss_id/local/stats;
@@ -909,14 +917,20 @@ fn create_dirs_for_bss_server(bss_id: u32) -> CmdResult {
     }?;
 
     // Data volume
-    let data_volume_id = (bss_id / 3) + 1;
+    let data_volume_id = match bss_count {
+        1 => 1,
+        _ => (bss_id / DATA_VG_QUORUM_N) + 1,
+    };
     run_cmd!(mkdir -p data/bss$bss_id/local/blobs/data_volume$data_volume_id)?;
     for i in 0..256 {
         run_cmd!(mkdir -p data/bss$bss_id/local/blobs/data_volume$data_volume_id/dir$i)?;
     }
 
-    // Metadata volume
-    let metadata_volume_id = (bss_id / 6) + 1;
+    // Metadata volume - calculate based on metadata VG quorum N
+    let metadata_volume_id = match bss_count {
+        1 => 1,
+        _ => (bss_id / METADATA_VG_QUORUM_N) + 1,
+    };
     run_cmd!(mkdir -p data/bss$bss_id/local/blobs/metadata_volume$metadata_volume_id)?;
     for i in 0..256 {
         run_cmd!(mkdir -p data/bss$bss_id/local/blobs/metadata_volume$metadata_volume_id/dir$i)?;
@@ -1083,93 +1097,67 @@ fn generate_https_certificates() -> CmdResult {
     Ok(())
 }
 
+fn generate_volume_group_config(bss_count: u32, n: u32, r: u32, w: u32) -> String {
+    let num_volumes = bss_count / n;
+    let mut volumes = Vec::new();
+
+    for vol_idx in 0..num_volumes {
+        let start_idx = vol_idx * n;
+        let end_idx = start_idx + n;
+
+        let nodes: Vec<String> = (start_idx..end_idx)
+            .map(|i| {
+                format!(
+                    r#"{{"node_id": "bss{}", "ip": "127.0.0.1", "port": {}}}"#,
+                    i,
+                    8088 + i
+                )
+            })
+            .collect();
+
+        volumes.push(format!(
+            r#"{{
+                "volume_id": {},
+                "bss_nodes": [{}]
+            }}"#,
+            vol_idx + 1,
+            nodes.join(",")
+        ));
+    }
+
+    format!(
+        r#"{{
+            "volumes": [{}],
+            "quorum": {{
+                "n": {},
+                "r": {},
+                "w": {}
+            }}
+        }}"#,
+        volumes.join(","),
+        n,
+        r,
+        w
+    )
+}
+
 fn generate_bss_data_vg_config(bss_count: u32) -> String {
     match bss_count {
-        1 => r#"{
-            "volumes": [
-                {
-                    "volume_id": 1,
-                    "bss_nodes": [
-                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088}
-                    ]
-                }
-            ],
-            "quorum": {
-                "n": 1,
-                "r": 1,
-                "w": 1
-            }
-        }"#
-        .to_string(),
-        6 => r#"{
-            "volumes": [
-                {
-                    "volume_id": 1,
-                    "bss_nodes": [
-                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088},
-                        {"node_id": "bss1", "ip": "127.0.0.1", "port": 8089},
-                        {"node_id": "bss2", "ip": "127.0.0.1", "port": 8090}
-                    ]
-                },
-                {
-                    "volume_id": 2,
-                    "bss_nodes": [
-                        {"node_id": "bss3", "ip": "127.0.0.1", "port": 8091},
-                        {"node_id": "bss4", "ip": "127.0.0.1", "port": 8092},
-                        {"node_id": "bss5", "ip": "127.0.0.1", "port": 8093}
-                    ]
-                }
-            ],
-            "quorum": {
-                "n": 3,
-                "r": 2,
-                "w": 2
-            }
-        }"#
-        .to_string(),
+        1 => generate_volume_group_config(1, 1, 1, 1),
+        6 => generate_volume_group_config(6, DATA_VG_QUORUM_N, DATA_VG_QUORUM_R, DATA_VG_QUORUM_W),
         _ => unreachable!("bss_count validated in main.rs"),
     }
 }
 
 fn generate_bss_metadata_vg_config(bss_count: u32) -> String {
     match bss_count {
-        1 => r#"{
-            "volumes": [
-                {
-                    "volume_id": 1,
-                    "bss_nodes": [
-                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088}
-                    ]
-                }
-            ],
-            "quorum": {
-                "n": 1,
-                "r": 1,
-                "w": 1
-            }
-        }"#
-        .to_string(),
-        6 => r#"{
-            "volumes": [
-                {
-                    "volume_id": 1,
-                    "bss_nodes": [
-                        {"node_id": "bss0", "ip": "127.0.0.1", "port": 8088},
-                        {"node_id": "bss1", "ip": "127.0.0.1", "port": 8089},
-                        {"node_id": "bss2", "ip": "127.0.0.1", "port": 8090},
-                        {"node_id": "bss3", "ip": "127.0.0.1", "port": 8091},
-                        {"node_id": "bss4", "ip": "127.0.0.1", "port": 8092},
-                        {"node_id": "bss5", "ip": "127.0.0.1", "port": 8093}
-                    ]
-                }
-            ],
-            "quorum": {
-                "n": 6,
-                "r": 4,
-                "w": 4
-            }
-        }"#
-        .to_string(),
+        1 => generate_volume_group_config(1, 1, 1, 1),
+        6 => generate_volume_group_config(
+            6,
+            METADATA_VG_QUORUM_N,
+            METADATA_VG_QUORUM_R,
+            METADATA_VG_QUORUM_W,
+        ),
         _ => unreachable!("bss_count validated in main.rs"),
     }
 }

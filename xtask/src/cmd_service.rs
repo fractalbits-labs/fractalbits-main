@@ -1108,36 +1108,22 @@ fn generate_volume_group_config(bss_count: u32, n: u32, r: u32, w: u32) -> Strin
         let nodes: Vec<String> = (start_idx..end_idx)
             .map(|i| {
                 format!(
-                    r#"{{"node_id": "bss{}", "ip": "127.0.0.1", "port": {}}}"#,
-                    i,
+                    r#"{{"node_id":"bss{i}","ip":"127.0.0.1","port":{}}}"#,
                     8088 + i
                 )
             })
             .collect();
 
         volumes.push(format!(
-            r#"{{
-                "volume_id": {},
-                "bss_nodes": [{}]
-            }}"#,
+            r#"{{"volume_id":{},"bss_nodes":[{}]}}"#,
             vol_idx + 1,
             nodes.join(",")
         ));
     }
 
     format!(
-        r#"{{
-            "volumes": [{}],
-            "quorum": {{
-                "n": {},
-                "r": {},
-                "w": {}
-            }}
-        }}"#,
+        r#"{{"volumes":[{}],"quorum":{{"n":{n},"r":{r},"w":{w}}}}}"#,
         volumes.join(","),
-        n,
-        r,
-        w
     )
 }
 

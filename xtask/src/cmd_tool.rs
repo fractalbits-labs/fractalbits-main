@@ -166,12 +166,12 @@ fn describe_stack(stack_name: &str) -> CmdResult {
 
     let mut name_indices: HashMap<String, usize> = HashMap::new();
     for (name, _, _, _, _, _, _) in &mut instances {
-        if let Some(&count) = name_counts.get(name) {
-            if count > 1 {
-                let idx = name_indices.entry(name.clone()).or_insert(0);
-                *idx += 1;
-                *name = format!("{} ({}/{})", name, idx, count);
-            }
+        if let Some(&count) = name_counts.get(name)
+            && count > 1
+        {
+            let idx = name_indices.entry(name.clone()).or_insert(0);
+            *idx += 1;
+            *name = format!("{} ({}/{})", name, idx, count);
         }
     }
 

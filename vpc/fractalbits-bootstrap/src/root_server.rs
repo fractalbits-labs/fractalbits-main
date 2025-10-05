@@ -223,31 +223,21 @@ fn build_volume_group_config(
         let nodes: Vec<String> = (start_idx..end_idx)
             .map(|i| {
                 format!(
-                    r#"{{"node_id": "{}", "ip": "{}", "port": 8088}}"#,
+                    r#"{{"node_id":"{}","ip":"{}","port":8088}}"#,
                     bss_addresses[i].0, bss_addresses[i].1
                 )
             })
             .collect();
 
         volumes.push(format!(
-            r#"{{
-                "volume_id": {},
-                "bss_nodes": [{}]
-            }}"#,
+            r#"{{"volume_id":{},"bss_nodes":[{}]}}"#,
             vol_id_idx + 1,
             nodes.join(",")
         ));
     }
 
     format!(
-        r#"{{
-        "volumes": [{}],
-        "quorum": {{
-            "n": {quorum_n},
-            "r": {quorum_r},
-            "w": {quorum_w}
-        }}
-    }}"#,
+        r#"{{"volumes":[{}],"quorum":{{"n":{quorum_n},"r":{quorum_r},"w":{quorum_w}}}}}"#,
         volumes.join(",")
     )
 }

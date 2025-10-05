@@ -242,7 +242,7 @@ pub fn destroy_vpc() -> CmdResult {
 
     // Require user to type exact confirmation text
     let _confirmation: String = Input::new()
-        .with_prompt(&format!(
+        .with_prompt(format!(
             "Type {} to confirm VPC destruction",
             "permanent destroy".bold()
         ))

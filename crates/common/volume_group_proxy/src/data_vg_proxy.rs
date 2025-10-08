@@ -14,11 +14,30 @@ use std::{
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+struct InFlightGuard<'a> {
+    counter: &'a AtomicU64,
+}
+
+impl<'a> InFlightGuard<'a> {
+    fn new(counter: &'a AtomicU64) -> Self {
+        counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self { counter }
+    }
+}
+
+impl<'a> Drop for InFlightGuard<'a> {
+    fn drop(&mut self) {
+        self.counter
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 struct BssNodeWithPool {
     #[allow(dead_code)]
     node_id: String,
     address: String,
     pool: ConnPool<Arc<RpcClientBss>, String>,
+    in_flight_requests: AtomicU64,
 }
 
 struct BssNodePoolWrapper {
@@ -100,6 +119,7 @@ impl DataVgProxy {
                     node_id: bss_node.node_id,
                     address,
                     pool,
+                    in_flight_requests: AtomicU64::new(0),
                 });
             }
 
@@ -347,18 +367,24 @@ impl DataVgProxy {
                 DataVgError::InitializationError(format!("Volume {} not found", volume_id))
             })?;
 
-        // Fast path: try reading from a random BSS node first
+        // Fast path: try reading from the node with least in-flight requests
         if !volume.bss_nodes.is_empty() {
-            let node_index = (self
-                .round_robin_counter
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                as usize)
-                % volume.bss_nodes.len();
-            let selected_node = &volume.bss_nodes[node_index];
+            let selected_node = volume
+                .bss_nodes
+                .iter()
+                .min_by_key(|node| {
+                    node.in_flight_requests
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                })
+                .unwrap();
             debug!(
-                "Attempting fast path read from BSS node: {}",
-                selected_node.address
+                "Attempting fast path read from BSS node: {} (in_flight: {})",
+                selected_node.address,
+                selected_node
+                    .in_flight_requests
+                    .load(std::sync::atomic::Ordering::Relaxed)
             );
+            let _guard = InFlightGuard::new(&selected_node.in_flight_requests);
             match self
                 .get_blob_from_node_instance(selected_node, blob_guid, block_number)
                 .await

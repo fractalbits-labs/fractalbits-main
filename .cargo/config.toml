@@ -5,6 +5,6 @@ xtask = "run --manifest-path ./xtask/Cargo.toml --"
 rustflags = ["--cfg", "tokio_unstable"]
 
 [profile.release]
-debug = true
+debug = false
 codegen-units = 1
 panic = "abort"

@@ -15,14 +15,6 @@ struct CpuTarget {
 
 const CPU_TARGETS: &[CpuTarget] = &[
     CpuTarget {
-        name: "i3",
-        arch: "x86_64",
-        rust_target: "x86_64-unknown-linux-gnu",
-        rust_cpu: "skylake",
-        zig_target: "x86_64-linux-gnu",
-        zig_cpu: "skylake",
-    },
-    CpuTarget {
         name: "graviton3",
         arch: "aarch64",
         rust_target: "aarch64-unknown-linux-gnu",
@@ -37,6 +29,22 @@ const CPU_TARGETS: &[CpuTarget] = &[
         rust_cpu: "neoverse-v2",
         zig_target: "aarch64-linux-gnu",
         zig_cpu: "neoverse_v2",
+    },
+    CpuTarget {
+        name: "i3",
+        arch: "x86_64",
+        rust_target: "x86_64-unknown-linux-gnu",
+        rust_cpu: "", // for bss only, no rust binaries
+        zig_target: "x86_64-linux-gnu",
+        zig_cpu: "broadwell",
+    },
+    CpuTarget {
+        name: "i3en",
+        arch: "x86_64",
+        rust_target: "x86_64-unknown-linux-gnu",
+        rust_cpu: "", // for bss only, no rust binaries
+        zig_target: "x86_64-linux-gnu",
+        zig_cpu: "skylake",
     },
 ];
 
@@ -93,6 +101,10 @@ pub fn build(deploy_target: DeployTarget, release_mode: bool) -> CmdResult {
         for target in CPU_TARGETS {
             let rust_cpu = target.rust_cpu;
             let rust_target = target.rust_target;
+
+            if rust_cpu.is_empty() {
+                continue;
+            }
             run_cmd! {
                 info "Building Rust projects for $rust_target ($rust_cpu)";
                 RUSTFLAGS="-C target-cpu=$rust_cpu"

@@ -214,7 +214,8 @@ pub fn get_cpu_target_from_instance_type(instance_type: &str) -> &'static str {
     let family = instance_type.split('.').next().unwrap_or("");
 
     match family {
-        "i3" | "i3en" => "i3",
+        "i3" => "i3",
+        "i3en" => "i3en",
         "c7g" | "m7g" | "m7gd" | "r7g" | "r7gd" => "graviton3",
         "c8g" | "m8g" | "m8gd" | "r8g" | "r8gd" => "graviton4",
         _ => {

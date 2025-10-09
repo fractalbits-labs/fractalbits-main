@@ -35,12 +35,7 @@ pub fn bootstrap(
     }
     format_local_nvme_disks(false)?;
     download_binaries(&["nss_server", "nss_role_agent"])?;
-    setup_configs(
-        volume_id,
-        "nss",
-        mirrord_endpoint,
-        rss_endpoint,
-    )?;
+    setup_configs(volume_id, "nss", mirrord_endpoint, rss_endpoint)?;
 
     // Note for normal deployment, the nss_server service is not started
     // until EBS/nss formatted from root_server

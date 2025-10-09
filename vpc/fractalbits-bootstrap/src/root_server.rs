@@ -162,21 +162,26 @@ fn initialize_bss_volume_groups_in_ddb(total_bss_nodes: usize) -> CmdResult {
     info!("All BSS nodes registered. Initializing volume group configurations...");
 
     // Adjust quorum settings for single BSS node deployments
-    let (data_vg_quorum_n, data_vg_quorum_r, data_vg_quorum_w) = if total_bss_nodes == 1 {
-        (1, 1, 1)
-    } else {
-        (DATA_VG_QUORUM_N, DATA_VG_QUORUM_R, DATA_VG_QUORUM_W)
+    let (data_vg_quorum_n, data_vg_quorum_r, data_vg_quorum_w) = match total_bss_nodes {
+        1 => (1, 1, 1),
+        n if n % DATA_VG_QUORUM_N == 0 => (DATA_VG_QUORUM_N, DATA_VG_QUORUM_R, DATA_VG_QUORUM_W),
+        _ => cmd_die!(
+            "Unsupported number of bss nodes (1 or $DATA_VG_QUORUM_N}*k ): $total_bss_nodes"
+        ),
     };
 
-    let (metadata_vg_quorum_n, metadata_vg_quorum_r, metadata_vg_quorum_w) = if total_bss_nodes == 1
-    {
-        (1, 1, 1)
-    } else {
-        (
+    let (metadata_vg_quorum_n, metadata_vg_quorum_r, metadata_vg_quorum_w) = match total_bss_nodes {
+        1 => (1, 1, 1),
+        n if n % META_DATA_VG_QUORUM_N == 0 => (
             META_DATA_VG_QUORUM_N,
             META_DATA_VG_QUORUM_R,
             META_DATA_VG_QUORUM_W,
-        )
+        ),
+        // Allow it to have the same quorum as data_vg
+        n if n % DATA_VG_QUORUM_N == 0 => (DATA_VG_QUORUM_N, DATA_VG_QUORUM_R, DATA_VG_QUORUM_W),
+        _ => cmd_die!(
+            "Unsupported number of bss nodes (1 or $META_DATA_VG_QUORUM_N}*k ): $total_bss_nodes"
+        ),
     };
 
     let bss_data_vg_config_json = build_volume_group_config(

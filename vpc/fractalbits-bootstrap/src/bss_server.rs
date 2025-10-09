@@ -66,7 +66,7 @@ server_port = 8088
 num_threads = {num_threads}
 log_level = "warn"
 use_direct_io = true
-io_concurrency = 256 
+io_concurrency = 256
 "##
     );
     run_cmd! {

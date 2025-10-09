@@ -78,7 +78,7 @@ use_direct_io = true
 
 fn wait_for_volume_configs() -> CmdResult {
     const TIMEOUT_SECS: u64 = 300;
-    const POLL_INTERVAL_SECS: u64 = 5;
+    const POLL_INTERVAL_SECS: u64 = 1;
 
     info!("Waiting for BSS volume configurations in DDB...");
     let start = std::time::Instant::now();

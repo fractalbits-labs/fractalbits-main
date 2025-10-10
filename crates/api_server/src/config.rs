@@ -130,7 +130,7 @@ impl Config {
             mgmt_port: 18080,
             region: "localdev".into(),
             root_domain: ".localhost".into(),
-            with_metrics: true,
+            with_metrics: false,
             http_request_timeout_seconds: 30,
             rpc_timeout_seconds: 10,
             blob_storage: BlobStorageConfig {
@@ -153,7 +153,7 @@ impl Config {
             mgmt_port: 18080,
             region: "localdev".into(),
             root_domain: ".localhost".into(),
-            with_metrics: true,
+            with_metrics: false,
             http_request_timeout_seconds: 30,
             rpc_timeout_seconds: 10,
             blob_storage: BlobStorageConfig {

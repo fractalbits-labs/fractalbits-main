@@ -19,6 +19,7 @@ slotmap_conn_pool.workspace = true
 serde.workspace = true
 config.workspace = true
 actix-web.workspace = true
+actix-files.workspace = true
 tokio.workspace = true
 tracing-subscriber.workspace = true
 prost.workspace = true
@@ -60,6 +61,7 @@ aws-sdk-s3.workspace = true
 aws-config.workspace = true
 aws-smithy-http-client.workspace = true
 metrics.workspace = true
+openssl.workspace = true
 metrics-exporter-statsd = { workspace = true, optional = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 tokio-retry.workspace = true

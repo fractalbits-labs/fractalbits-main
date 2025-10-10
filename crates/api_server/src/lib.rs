@@ -5,7 +5,6 @@ mod config;
 pub mod handler;
 mod object_layout;
 pub mod runtime;
-pub mod uring;
 
 use blob_client::{BlobClient, BlobDeletionRequest};
 pub use config::{BlobStorageBackend, BlobStorageConfig, Config, S3HybridSingleAzConfig};
@@ -17,8 +16,8 @@ use rpc_client_common::{RpcError, rss_rpc_retry};
 use rpc_client_nss::RpcClientNss;
 use rpc_client_rss::RpcClientRss;
 pub use runtime::per_core::PerCoreContext;
-use uring::reactor::RpcReactorHandle;
-pub use uring::ring::PerCoreRing;
+use runtime::uring::reactor::RpcReactorHandle;
+pub use runtime::uring::ring::PerCoreRing;
 
 pub use cache_registry::CacheCoordinator;
 

@@ -8,8 +8,8 @@ mod cache_mgmt;
 
 use actix_files::Files;
 use actix_web::{App, HttpServer, middleware::Logger, web};
+use api_server::runtime::uring::{config::UringConfig, reactor, ring::PerCoreRing};
 use api_server::runtime::{listeners, per_core::PerCoreBuilder};
-use api_server::uring::{config::UringConfig, reactor, ring::PerCoreRing};
 use api_server::{AppState, CacheCoordinator, Config, handler::any_handler};
 use clap::Parser;
 use data_types::Versioned;

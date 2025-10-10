@@ -6,7 +6,7 @@ mod cache_mgmt;
 
 use actix_web::{App, HttpServer, middleware::Logger, web};
 use api_server::runtime::{listeners, per_core::PerCoreBuilder};
-use api_server::uring::{config::UringConfig, ring::PerCoreRing};
+use api_server::uring::{config::UringConfig, reactor, ring::PerCoreRing};
 use api_server::{AppState, Config, handler::any_handler};
 use clap::Parser;
 use tracing::{error, info};
@@ -129,15 +129,35 @@ async fn main() {
             .collect(),
     );
 
-    let http_app_states = Arc::new(
-        build_per_core_app_states(worker_count, config.clone(), per_core_rings.clone()).await,
-    );
-    let mgmt_app_states = Arc::new(
-        build_per_core_app_states(worker_count, config.clone(), per_core_rings.clone()).await,
+    let per_core_reactors: Arc<Vec<Arc<reactor::RpcReactorHandle>>> = Arc::new(
+        per_core_rings
+            .iter()
+            .enumerate()
+            .map(|(idx, ring)| reactor::spawn_rpc_reactor(idx, ring.clone()))
+            .collect(),
     );
 
-    let http_per_core = PerCoreBuilder::new(per_core_rings.clone());
-    let mgmt_per_core = PerCoreBuilder::new(per_core_rings.clone());
+    let http_app_states = Arc::new(
+        build_per_core_app_states(
+            worker_count,
+            config.clone(),
+            per_core_rings.clone(),
+            per_core_reactors.clone(),
+        )
+        .await,
+    );
+    let mgmt_app_states = Arc::new(
+        build_per_core_app_states(
+            worker_count,
+            config.clone(),
+            per_core_rings.clone(),
+            per_core_reactors.clone(),
+        )
+        .await,
+    );
+
+    let http_per_core = PerCoreBuilder::new(per_core_rings.clone(), per_core_reactors.clone());
+    let mgmt_per_core = PerCoreBuilder::new(per_core_rings.clone(), per_core_reactors.clone());
 
     let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
     let mgmt_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), mgmt_port);
@@ -262,6 +282,7 @@ async fn build_per_core_app_states(
     worker_count: usize,
     config: Arc<Config>,
     rings: Arc<Vec<Arc<PerCoreRing>>>,
+    reactors: Arc<Vec<Arc<reactor::RpcReactorHandle>>>,
 ) -> Vec<Arc<AppState>> {
     let mut states = Vec::with_capacity(worker_count);
     for idx in 0..worker_count {
@@ -269,7 +290,11 @@ async fn build_per_core_app_states(
             .get(idx)
             .expect("missing per-core ring for app state")
             .clone();
-        let state = AppState::new_per_core(config.clone(), ring).await;
+        let reactor_handle = reactors
+            .get(idx)
+            .expect("missing per-core reactor for app state")
+            .clone();
+        let state = AppState::new_per_core(config.clone(), ring, reactor_handle).await;
         states.push(Arc::new(state));
     }
     states

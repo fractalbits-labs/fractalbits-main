@@ -1,11 +1,11 @@
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use metrics::{counter, gauge};
 use parking_lot::Mutex;
 use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 use slotmap_conn_pool::Poolable;
 use socket2::{Socket, TcpKeepalive};
 use std::collections::HashMap;
-use std::io;
+use std::io::{self, ErrorKind, IoSlice};
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::os::fd::RawFd;
@@ -30,9 +30,43 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use tracing::{debug, warn};
 
-use crate::RpcError;
+use crate::{
+    RpcError,
+    io_uring_support::{
+        IoUringDriver, ZeroCopySender, current_io_uring_driver, current_zero_copy_sender,
+    },
+    transport::{RpcTransport, current_transport},
+};
 
 type RequestMap<Header> = Arc<Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>>;
+
+fn send_frame_zero_copy(
+    sender: &dyn ZeroCopySender,
+    fd: RawFd,
+    header: &[u8],
+    body: &Bytes,
+) -> io::Result<()> {
+    send_all_zero_copy(sender, fd, header)?;
+    if !body.is_empty() {
+        send_all_zero_copy(sender, fd, body.as_ref())?;
+    }
+    Ok(())
+}
+
+fn send_all_zero_copy(sender: &dyn ZeroCopySender, fd: RawFd, mut buf: &[u8]) -> io::Result<()> {
+    while !buf.is_empty() {
+        let slice = [IoSlice::new(buf)];
+        let written = sender.send_vectored(fd, &slice)?;
+        if written == 0 {
+            return Err(io::Error::new(
+                ErrorKind::WriteZero,
+                "zero-copy send returned zero bytes",
+            ));
+        }
+        buf = &buf[written..];
+    }
+    Ok(())
+}
 
 pub trait RpcCodec<Header: MessageHeaderTrait>:
     Default
@@ -54,6 +88,8 @@ pub struct RpcClient<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> {
     socket_fd: RawFd,
     is_closed: Arc<AtomicBool>,
     client_session_id: u64,
+    #[allow(unused)]
+    transport: Option<Arc<dyn RpcTransport>>,
     _phantom: PhantomData<Codec>,
 }
 
@@ -159,6 +195,14 @@ where
     }
 
     async fn new_internal(stream: TcpStream, session_id: u64) -> Result<Self, RpcError> {
+        let transport = current_transport();
+        if let Some(t) = transport.as_ref() {
+            tracing::debug!(
+                rpc_type = Codec::RPC_TYPE,
+                transport = t.name(),
+                "rpc client detected alternate transport"
+            );
+        }
         let rpc_type = Codec::RPC_TYPE;
         let socket_fd = stream.as_raw_fd();
         let (reader, writer) = stream.into_split();
@@ -166,6 +210,8 @@ where
             Arc::new(Mutex::new(HashMap::new()));
         let (sender, receiver) = mpsc::channel::<MessageFrame<Header>>(1024);
         let is_closed = Arc::new(AtomicBool::new(false));
+        let zero_copy_sender = current_zero_copy_sender();
+        let io_uring_driver = current_io_uring_driver();
 
         let mut tasks = JoinSet::new();
 
@@ -173,8 +219,19 @@ where
         {
             let sender_requests = requests.clone();
             let is_closed = is_closed.clone();
+            let zero_copy_sender = zero_copy_sender.clone();
+            let transport = transport.clone();
             tasks.spawn(async move {
-                if let Err(e) = Self::send_task(writer, receiver, socket_fd, rpc_type).await {
+                if let Err(e) = Self::send_task(
+                    writer,
+                    receiver,
+                    socket_fd,
+                    rpc_type,
+                    zero_copy_sender,
+                    transport,
+                )
+                .await
+                {
                     warn!(%rpc_type, %socket_fd, %e, "send task failed");
                 }
                 is_closed.store(true, Ordering::SeqCst);
@@ -186,9 +243,16 @@ where
         {
             let receiver_requests = requests.clone();
             let is_closed = is_closed.clone();
+            let io_uring_driver = io_uring_driver.clone();
             tasks.spawn(async move {
-                if let Err(e) =
-                    Self::receive_task(reader, &receiver_requests, socket_fd, rpc_type).await
+                if let Err(e) = Self::receive_task(
+                    reader,
+                    receiver_requests.clone(),
+                    socket_fd,
+                    rpc_type,
+                    io_uring_driver,
+                )
+                .await
                 {
                     warn!(%rpc_type, %socket_fd, %e, "receive task failed");
                 }
@@ -207,6 +271,7 @@ where
             socket_fd,
             is_closed,
             client_session_id: session_id,
+            transport,
             _phantom: PhantomData,
         })
     }
@@ -216,26 +281,46 @@ where
         mut receiver: Receiver<MessageFrame<Header>>,
         socket_fd: RawFd,
         rpc_type: &'static str,
+        zero_copy_sender: Option<Arc<dyn ZeroCopySender>>,
+        transport: Option<Arc<dyn RpcTransport>>,
     ) -> Result<(), RpcError> {
         let mut header_buf = BytesMut::with_capacity(Header::SIZE);
         while let Some(frame) = receiver.recv().await {
             gauge!("rpc_request_pending_in_send_queue", "type" => rpc_type).decrement(1.0);
+            let MessageFrame { header, body } = frame;
             let request_id = frame.header.get_id();
             debug!(%rpc_type, %socket_fd, %request_id, "sending request:");
 
             header_buf.clear();
-            frame.header.encode(&mut header_buf);
+            header.encode(&mut header_buf);
 
-            writer
-                .write_all(header_buf.as_ref())
+            if let Some(tp) = transport.as_ref() {
+                tp.send(
+                    socket_fd,
+                    Bytes::copy_from_slice(header_buf.as_ref()),
+                    body.clone(),
+                )
                 .await
                 .map_err(RpcError::IoError)?;
-
-            if !frame.body.is_empty() {
+            } else if let Some(sender) = zero_copy_sender.as_ref() {
+                send_frame_zero_copy(
+                    sender.as_ref(),
+                    writer.as_ref().as_raw_fd(),
+                    header_buf.as_ref(),
+                    &body,
+                )?;
+            } else {
                 writer
-                    .write_all(&frame.body)
+                    .write_all(header_buf.as_ref())
                     .await
                     .map_err(RpcError::IoError)?;
+
+                if !body.is_empty() {
+                    writer
+                        .write_all(body.as_ref())
+                        .await
+                        .map_err(RpcError::IoError)?;
+                }
             }
             writer.flush().await?;
             counter!("rpc_request_sent", "type" => rpc_type, "name" => "all").increment(1);
@@ -246,7 +331,66 @@ where
 
     async fn receive_task(
         receiver: OwnedReadHalf,
-        requests: &RequestMap<Header>,
+        requests: RequestMap<Header>,
+        socket_fd: RawFd,
+        rpc_type: &'static str,
+        io_uring_driver: Option<Arc<dyn IoUringDriver>>,
+    ) -> Result<(), RpcError> {
+        if let Some(driver) = io_uring_driver {
+            drop(receiver);
+            Self::receive_task_uring(driver, socket_fd, requests, rpc_type).await?;
+            warn!(%rpc_type, %socket_fd, "connection closed, receive message task quit");
+            Ok(())
+        } else {
+            Self::receive_task_tokio(receiver, requests, socket_fd, rpc_type).await
+        }
+    }
+
+    async fn receive_task_uring(
+        driver: Arc<dyn IoUringDriver>,
+        socket_fd: RawFd,
+        requests: RequestMap<Header>,
+        rpc_type: &'static str,
+    ) -> Result<(), RpcError> {
+        const RECV_CHUNK_SIZE: usize = 64 * 1024;
+        let mut decoder = Codec::default();
+        let mut buffer = BytesMut::with_capacity(128 * 1024);
+
+        loop {
+            let chunk = driver
+                .recv(socket_fd, RECV_CHUNK_SIZE)
+                .await
+                .map_err(RpcError::IoError)?;
+
+            if chunk.is_empty() {
+                if let Some(frame) = decoder
+                    .decode_eof(&mut buffer)
+                    .map_err(|e| RpcError::DecodeError(e.to_string()))?
+                {
+                    Self::handle_incoming_frame(frame, &requests, socket_fd, rpc_type);
+                }
+                break;
+            }
+
+            buffer.extend_from_slice(&chunk);
+
+            loop {
+                match decoder.decode(&mut buffer) {
+                    Ok(Some(frame)) => {
+                        Self::handle_incoming_frame(frame, &requests, socket_fd, rpc_type);
+                    }
+                    Ok(None) => break,
+                    Err(e) => return Err(RpcError::DecodeError(e.to_string())),
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn receive_task_tokio(
+        receiver: OwnedReadHalf,
+        requests: RequestMap<Header>,
         socket_fd: RawFd,
         rpc_type: &'static str,
     ) -> Result<(), RpcError> {
@@ -254,25 +398,33 @@ where
         let mut reader = FramedRead::new(receiver, decoder);
         while let Some(frame) = reader.next().await {
             let frame = frame?;
-            let request_id = frame.header.get_id();
-            debug!(%rpc_type, %socket_fd, %request_id, "receiving response:");
-            counter!("rpc_response_received", "type" => rpc_type, "name" => "all").increment(1);
-            let tx: oneshot::Sender<MessageFrame<Header>> =
-                match requests.lock().remove(&request_id) {
-                    Some(tx) => tx,
-                    None => {
-                        warn!(%rpc_type, %socket_fd, %request_id,
-                            "received rpc message with id not in the resp_map");
-                        continue;
-                    }
-                };
-            gauge!("rpc_request_pending_in_resp_map", "type" => rpc_type).decrement(1.0);
-            if tx.send(frame).is_err() {
-                warn!(%rpc_type, %socket_fd, %request_id, "oneshot response send failed");
-            }
+            Self::handle_incoming_frame(frame, &requests, socket_fd, rpc_type);
         }
         warn!(%rpc_type, %socket_fd, "connection closed, receive message task quit");
         Ok(())
+    }
+
+    fn handle_incoming_frame(
+        frame: MessageFrame<Header>,
+        requests: &RequestMap<Header>,
+        socket_fd: RawFd,
+        rpc_type: &'static str,
+    ) {
+        let request_id = frame.header.get_id();
+        debug!(%rpc_type, %socket_fd, %request_id, "receiving response:");
+        counter!("rpc_response_received", "type" => rpc_type, "name" => "all").increment(1);
+        let tx: oneshot::Sender<MessageFrame<Header>> = match requests.lock().remove(&request_id) {
+            Some(tx) => tx,
+            None => {
+                warn!(%rpc_type, %socket_fd, %request_id,
+                    "received rpc message with id not in the resp_map");
+                return;
+            }
+        };
+        gauge!("rpc_request_pending_in_resp_map", "type" => rpc_type).decrement(1.0);
+        if tx.send(frame).is_err() {
+            warn!(%rpc_type, %socket_fd, %request_id, "oneshot response send failed");
+        }
     }
 
     fn drain_pending_requests(

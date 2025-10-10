@@ -12,10 +12,14 @@ pub use data_blob_tracking::{DataBlobTracker, DataBlobTrackingError};
 use data_types::{ApiKey, Bucket, Versioned};
 use metrics::{counter, histogram};
 use moka::future::Cache;
-use rpc_client_common::{RpcError, rss_rpc_retry};
+use rpc_client_common::{
+    RpcError, rss_rpc_retry,
+    transport::{RpcTransport, clear_current_transport, set_current_transport},
+};
 use rpc_client_nss::RpcClientNss;
 use rpc_client_rss::RpcClientRss;
 pub use runtime::per_core::PerCoreContext;
+use uring::reactor::RpcReactorHandle;
 pub use uring::ring::PerCoreRing;
 
 use slotmap_conn_pool::{ConnPool, Poolable};
@@ -39,13 +43,22 @@ pub struct AppState {
     blob_deletion: Sender<BlobDeletionRequest>,
     pub data_blob_tracker: Arc<DataBlobTracker>,
     pub per_core_ring: Arc<PerCoreRing>,
+    pub rpc_handle: Arc<RpcReactorHandle>,
 }
 
 impl AppState {
     const PER_CORE_RPC_POOL_SIZE: u16 = 1;
     const PER_CORE_CACHE_CAPACITY: u64 = 10_000;
 
-    pub async fn new_per_core(config: Arc<Config>, per_core_ring: Arc<PerCoreRing>) -> Self {
+    pub async fn new_per_core(
+        config: Arc<Config>,
+        per_core_ring: Arc<PerCoreRing>,
+        rpc_handle: Arc<RpcReactorHandle>,
+    ) -> Self {
+        let reactor_transport: Arc<dyn RpcTransport> = Arc::new(
+            crate::uring::reactor::ReactorTransport::new(rpc_handle.clone()),
+        );
+        set_current_transport(Some(reactor_transport));
         let rpc_clients_rss =
             Self::new_rpc_clients_pool_rss(&config.rss_addr, Self::PER_CORE_RPC_POOL_SIZE).await;
         let rpc_clients_nss =
@@ -78,7 +91,7 @@ impl AppState {
         .await
         .expect("Failed to initialize blob client");
 
-        Self {
+        let state = Self {
             config,
             rpc_clients_nss,
             blob_client: Arc::new(blob_client),
@@ -88,7 +101,11 @@ impl AppState {
             az_status_cache,
             data_blob_tracker,
             per_core_ring,
-        }
+            rpc_handle,
+        };
+
+        clear_current_transport();
+        state
     }
 
     async fn new_rpc_clients_pool_nss(

@@ -69,9 +69,12 @@ arrayvec.workspace = true
 governor.workspace = true
 futures-util.workspace = true
 socket2.workspace = true
+libc.workspace = true
 num_cpus.workspace = true
 core_affinity.workspace = true
 io-uring.workspace = true
+crossbeam-channel.workspace = true
+async-trait.workspace = true
 parking_lot.workspace = true
 
 [dev-dependencies]

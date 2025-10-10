@@ -1,6 +1,8 @@
 use thiserror::Error;
 
 pub mod generic_client;
+pub mod io_uring_support;
+pub mod transport;
 pub use generic_client::{RpcClient, RpcCodec};
 
 pub trait ErrorRetryable {

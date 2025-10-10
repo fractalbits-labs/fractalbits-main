@@ -363,10 +363,21 @@ where
         let mut buffer = BytesMut::with_capacity(128 * 1024);
 
         loop {
+            debug!(
+                rpc_type = %rpc_type,
+                %socket_fd,
+                "transport recv waiting"
+            );
             let chunk = transport
                 .recv(socket_fd, TRANSPORT_CHUNK_SIZE)
                 .await
                 .map_err(RpcError::IoError)?;
+            debug!(
+                rpc_type = %rpc_type,
+                %socket_fd,
+                chunk_len = chunk.len(),
+                "transport recv completed"
+            );
 
             if chunk.is_empty() {
                 if let Some(frame) = decoder
@@ -416,7 +427,7 @@ where
                     .decode_eof(&mut buffer)
                     .map_err(|e| RpcError::DecodeError(e.to_string()))?
                 {
-                    Self::handle_incoming_frame(frame, &requests, socket_fd, rpc_type);
+                    Self::handle_incoming_frame(frame, requests, socket_fd, rpc_type);
                 }
                 break;
             }
@@ -426,7 +437,7 @@ where
             loop {
                 match decoder.decode(&mut buffer) {
                     Ok(Some(frame)) => {
-                        Self::handle_incoming_frame(frame, &requests, socket_fd, rpc_type);
+                        Self::handle_incoming_frame(frame, requests, socket_fd, rpc_type);
                     }
                     Ok(None) => break,
                     Err(e) => return Err(RpcError::DecodeError(e.to_string())),
@@ -447,7 +458,7 @@ where
         let mut reader = FramedRead::new(receiver, decoder);
         while let Some(frame) = reader.next().await {
             let frame = frame?;
-            Self::handle_incoming_frame(frame, &requests, socket_fd, rpc_type);
+            Self::handle_incoming_frame(frame, requests, socket_fd, rpc_type);
         }
         warn!(%rpc_type, %socket_fd, "connection closed, receive message task quit");
         Ok(())

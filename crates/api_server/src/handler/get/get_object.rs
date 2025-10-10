@@ -199,7 +199,7 @@ pub async fn get_object_content(
     ),
     S3Error,
 > {
-    let blob_client = app.get_blob_client();
+    let blob_client = app.get_blob_client().await.ok_or(S3Error::InternalError)?;
     match object.state {
         ObjectState::Normal(ref _obj_data) => {
             let blob_guid = object.blob_guid()?;
@@ -277,7 +277,7 @@ async fn get_object_range_content(
     key: String,
     range: &std::ops::Range<usize>,
 ) -> Result<std::pin::Pin<Box<dyn stream::Stream<Item = Result<Bytes, S3Error>> + Send>>, S3Error> {
-    let blob_client = app.get_blob_client();
+    let blob_client = app.get_blob_client().await.ok_or(S3Error::InternalError)?;
     let block_size = object.block_size as usize;
     match object.state {
         ObjectState::Normal(ref _obj_data) => {

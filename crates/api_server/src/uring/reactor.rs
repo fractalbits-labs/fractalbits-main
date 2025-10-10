@@ -1,13 +1,14 @@
 use super::ring::PerCoreRing;
 use async_trait::async_trait;
-use bytes::{Bytes, BytesMut};
-use crossbeam_channel::{Receiver, Sender, select, unbounded};
+use bytes::Bytes;
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, unbounded};
 use libc;
 use metrics::gauge;
 use rpc_client_common::transport::RpcTransport;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::os::fd::RawFd;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -104,14 +105,20 @@ impl RpcReactorHandle {
         body: Bytes,
     ) -> oneshot::Receiver<io::Result<usize>> {
         let (tx, mut rx) = oneshot::channel();
+        let header_len = header.len();
+        let body_len = body.len();
         let task = RpcTask::ZeroCopySend(ZeroCopySendTask {
             fd,
             header,
             body,
             completion: tx,
         });
+        debug!(
+            worker_index = self.worker_index,
+            fd, header_len, body_len, "enqueue zero-copy send task"
+        );
         if let Err(err) = self.sender.send(RpcCommand::Task(task)) {
-            let _ = rx.close();
+            rx.close();
             warn!(
                 worker_index = self.worker_index,
                 error = %err,
@@ -128,8 +135,12 @@ impl RpcReactorHandle {
             len,
             completion: tx,
         });
+        debug!(
+            worker_index = self.worker_index,
+            fd, len, "enqueue recv task"
+        );
         if let Err(err) = self.sender.send(RpcCommand::Task(task)) {
-            let _ = rx.close();
+            rx.close();
             warn!(
                 worker_index = self.worker_index,
                 error = %err,
@@ -149,12 +160,12 @@ impl Drop for RpcReactorHandle {
             .expect("reactor join handle poisoned")
             .take()
         {
-            if let Err(err) = handle.join() {
+            handle.join().unwrap_or_else(|err| {
                 warn!(
                     worker_index = self.worker_index,
                     "failed to join rpc reactor thread: {err:?}"
                 );
-            }
+            });
         }
     }
 }
@@ -185,7 +196,6 @@ fn reactor_thread(handle: Arc<RpcReactorHandle>, rx: Receiver<RpcCommand>) {
     );
 
     let mut running = true;
-    let mut shutdown_seen = false;
     let mut metrics = ReactorMetrics::default();
 
     while running {
@@ -202,26 +212,37 @@ fn reactor_thread(handle: Arc<RpcReactorHandle>, rx: Receiver<RpcCommand>) {
             break;
         }
 
-        select! {
-            recv(rx) -> msg => match msg {
-                Ok(cmd) => {
-                    if !process_command(&handle, cmd) {
-                        running = false;
-                    }
-                }
-                Err(_) => {
-                    debug!(worker_index = handle.worker_index, "rpc reactor command channel closed");
-                    running = false;
-                }
-            },
-            default(Duration::from_millis(50)) => {
-                if shutdown_seen {
+        handle.io.poll_completions(handle.worker_index);
+
+        if !running {
+            break;
+        }
+
+        metrics.update_queue_depth(rx.len(), handle.worker_index);
+
+        match rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(cmd) => {
+                if !process_command(&handle, cmd) {
                     running = false;
                 }
             }
+            Err(RecvTimeoutError::Timeout) => {
+                if handle.io.has_pending_operations() {
+                    handle.io.poll_completions(handle.worker_index);
+                }
+                let shutdown_seen = handle.closed.load(Ordering::Acquire);
+                if shutdown_seen && !handle.io.has_pending_operations() {
+                    running = false;
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                debug!(
+                    worker_index = handle.worker_index,
+                    "rpc reactor command channel closed"
+                );
+                running = false;
+            }
         }
-
-        shutdown_seen = handle.closed.load(Ordering::Acquire);
     }
 
     handle.closed.store(true, Ordering::Release);
@@ -264,29 +285,23 @@ fn handle_zero_copy_send(handle: &Arc<RpcReactorHandle>, task: ZeroCopySendTask)
         completion,
     } = task;
 
-    let mut total_written = 0usize;
-    let result = handle
-        .io
-        .send_slice(fd, header.as_ref())
-        .and_then(|written| {
-            total_written += written;
-            if body.is_empty() {
-                Ok(0)
-            } else {
-                handle.io.send_slice(fd, body.as_ref()).map(|w| w as i64)
-            }
-        })
-        .map(|additional| {
-            if additional > 0 {
-                total_written += additional as usize;
-            }
-            total_written
-        });
+    debug!(
+        worker_index = handle.worker_index,
+        fd,
+        header_len = header.len(),
+        body_len = body.len(),
+        "enqueuing async zero-copy send"
+    );
 
-    if completion.send(result).is_err() {
-        debug!(
+    if let Err(err) = handle
+        .io
+        .submit_send(handle.worker_index, fd, header, body, completion)
+    {
+        warn!(
             worker_index = handle.worker_index,
-            fd, "zero-copy send completion receiver dropped"
+            fd,
+            error = %err,
+            "failed to submit send task"
         );
     }
 }
@@ -297,174 +312,377 @@ fn handle_recv(handle: &Arc<RpcReactorHandle>, task: RecvTask) {
         len,
         completion,
     } = task;
-    let mut buffer = BytesMut::with_capacity(len.max(RECV_BUFFER_SIZE));
-    match handle.io.recv_chunk(fd, buffer.capacity()) {
-        Ok(bytes) => {
-            buffer.extend_from_slice(&bytes);
-            let bytes = buffer.freeze();
-            let _ = completion.send(Ok(bytes));
-        }
-        Err(err) => {
-            let _ = completion.send(Err(err));
-        }
+    if let Err(err) = handle
+        .io
+        .submit_recv(handle.worker_index, fd, len, completion)
+    {
+        warn!(
+            worker_index = handle.worker_index,
+            fd,
+            error = %err,
+            "failed to submit recv task"
+        );
     }
 }
 
 struct ReactorIo {
     ring: Arc<PerCoreRing>,
-    zerocopy_configured: AtomicBool,
+    next_uring_id: AtomicU64,
+    pending_recv: Mutex<HashMap<u64, PendingRecv>>,
+    pending_send: Mutex<HashMap<u64, PendingSend>>,
+    zerocopy_fds: Mutex<HashSet<RawFd>>,
 }
 
 impl ReactorIo {
     fn new(ring: Arc<PerCoreRing>) -> Self {
         Self {
             ring,
-            zerocopy_configured: AtomicBool::new(false),
+            next_uring_id: AtomicU64::new(1),
+            pending_recv: Mutex::new(HashMap::new()),
+            pending_send: Mutex::new(HashMap::new()),
+            zerocopy_fds: Mutex::new(HashSet::new()),
         }
     }
 
-    fn send_slice(&self, fd: RawFd, mut buf: &[u8]) -> io::Result<usize> {
-        let mut total = 0usize;
-        while !buf.is_empty() {
-            let bytes_written = if buf.len() >= 16 * 1024 {
-                self.send_zero_copy(fd, buf)?
-            } else {
-                self.send_write(fd, buf)?
-            };
-
-            if bytes_written == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::WriteZero,
-                    "io_uring send returned zero bytes",
-                ));
-            }
-
-            total += bytes_written;
-            buf = &buf[bytes_written..];
-        }
-        Ok(total)
-    }
-
-    fn send_write(&self, fd: RawFd, buf: &[u8]) -> io::Result<usize> {
-        self.ring.with_lock(|ring| {
-            let entry = io_uring::opcode::Write::new(
-                io_uring::types::Fd(fd),
-                buf.as_ptr(),
-                buf.len() as u32,
-            )
-            .build();
-            unsafe {
-                ring.submission()
-                    .push(&entry)
-                    .map_err(|_| io::Error::other("submission queue full"))?;
-            }
-            ring.submit_and_wait(1)?;
-            let mut cq = ring.completion();
-            let cqe = cq
-                .next()
-                .ok_or_else(|| io::Error::other("missing completion"))?;
-            let res = cqe.result();
-            if res < 0 {
-                Err(io::Error::from_raw_os_error(-res))
-            } else {
-                Ok(res as usize)
-            }
-        })
-    }
-
-    fn send_zero_copy(&self, fd: RawFd, buf: &[u8]) -> io::Result<usize> {
+    fn submit_send(
+        &self,
+        worker_index: usize,
+        fd: RawFd,
+        header: Bytes,
+        body: Bytes,
+        completion: oneshot::Sender<io::Result<usize>>,
+    ) -> io::Result<()> {
         self.ensure_zero_copy(fd)?;
-        self.ring.with_lock(|ring| {
-            let entry = io_uring::opcode::SendZc::new(
-                io_uring::types::Fd(fd),
-                buf.as_ptr(),
-                buf.len() as u32,
-            )
-            .flags(libc::MSG_ZEROCOPY | libc::MSG_NOSIGNAL)
-            .build();
+
+        let header_user_data = self.next_uring_id.fetch_add(1, Ordering::Relaxed);
+
+        debug!(
+            worker_index,
+            fd,
+            header_len = header.len(),
+            body_len = body.len(),
+            header_user_data,
+            "submitting send to io_uring"
+        );
+
+        // Submit header send
+        let header_entry = io_uring::opcode::SendZc::new(
+            io_uring::types::Fd(fd),
+            header.as_ptr(),
+            header.len() as u32,
+        )
+        .flags(libc::MSG_ZEROCOPY | libc::MSG_NOSIGNAL)
+        .build()
+        .user_data(header_user_data);
+
+        // Prepare body entry if needed
+        let body_user_data = if !body.is_empty() {
+            Some(self.next_uring_id.fetch_add(1, Ordering::Relaxed))
+        } else {
+            None
+        };
+
+        let submit_result = self.ring.with_lock(|ring| {
             unsafe {
                 ring.submission()
-                    .push(&entry)
+                    .push(&header_entry)
                     .map_err(|_| io::Error::other("submission queue full"))?;
             }
-            ring.submit_and_wait(1)?;
 
-            let mut cq = ring.completion();
-            let mut result: Option<usize> = None;
-            while let Some(cqe) = cq.next() {
-                if io_uring::cqueue::notif(cqe.flags()) {
-                    continue;
-                }
-                if result.is_none() {
-                    let res = cqe.result();
-                    if res < 0 {
-                        return Err(io::Error::from_raw_os_error(-res));
-                    }
-                    result = Some(res as usize);
-                }
-                if !io_uring::cqueue::more(cqe.flags()) {
-                    break;
+            // If there's a body, submit it too
+            if let Some(body_user_data) = body_user_data {
+                let body_entry = io_uring::opcode::SendZc::new(
+                    io_uring::types::Fd(fd),
+                    body.as_ptr(),
+                    body.len() as u32,
+                )
+                .flags(libc::MSG_ZEROCOPY | libc::MSG_NOSIGNAL)
+                .build()
+                .user_data(body_user_data);
+
+                unsafe {
+                    ring.submission()
+                        .push(&body_entry)
+                        .map_err(|_| io::Error::other("submission queue full"))?;
                 }
             }
 
-            result.ok_or_else(|| io::Error::other("missing zero-copy completion"))
-        })
+            ring.submit()
+        });
+
+        match submit_result {
+            Ok(_) => {
+                // Store in pending map after successful submission
+                let mut pending = self.pending_send.lock().expect("pending send map poisoned");
+                pending.insert(
+                    header_user_data,
+                    PendingSend {
+                        fd,
+                        _header: header,
+                        body: body_user_data.map(|id| (body, id)),
+                        completion,
+                        header_result: None,
+                        body_result: None,
+                    },
+                );
+                Ok(())
+            }
+            Err(err) => {
+                let send_err = io::Error::new(err.kind(), err.to_string());
+                let _ = completion.send(Err(send_err));
+                Err(err)
+            }
+        }
     }
 
-    fn recv_chunk(&self, fd: RawFd, len: usize) -> io::Result<Vec<u8>> {
-        let mut buffer = vec![0u8; len];
-        let read = self.ring.with_lock(|ring| {
-            let entry = io_uring::opcode::Recv::new(
-                io_uring::types::Fd(fd),
-                buffer.as_mut_ptr(),
-                len as u32,
-            )
-            .flags(libc::MSG_NOSIGNAL)
-            .build();
+    fn submit_recv(
+        &self,
+        worker_index: usize,
+        fd: RawFd,
+        len: usize,
+        completion: oneshot::Sender<io::Result<Bytes>>,
+    ) -> io::Result<()> {
+        let requested = len.max(RECV_BUFFER_SIZE);
+        let mut buffer = vec![0u8; requested];
+        let user_data = self.next_uring_id.fetch_add(1, Ordering::Relaxed);
+        debug!(
+            worker_index,
+            fd, requested, user_data, "submitting recv to io_uring"
+        );
+        let entry = io_uring::opcode::Recv::new(
+            io_uring::types::Fd(fd),
+            buffer.as_mut_ptr(),
+            requested as u32,
+        )
+        .flags(libc::MSG_NOSIGNAL)
+        .build()
+        .user_data(user_data);
+
+        let submit_result = self.ring.with_lock(|ring| {
             unsafe {
                 ring.submission()
                     .push(&entry)
                     .map_err(|_| io::Error::other("submission queue full"))?;
             }
-            ring.submit_and_wait(1)?;
-            let mut cq = ring.completion();
-            let cqe = cq
-                .next()
-                .ok_or_else(|| io::Error::other("missing completion"))?;
-            Ok::<_, io::Error>(cqe.result())
-        })?;
+            ring.submit()
+        });
 
-        if read < 0 {
-            Err(io::Error::from_raw_os_error(-read))
-        } else {
-            let read = read as usize;
-            buffer.truncate(read);
-            Ok(buffer)
+        match submit_result {
+            Ok(_) => {
+                let mut pending = self.pending_recv.lock().expect("pending recv map poisoned");
+                pending.insert(
+                    user_data,
+                    PendingRecv {
+                        fd,
+                        buffer,
+                        completion,
+                    },
+                );
+                Ok(())
+            }
+            Err(err) => {
+                let send_err = io::Error::new(err.kind(), err.to_string());
+                let _ = completion.send(Err(send_err));
+                Err(err)
+            }
         }
     }
 
     fn ensure_zero_copy(&self, fd: RawFd) -> io::Result<()> {
-        if self
-            .zerocopy_configured
-            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-            .is_ok()
-        {
-            let enable: libc::c_int = 1;
-            let ret = unsafe {
-                libc::setsockopt(
-                    fd,
-                    libc::SOL_SOCKET,
-                    libc::SO_ZEROCOPY,
-                    &enable as *const _ as *const libc::c_void,
-                    std::mem::size_of_val(&enable) as libc::socklen_t,
-                )
-            };
-            if ret == -1 {
-                return Err(io::Error::last_os_error());
-            }
+        let mut configured = self.zerocopy_fds.lock().expect("zero-copy fd set poisoned");
+
+        if configured.contains(&fd) {
+            return Ok(());
         }
+
+        let enable: libc::c_int = 1;
+        let ret = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_ZEROCOPY,
+                &enable as *const _ as *const libc::c_void,
+                std::mem::size_of_val(&enable) as libc::socklen_t,
+            )
+        };
+        if ret == -1 {
+            return Err(io::Error::last_os_error());
+        }
+
+        configured.insert(fd);
         Ok(())
     }
+
+    fn poll_completions(&self, worker_index: usize) {
+        let mut completions = Vec::new();
+        self.ring.with_lock(|ring| {
+            let mut cq = ring.completion();
+            for cqe in &mut cq {
+                if io_uring::cqueue::notif(cqe.flags()) {
+                    continue;
+                }
+                completions.push((cqe.user_data(), cqe.result()));
+            }
+        });
+
+        if completions.is_empty() {
+            return;
+        }
+
+        let mut pending_recv = self.pending_recv.lock().expect("pending recv map poisoned");
+        let mut pending_send = self.pending_send.lock().expect("pending send map poisoned");
+
+        for (user_data, result) in completions {
+            if user_data == 0 {
+                debug!(
+                    worker_index,
+                    user_data, result, "completion without pending entry"
+                );
+                continue;
+            }
+
+            // Check if this is a recv completion
+            if let Some(mut recv) = pending_recv.remove(&user_data) {
+                if result < 0 {
+                    let err = io::Error::from_raw_os_error(-result);
+                    debug!(
+                        worker_index,
+                        fd = recv.fd,
+                        user_data,
+                        error = %err,
+                        "recv completion with error"
+                    );
+                    let _ = recv.completion.send(Err(err));
+                    continue;
+                }
+                let read = result as usize;
+                recv.buffer.truncate(read);
+                debug!(
+                    worker_index,
+                    fd = recv.fd,
+                    user_data,
+                    read,
+                    "recv completion"
+                );
+                let bytes = Bytes::from(recv.buffer);
+                let _ = recv.completion.send(Ok(bytes));
+                continue;
+            }
+
+            // Check if this is a send completion (header)
+            if let Some(send) = pending_send.get_mut(&user_data) {
+                if result < 0 {
+                    let err = io::Error::from_raw_os_error(-result);
+                    debug!(
+                        worker_index,
+                        fd = send.fd,
+                        user_data,
+                        error = %err,
+                        "send header completion with error"
+                    );
+                    let send = pending_send.remove(&user_data).unwrap();
+                    let _ = send.completion.send(Err(err));
+                    continue;
+                }
+
+                send.header_result = Some(result as usize);
+                debug!(
+                    worker_index,
+                    fd = send.fd,
+                    user_data,
+                    written = result,
+                    "send header completion"
+                );
+
+                // Check if we're done (no body or body also completed)
+                if send.body.is_none() || send.body_result.is_some() {
+                    let send = pending_send.remove(&user_data).unwrap();
+                    let header_written = send.header_result.unwrap_or(0);
+                    let total = header_written + send.body_result.unwrap_or(0);
+                    let _ = send.completion.send(Ok(total));
+                }
+                continue;
+            }
+
+            // Check if this is a send body completion
+            let mut header_to_complete = None;
+            for (header_user_data, send) in pending_send.iter_mut() {
+                match send.body.as_ref() {
+                    Some((_, body_user_data)) if *body_user_data == user_data => {
+                        if result < 0 {
+                            let err = io::Error::from_raw_os_error(-result);
+                            debug!(
+                                worker_index,
+                                fd = send.fd,
+                                user_data,
+                                error = %err,
+                                "send body completion with error"
+                            );
+                            header_to_complete = Some((*header_user_data, Err(err)));
+                        } else {
+                            let written = result as usize;
+                            send.body_result = Some(written);
+                            debug!(
+                                worker_index,
+                                fd = send.fd,
+                                user_data,
+                                written = result,
+                                "send body completion"
+                            );
+
+                            if let Some(header_written) = send.header_result {
+                                header_to_complete =
+                                    Some((*header_user_data, Ok(header_written + written)));
+                            }
+                        }
+                        break;
+                    }
+                    _ => continue,
+                }
+            }
+
+            if let Some((header_user_data, result)) = header_to_complete {
+                let send = pending_send.remove(&header_user_data).unwrap();
+                let _ = send.completion.send(result);
+            } else if !pending_send.contains_key(&user_data)
+                && !pending_recv.contains_key(&user_data)
+            {
+                warn!(
+                    worker_index,
+                    user_data, "received completion for unknown operation"
+                );
+            }
+        }
+    }
+
+    fn has_pending_operations(&self) -> bool {
+        let has_recv = !self
+            .pending_recv
+            .lock()
+            .expect("pending recv map poisoned")
+            .is_empty();
+        let has_send = !self
+            .pending_send
+            .lock()
+            .expect("pending send map poisoned")
+            .is_empty();
+        has_recv || has_send
+    }
+}
+
+struct PendingRecv {
+    fd: RawFd,
+    buffer: Vec<u8>,
+    completion: oneshot::Sender<io::Result<Bytes>>,
+}
+
+struct PendingSend {
+    fd: RawFd,
+    _header: Bytes,             // hold header buffer alive until completion
+    body: Option<(Bytes, u64)>, // (body_bytes, body_user_data)
+    completion: oneshot::Sender<io::Result<usize>>,
+    header_result: Option<usize>,
+    body_result: Option<usize>,
 }
 
 #[derive(Clone)]

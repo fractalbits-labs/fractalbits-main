@@ -4,6 +4,7 @@ use actix_web::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tracing::{info, warn};
 
 use crate::AppState;
@@ -27,9 +28,7 @@ pub async fn invalidate_bucket(
     let bucket_name = path.into_inner();
     info!("Invalidating bucket cache for: {}", bucket_name);
 
-    // The cache key format for buckets should match what's used in bucket::resolve_bucket
-    // Based on the code, it appears buckets are cached with their name as the key
-    app.cache.invalidate(&bucket_name).await;
+    app.cache_coordinator.invalidate_entry(&bucket_name).await;
 
     let response = CacheInvalidationResponse {
         status: "success".to_string(),
@@ -47,9 +46,7 @@ pub async fn invalidate_api_key(
     let key_id = path.into_inner();
     info!("Invalidating API key cache for: {}", key_id);
 
-    // The cache key format for API keys should match what's used in get_api_key
-    // Based on the code, it appears API keys are cached with their access_key as the key
-    app.cache.invalidate(&key_id).await;
+    app.cache_coordinator.invalidate_entry(&key_id).await;
 
     let response = CacheInvalidationResponse {
         status: "success".to_string(),
@@ -71,29 +68,29 @@ pub async fn update_az_status(
         az_id, request.status
     );
 
-    if let Some(az_status_cache) = &app.az_status_cache {
-        let cache_key = format!("az_status:{}", az_id);
-        az_status_cache
-            .insert(cache_key, request.status.clone())
-            .await;
-
-        let response = CacheInvalidationResponse {
-            status: "success".to_string(),
-            message: format!(
-                "AZ status cache for '{}' updated to '{}'",
-                az_id, request.status
-            ),
-        };
-
-        Ok(HttpResponse::Ok().json(response))
-    } else {
+    if !app.az_status_enabled.load(Ordering::Acquire) {
         let response = CacheInvalidationResponse {
             status: "error".to_string(),
             message: "AZ status cache not available for this storage backend".to_string(),
         };
 
-        Ok(HttpResponse::NotFound().json(response))
+        return Ok(HttpResponse::NotFound().json(response));
     }
+
+    let cache_key = format!("az_status:{}", az_id);
+    app.az_status_coordinator
+        .insert(&cache_key, request.status.clone())
+        .await;
+
+    let response = CacheInvalidationResponse {
+        status: "success".to_string(),
+        message: format!(
+            "AZ status cache for '{}' updated to '{}'",
+            az_id, request.status
+        ),
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 /// Clear the entire cache
@@ -101,7 +98,10 @@ pub async fn clear_cache(app: Data<Arc<AppState>>) -> Result<HttpResponse> {
     warn!("Clearing entire cache");
 
     // Invalidate all entries in the cache
-    app.cache.invalidate_all();
+    app.cache_coordinator.invalidate_all();
+    if app.az_status_enabled.load(Ordering::Acquire) {
+        app.az_status_coordinator.invalidate_all();
+    }
 
     let response = CacheInvalidationResponse {
         status: "success".to_string(),

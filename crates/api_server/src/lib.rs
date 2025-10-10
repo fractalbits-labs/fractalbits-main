@@ -1,5 +1,6 @@
 mod blob_client;
 mod blob_storage;
+mod cache_registry;
 mod config;
 pub mod handler;
 mod object_layout;
@@ -12,34 +13,41 @@ pub use data_blob_tracking::{DataBlobTracker, DataBlobTrackingError};
 use data_types::{ApiKey, Bucket, Versioned};
 use metrics::{counter, histogram};
 use moka::future::Cache;
-use rpc_client_common::{
-    RpcError, rss_rpc_retry,
-    transport::{RpcTransport, clear_current_transport, set_current_transport},
-};
+use rpc_client_common::{RpcError, rss_rpc_retry};
 use rpc_client_nss::RpcClientNss;
 use rpc_client_rss::RpcClientRss;
 pub use runtime::per_core::PerCoreContext;
 use uring::reactor::RpcReactorHandle;
 pub use uring::ring::PerCoreRing;
 
+pub use cache_registry::CacheCoordinator;
+
 use slotmap_conn_pool::{ConnPool, Poolable};
 use std::{
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
-use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::{
+    OnceCell,
+    mpsc::{self, Sender},
+};
 use tracing::info;
 pub type BlobId = uuid::Uuid;
 
 pub struct AppState {
     pub config: Arc<Config>,
     pub cache: Arc<Cache<String, Versioned<String>>>,
-    pub az_status_cache: Option<Arc<Cache<String, String>>>,
+    pub cache_coordinator: Arc<CacheCoordinator<Versioned<String>>>,
+    pub az_status_coordinator: Arc<CacheCoordinator<String>>,
+    pub az_status_enabled: AtomicBool,
 
     rpc_clients_nss: ConnPool<Arc<RpcClientNss>, String>,
     rpc_clients_rss: ConnPool<Arc<RpcClientRss>, String>,
 
-    blob_client: Arc<BlobClient>,
+    blob_client: OnceCell<Arc<BlobClient>>,
     blob_deletion: Sender<BlobDeletionRequest>,
     pub data_blob_tracker: Arc<DataBlobTracker>,
     pub per_core_ring: Arc<PerCoreRing>,
@@ -47,24 +55,20 @@ pub struct AppState {
 }
 
 impl AppState {
-    const PER_CORE_RPC_POOL_SIZE: u16 = 1;
     const PER_CORE_CACHE_CAPACITY: u64 = 10_000;
 
-    pub async fn new_per_core(
+    pub fn new_per_core_sync(
         config: Arc<Config>,
         per_core_ring: Arc<PerCoreRing>,
         rpc_handle: Arc<RpcReactorHandle>,
+        cache_coordinator: Arc<CacheCoordinator<Versioned<String>>>,
+        az_status_coordinator: Arc<CacheCoordinator<String>>,
     ) -> Self {
-        let reactor_transport: Arc<dyn RpcTransport> = Arc::new(
-            crate::uring::reactor::ReactorTransport::new(rpc_handle.clone()),
-        );
-        set_current_transport(Some(reactor_transport));
-        let rpc_clients_rss =
-            Self::new_rpc_clients_pool_rss(&config.rss_addr, Self::PER_CORE_RPC_POOL_SIZE).await;
-        let rpc_clients_nss =
-            Self::new_rpc_clients_pool_nss(&config.nss_addr, Self::PER_CORE_RPC_POOL_SIZE).await;
+        // RPC clients will be created lazily on first checkout
+        let rpc_clients_rss = ConnPool::new();
+        let rpc_clients_nss = ConnPool::new();
 
-        let (tx, rx) = mpsc::channel(1024 * 1024);
+        let (tx, _rx) = mpsc::channel(1024 * 1024);
         let data_blob_tracker = Arc::new(DataBlobTracker::with_pools(
             config.rss_addr.clone(),
             rpc_clients_rss.clone(),
@@ -78,84 +82,27 @@ impl AppState {
                 .max_capacity(Self::PER_CORE_CACHE_CAPACITY)
                 .build(),
         );
+        cache_coordinator.register_cache(cache.clone());
 
-        let (blob_client, az_status_cache) = BlobClient::new(
-            &config.blob_storage,
-            rx,
-            config.rpc_timeout(),
-            Self::PER_CORE_RPC_POOL_SIZE,
-            Some(data_blob_tracker.clone()),
-            Some(Arc::new(rpc_clients_rss.clone())),
-            Some(config.rss_addr.clone()),
-        )
-        .await
-        .expect("Failed to initialize blob client");
+        let az_status_enabled = matches!(
+            config.blob_storage.backend,
+            BlobStorageBackend::S3ExpressMultiAz
+        );
 
-        let state = Self {
+        Self {
             config,
             rpc_clients_nss,
-            blob_client: Arc::new(blob_client),
+            blob_client: OnceCell::new(),
             blob_deletion: tx,
             rpc_clients_rss,
             cache,
-            az_status_cache,
+            cache_coordinator,
+            az_status_coordinator,
+            az_status_enabled: AtomicBool::new(az_status_enabled),
             data_blob_tracker,
             per_core_ring,
             rpc_handle,
-        };
-
-        clear_current_transport();
-        state
-    }
-
-    async fn new_rpc_clients_pool_nss(
-        nss_addr: &str,
-        nss_conn_num: u16,
-    ) -> ConnPool<Arc<RpcClientNss>, String> {
-        let rpc_clients_nss = ConnPool::new();
-
-        // Use the Poolable trait's retry logic instead of manual retry
-        for i in 0..nss_conn_num as usize {
-            info!(
-                "Connecting to NSS server at {nss_addr} (connection {}/{})",
-                i + 1,
-                nss_conn_num
-            );
-            let client = Arc::new(
-                <RpcClientNss as slotmap_conn_pool::Poolable>::new(nss_addr.to_string())
-                    .await
-                    .unwrap(),
-            );
-            rpc_clients_nss.pooled(nss_addr.to_string(), client);
         }
-
-        info!("NSS RPC client pool initialized with {nss_conn_num} connections.");
-        rpc_clients_nss
-    }
-
-    async fn new_rpc_clients_pool_rss(
-        rss_addr: &str,
-        rss_conn_num: u16,
-    ) -> ConnPool<Arc<RpcClientRss>, String> {
-        let rpc_clients_rss = ConnPool::new();
-
-        // Use the Poolable trait's retry logic
-        for i in 0..rss_conn_num as usize {
-            info!(
-                "Connecting to RSS server at {rss_addr} (connection {}/{})",
-                i + 1,
-                rss_conn_num
-            );
-            let client = Arc::new(
-                <RpcClientRss as slotmap_conn_pool::Poolable>::new(rss_addr.to_string())
-                    .await
-                    .unwrap(),
-            );
-            rpc_clients_rss.pooled(rss_addr.to_string(), client);
-        }
-
-        info!("RSS RPC client pool initialized with {rss_conn_num} connections.");
-        rpc_clients_rss
     }
 
     pub async fn checkout_rpc_client_nss(
@@ -196,9 +143,27 @@ impl AppState {
                     .await?
             }
             None => {
-                self.rpc_clients_nss
+                match self
+                    .rpc_clients_nss
                     .checkout(self.config.nss_addr.clone())
-                    .await?
+                    .await
+                {
+                    Ok(client) => client,
+                    Err(slotmap_conn_pool::Error::NoConnectionAvailable) => {
+                        // Pool is empty, create connection on-demand (with transport already set in worker thread)
+                        info!(
+                            "Creating NSS connection on-demand for {}",
+                            self.config.nss_addr
+                        );
+                        let client = Arc::new(
+                            <RpcClientNss as Poolable>::new(self.config.nss_addr.clone()).await?,
+                        );
+                        self.rpc_clients_nss
+                            .pooled(self.config.nss_addr.clone(), client.clone());
+                        client
+                    }
+                    Err(e) => return Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+                }
             }
         };
         histogram!("checkout_rpc_client_nanos", "type" => "nss")
@@ -218,9 +183,27 @@ impl AppState {
                     .await?
             }
             None => {
-                self.rpc_clients_rss
+                match self
+                    .rpc_clients_rss
                     .checkout(self.config.rss_addr.clone())
-                    .await?
+                    .await
+                {
+                    Ok(client) => client,
+                    Err(slotmap_conn_pool::Error::NoConnectionAvailable) => {
+                        // Pool is empty, create connection on-demand (with transport already set in worker thread)
+                        info!(
+                            "Creating RSS connection on-demand for {}",
+                            self.config.rss_addr
+                        );
+                        let client = Arc::new(
+                            <RpcClientRss as Poolable>::new(self.config.rss_addr.clone()).await?,
+                        );
+                        self.rpc_clients_rss
+                            .pooled(self.config.rss_addr.clone(), client.clone());
+                        client
+                    }
+                    Err(e) => return Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+                }
             }
         };
         histogram!("checkout_rpc_client_nanos", "type" => "rss")
@@ -228,8 +211,40 @@ impl AppState {
         Ok(res)
     }
 
-    pub fn get_blob_client(&self) -> Arc<BlobClient> {
-        self.blob_client.clone()
+    pub async fn get_blob_client(&self) -> Option<Arc<BlobClient>> {
+        self.blob_client
+            .get_or_try_init(|| async {
+                info!("Lazy-initializing BlobClient for worker thread");
+
+                let (tx, rx) = mpsc::channel(1024 * 1024);
+
+                let (blob_client, az_status_cache) = BlobClient::new(
+                    &self.config.blob_storage,
+                    rx,
+                    self.config.rpc_timeout(),
+                    self.config.bss_conn_num,
+                    Some(self.data_blob_tracker.clone()),
+                    Some(Arc::new(self.rpc_clients_rss.clone())),
+                    Some(self.config.rss_addr.clone()),
+                )
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to initialize BlobClient: {e}");
+                    e
+                })?;
+
+                if let Some(cache) = az_status_cache {
+                    self.az_status_coordinator.register_cache(cache.clone());
+                    self.az_status_enabled.store(true, Ordering::Release);
+                }
+
+                drop(tx);
+
+                Ok::<Arc<BlobClient>, blob_storage::BlobStorageError>(Arc::new(blob_client))
+            })
+            .await
+            .ok()
+            .cloned()
     }
 
     pub fn get_blob_deletion(&self) -> Sender<BlobDeletionRequest> {

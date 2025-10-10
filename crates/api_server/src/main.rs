@@ -7,8 +7,9 @@ mod cache_mgmt;
 use actix_web::{App, HttpServer, middleware::Logger, web};
 use api_server::runtime::{listeners, per_core::PerCoreBuilder};
 use api_server::uring::{config::UringConfig, reactor, ring::PerCoreRing};
-use api_server::{AppState, Config, handler::any_handler};
+use api_server::{AppState, CacheCoordinator, Config, handler::any_handler};
 use clap::Parser;
+use data_types::Versioned;
 use rpc_client_common::transport::set_current_transport;
 use tracing::{error, info};
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
@@ -138,24 +139,9 @@ async fn main() {
             .collect(),
     );
 
-    let http_app_states = Arc::new(
-        build_per_core_app_states(
-            worker_count,
-            config.clone(),
-            per_core_rings.clone(),
-            per_core_reactors.clone(),
-        )
-        .await,
-    );
-    let mgmt_app_states = Arc::new(
-        build_per_core_app_states(
-            worker_count,
-            config.clone(),
-            per_core_rings.clone(),
-            per_core_reactors.clone(),
-        )
-        .await,
-    );
+    let cache_coordinator: Arc<CacheCoordinator<Versioned<String>>> =
+        Arc::new(CacheCoordinator::new());
+    let az_status_coordinator: Arc<CacheCoordinator<String>> = Arc::new(CacheCoordinator::new());
 
     let http_per_core = PerCoreBuilder::new(per_core_rings.clone(), per_core_reactors.clone());
     let mgmt_per_core = PerCoreBuilder::new(per_core_rings.clone(), per_core_reactors.clone());
@@ -176,9 +162,13 @@ async fn main() {
         port,
         worker_count, "HTTP server started with reuseport listeners"
     );
+    let cache_coordinator_http = cache_coordinator.clone();
+    let az_status_coordinator_http = az_status_coordinator.clone();
     let mut http_server = HttpServer::new({
         let per_core_builder = http_per_core.clone();
-        let app_states = http_app_states.clone();
+        let config_clone = config.clone();
+        let cache_coordinator = cache_coordinator_http;
+        let az_status_coordinator = az_status_coordinator_http;
         move || {
             let per_core_ctx = per_core_builder
                 .build_context()
@@ -187,11 +177,13 @@ async fn main() {
             set_current_transport(Some(Arc::new(reactor::ReactorTransport::new(
                 per_core_ctx.reactor(),
             ))));
-            let worker_index = per_core_ctx.worker_index();
-            let app_state = app_states
-                .get(worker_index)
-                .unwrap_or_else(|| panic!("missing app state for worker {worker_index}"))
-                .clone();
+            let app_state = Arc::new(AppState::new_per_core_sync(
+                config_clone.clone(),
+                per_core_ctx.ring(),
+                per_core_ctx.reactor(),
+                cache_coordinator.clone(),
+                az_status_coordinator.clone(),
+            ));
 
             App::new()
                 .app_data(web::Data::new(app_state))
@@ -221,9 +213,13 @@ async fn main() {
         mgmt_port,
         worker_count, "Management server started with reuseport listeners"
     );
+    let cache_coordinator_mgmt = cache_coordinator.clone();
+    let az_status_coordinator_mgmt = az_status_coordinator.clone();
     let mut mgmt_server = HttpServer::new({
         let per_core_builder = mgmt_per_core.clone();
-        let app_states = mgmt_app_states.clone();
+        let config_clone = config.clone();
+        let cache_coordinator = cache_coordinator_mgmt;
+        let az_status_coordinator = az_status_coordinator_mgmt;
         move || {
             let per_core_ctx = per_core_builder
                 .build_context()
@@ -232,11 +228,13 @@ async fn main() {
             set_current_transport(Some(Arc::new(reactor::ReactorTransport::new(
                 per_core_ctx.reactor(),
             ))));
-            let worker_index = per_core_ctx.worker_index();
-            let app_state = app_states
-                .get(worker_index)
-                .unwrap_or_else(|| panic!("missing mgmt app state for worker {worker_index}"))
-                .clone();
+            let app_state = Arc::new(AppState::new_per_core_sync(
+                config_clone.clone(),
+                per_core_ctx.ring(),
+                per_core_ctx.reactor(),
+                cache_coordinator.clone(),
+                az_status_coordinator.clone(),
+            ));
 
             App::new()
                 .app_data(web::Data::new(app_state))
@@ -283,26 +281,4 @@ async fn main() {
             }
         }
     }
-}
-
-async fn build_per_core_app_states(
-    worker_count: usize,
-    config: Arc<Config>,
-    rings: Arc<Vec<Arc<PerCoreRing>>>,
-    reactors: Arc<Vec<Arc<reactor::RpcReactorHandle>>>,
-) -> Vec<Arc<AppState>> {
-    let mut states = Vec::with_capacity(worker_count);
-    for idx in 0..worker_count {
-        let ring = rings
-            .get(idx)
-            .expect("missing per-core ring for app state")
-            .clone();
-        let reactor_handle = reactors
-            .get(idx)
-            .expect("missing per-core reactor for app state")
-            .clone();
-        let state = AppState::new_per_core(config.clone(), ring, reactor_handle).await;
-        states.push(Arc::new(state));
-    }
-    states
 }

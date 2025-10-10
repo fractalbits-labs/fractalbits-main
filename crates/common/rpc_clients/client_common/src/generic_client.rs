@@ -5,7 +5,7 @@ use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 use slotmap_conn_pool::Poolable;
 use socket2::{Socket, TcpKeepalive};
 use std::collections::HashMap;
-use std::io::{self, ErrorKind, IoSlice};
+use std::io;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::os::fd::RawFd;
@@ -32,41 +32,10 @@ use tracing::{debug, warn};
 
 use crate::{
     RpcError,
-    io_uring_support::{
-        IoUringDriver, ZeroCopySender, current_io_uring_driver, current_zero_copy_sender,
-    },
     transport::{RpcTransport, current_transport},
 };
 
 type RequestMap<Header> = Arc<Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>>;
-
-fn send_frame_zero_copy(
-    sender: &dyn ZeroCopySender,
-    fd: RawFd,
-    header: &[u8],
-    body: &Bytes,
-) -> io::Result<()> {
-    send_all_zero_copy(sender, fd, header)?;
-    if !body.is_empty() {
-        send_all_zero_copy(sender, fd, body.as_ref())?;
-    }
-    Ok(())
-}
-
-fn send_all_zero_copy(sender: &dyn ZeroCopySender, fd: RawFd, mut buf: &[u8]) -> io::Result<()> {
-    while !buf.is_empty() {
-        let slice = [IoSlice::new(buf)];
-        let written = sender.send_vectored(fd, &slice)?;
-        if written == 0 {
-            return Err(io::Error::new(
-                ErrorKind::WriteZero,
-                "zero-copy send returned zero bytes",
-            ));
-        }
-        buf = &buf[written..];
-    }
-    Ok(())
-}
 
 pub trait RpcCodec<Header: MessageHeaderTrait>:
     Default
@@ -210,8 +179,6 @@ where
             Arc::new(Mutex::new(HashMap::new()));
         let (sender, receiver) = mpsc::channel::<MessageFrame<Header>>(1024);
         let is_closed = Arc::new(AtomicBool::new(false));
-        let zero_copy_sender = current_zero_copy_sender();
-        let io_uring_driver = current_io_uring_driver();
 
         let mut tasks = JoinSet::new();
 
@@ -219,18 +186,10 @@ where
         {
             let sender_requests = requests.clone();
             let is_closed = is_closed.clone();
-            let zero_copy_sender = zero_copy_sender.clone();
             let transport = transport.clone();
             tasks.spawn(async move {
-                if let Err(e) = Self::send_task(
-                    writer,
-                    receiver,
-                    socket_fd,
-                    rpc_type,
-                    zero_copy_sender,
-                    transport,
-                )
-                .await
+                if let Err(e) =
+                    Self::send_task(writer, receiver, socket_fd, rpc_type, transport).await
                 {
                     warn!(%rpc_type, %socket_fd, %e, "send task failed");
                 }
@@ -243,7 +202,6 @@ where
         {
             let receiver_requests = requests.clone();
             let is_closed = is_closed.clone();
-            let io_uring_driver = io_uring_driver.clone();
             let transport = transport.clone();
             tasks.spawn(async move {
                 if let Err(e) = Self::receive_task(
@@ -251,7 +209,6 @@ where
                     receiver_requests.clone(),
                     socket_fd,
                     rpc_type,
-                    io_uring_driver,
                     transport,
                 )
                 .await
@@ -283,7 +240,6 @@ where
         mut receiver: Receiver<MessageFrame<Header>>,
         socket_fd: RawFd,
         rpc_type: &'static str,
-        zero_copy_sender: Option<Arc<dyn ZeroCopySender>>,
         transport: Option<Arc<dyn RpcTransport>>,
     ) -> Result<(), RpcError> {
         let mut header_buf = BytesMut::with_capacity(Header::SIZE);
@@ -304,13 +260,6 @@ where
                 )
                 .await
                 .map_err(RpcError::IoError)?;
-            } else if let Some(sender) = zero_copy_sender.as_ref() {
-                send_frame_zero_copy(
-                    sender.as_ref(),
-                    writer.as_ref().as_raw_fd(),
-                    header_buf.as_ref(),
-                    &body,
-                )?;
             } else {
                 writer
                     .write_all(header_buf.as_ref())
@@ -336,17 +285,12 @@ where
         requests: RequestMap<Header>,
         socket_fd: RawFd,
         rpc_type: &'static str,
-        io_uring_driver: Option<Arc<dyn IoUringDriver>>,
+
         transport: Option<Arc<dyn RpcTransport>>,
     ) -> Result<(), RpcError> {
         if let Some(tp) = transport {
             drop(receiver);
             Self::receive_task_transport(tp, socket_fd, &requests, rpc_type).await
-        } else if let Some(driver) = io_uring_driver {
-            drop(receiver);
-            Self::receive_task_uring(driver, socket_fd, &requests, rpc_type).await?;
-            warn!(%rpc_type, %socket_fd, "connection closed, receive message task quit");
-            Ok(())
         } else {
             Self::receive_task_tokio(receiver, &requests, socket_fd, rpc_type).await
         }
@@ -403,67 +347,6 @@ where
         }
 
         warn!(%rpc_type, %socket_fd, "connection closed, receive message task quit");
-        Ok(())
-    }
-
-    async fn receive_task_uring(
-        driver: Arc<dyn IoUringDriver>,
-        socket_fd: RawFd,
-        requests: &RequestMap<Header>,
-        rpc_type: &'static str,
-    ) -> Result<(), RpcError> {
-        use std::io;
-
-        async fn read_exact(
-            driver: &Arc<dyn IoUringDriver>,
-            fd: RawFd,
-            mut remaining: usize,
-        ) -> Result<Vec<u8>, RpcError> {
-            let mut buffer = Vec::with_capacity(remaining);
-            while remaining > 0 {
-                let chunk = driver
-                    .recv(fd, remaining)
-                    .await
-                    .map_err(RpcError::IoError)?;
-
-                if chunk.is_empty() {
-                    return Err(RpcError::IoError(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "io_uring recv returned 0 bytes",
-                    )));
-                }
-
-                remaining = remaining.saturating_sub(chunk.len());
-                buffer.extend_from_slice(&chunk);
-            }
-            Ok(buffer)
-        }
-
-        loop {
-            // Read the fixed-size header first
-            let header_buf = match read_exact(&driver, socket_fd, Header::SIZE).await {
-                Ok(bytes) => bytes,
-                Err(RpcError::IoError(err)) if err.kind() == io::ErrorKind::UnexpectedEof => {
-                    // Remote end closed cleanly
-                    break;
-                }
-                Err(err) => return Err(err),
-            };
-
-            let header_bytes = Bytes::from(header_buf);
-            let header = Header::decode(&header_bytes);
-            let body_len = header.get_body_size();
-
-            let body_bytes = if body_len > 0 {
-                Bytes::from(read_exact(&driver, socket_fd, body_len).await?)
-            } else {
-                Bytes::new()
-            };
-
-            let frame = MessageFrame::new(header, body_bytes);
-            Self::handle_incoming_frame(frame, requests, socket_fd, rpc_type);
-        }
-
         Ok(())
     }
 

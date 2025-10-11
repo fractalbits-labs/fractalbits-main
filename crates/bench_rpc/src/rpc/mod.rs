@@ -26,6 +26,7 @@ pub type Handle = JoinHandle<anyhow::Result<WorkerResult>>;
 
 const TEST_BUCKET_ROOT_BLOB_NAME: &str = "12345678-1234567890abcdef-0001-1234";
 const INODE_SIZE: usize = 187;
+const BLOB_SIZE: usize = 8192;
 
 fn read_keys(filename: &str, num_tasks: usize, keys_limit: usize) -> Vec<VecDeque<String>> {
     let file = File::open(filename).unwrap_or_else(|_| panic!("open {filename} failed"));
@@ -211,7 +212,7 @@ async fn benchmark_bss_write(
     for _ in 0..io_depth {
         if let Some(uuid) = uuids.pop_front() {
             let rpc_client = rpc_client.clone();
-            let content = Bytes::from(vec![0; 8192 - 256]);
+            let content = Bytes::from(vec![0; BLOB_SIZE - 256]);
             let blob_guid = DataBlobGuid {
                 blob_id: Uuid::parse_str(&uuid).unwrap(),
                 volume_id: 1,
@@ -251,7 +252,7 @@ async fn benchmark_bss_write(
         // If there are more UUIDs, add a new request to maintain io_depth
         if let Some(uuid) = uuids.pop_front() {
             let rpc_client = rpc_client.clone();
-            let content = Bytes::from(vec![0; 4096 - 256]);
+            let content = Bytes::from(vec![0; BLOB_SIZE - 256]);
             let blob_guid = DataBlobGuid {
                 blob_id: Uuid::parse_str(&uuid).unwrap(),
                 volume_id: 1,

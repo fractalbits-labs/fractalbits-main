@@ -214,6 +214,7 @@ where
     ) -> Result<(), RpcError> {
         let mut header_buf = BytesMut::with_capacity(Header::SIZE);
         while let Some(frame) = receiver.recv().await {
+            gauge!("rpc_request_pending_in_send_queue", "type" => rpc_type).decrement(1.0);
             let request_id = frame.header.get_id();
             debug!(%rpc_type, %socket_fd, %request_id, "sending request:");
 
@@ -231,6 +232,7 @@ where
                     .await
                     .map_err(RpcError::IoError)?;
             }
+            writer.flush().await?;
             counter!("rpc_request_sent", "type" => rpc_type, "name" => "all").increment(1);
         }
         warn!(%rpc_type, %socket_fd, "sender closed, send message task quit");
@@ -288,17 +290,12 @@ where
         }
     }
 
-    pub async fn send_message(
+    async fn send_request_internal(
         &self,
-        frame: MessageFrame<Header>,
-    ) -> Result<MessageFrame<Header>, RpcError> {
-        self.send_message_with_retry_count(0, frame).await
-    }
-
-    pub async fn send_message_with_retry_count(
-        &self,
+        request_id: u32,
         retry_count: u32,
         mut frame: MessageFrame<Header>,
+        timeout: Option<Duration>,
     ) -> Result<MessageFrame<Header>, RpcError> {
         if self.is_closed.load(Ordering::SeqCst) {
             return Err(RpcError::InternalRequestError(
@@ -306,7 +303,7 @@ where
             ));
         }
 
-        let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let rpc_type = Codec::RPC_TYPE;
         frame.header.set_id(request_id);
         frame.header.set_client_session_id(self.client_session_id);
         frame.header.set_retry_count(retry_count);
@@ -315,18 +312,25 @@ where
         {
             self.requests.lock().insert(request_id, tx);
         }
-        gauge!("rpc_request_pending_in_resp_map", "type" => Codec::RPC_TYPE).increment(1.0);
+        gauge!("rpc_request_pending_in_resp_map", "type" => rpc_type).increment(1.0);
 
         self.sender
             .send(frame)
             .await
             .map_err(|e| RpcError::InternalRequestError(e.to_string()))?;
+        gauge!("rpc_request_pending_in_send_queue", "type" => rpc_type).increment(1.0);
 
-        let response = rx
-            .await
-            .map_err(|e| RpcError::InternalResponseError(e.to_string()))?;
-
-        Ok(response)
+        let result = match timeout {
+            None => rx.await,
+            Some(rpc_timeout) => match tokio::time::timeout(rpc_timeout, rx).await {
+                Ok(result) => result,
+                Err(_) => {
+                    warn!(%rpc_type, socket_fd=%self.socket_fd, %request_id, "rpc request timeout");
+                    return Err(RpcError::InternalResponseError("timeout".into()));
+                }
+            },
+        };
+        result.map_err(|e| RpcError::InternalResponseError(e.to_string()))
     }
 
     pub fn gen_request_id(&self) -> u32 {
@@ -404,46 +408,19 @@ where
         handshake_frame.header.set_size(Header::SIZE as u32);
 
         // Send handshake request and wait for response
-        self.send_message(handshake_frame).await
+        let request_id = self.gen_request_id();
+        self.send_request_internal(request_id, 0, handshake_frame, None)
+            .await
     }
 
     pub async fn send_request(
         &self,
         request_id: u32,
-        mut frame: MessageFrame<Header>,
+        frame: MessageFrame<Header>,
         timeout: Option<std::time::Duration>,
     ) -> Result<MessageFrame<Header>, RpcError> {
-        if self.is_closed.load(Ordering::SeqCst) {
-            return Err(RpcError::InternalRequestError(
-                "Connection is closed".into(),
-            ));
-        }
-
-        // Set routing fields for session-based routing
-        frame.header.set_client_session_id(self.client_session_id);
-
-        let (tx, rx) = oneshot::channel();
-        {
-            self.requests.lock().insert(request_id, tx);
-        }
-        gauge!("rpc_request_pending_in_resp_map", "type" => Codec::RPC_TYPE).increment(1.0);
-
-        self.sender
-            .send(frame)
+        self.send_request_internal(request_id, 0, frame, timeout)
             .await
-            .map_err(|e| RpcError::InternalRequestError(e.to_string()))?;
-
-        let result = match timeout {
-            None => rx.await,
-            Some(rpc_timeout) => match tokio::time::timeout(rpc_timeout, rx).await {
-                Ok(result) => result,
-                Err(_) => {
-                    warn!(rpc_type=%Codec::RPC_TYPE, socket_fd=%self.socket_fd, %request_id, "rpc request timeout");
-                    return Err(RpcError::InternalRequestError("timeout".into()));
-                }
-            },
-        };
-        result.map_err(|e| RpcError::InternalResponseError(e.to_string()))
     }
 
     pub fn is_closed(&self) -> bool {

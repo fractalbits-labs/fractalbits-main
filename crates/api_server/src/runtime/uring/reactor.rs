@@ -1,11 +1,11 @@
 use super::ring::PerCoreRing;
-use async_trait::async_trait;
 use bytes::Bytes;
 use core_affinity;
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, unbounded};
 use libc;
 use metrics::gauge;
-use rpc_client_common::transport::RpcTransport;
+use rpc_client_common::{IoUringTransport, MessageFrame, MessageHeaderTrait};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::os::fd::RawFd;
@@ -177,6 +177,53 @@ impl Drop for RpcReactorHandle {
 pub enum RpcCommand {
     Shutdown,
     Task(RpcTask),
+}
+
+thread_local! {
+    static CURRENT_REACTOR: RefCell<Option<ReactorTransport>> = const { RefCell::new(None) };
+}
+
+pub fn set_current_reactor(reactor: ReactorTransport) {
+    use futures::FutureExt;
+    use rpc_client_common::io_uring_support::{RecvFrameFunction, set_io_uring_recv_frame};
+
+    let reactor_clone = reactor.clone();
+    let recv_fn: RecvFrameFunction = Arc::new(move |fd, header_size, body_size| {
+        let r = reactor_clone.clone();
+        async move {
+            if header_size > 0 {
+                let header_bytes = r.recv_exact(fd, header_size).await?;
+                if header_bytes.is_empty() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "connection closed during header read",
+                    ));
+                }
+                let body_bytes = if body_size > 0 {
+                    r.recv_exact(fd, body_size).await?
+                } else {
+                    Bytes::new()
+                };
+                Ok((header_bytes, body_bytes))
+            } else if body_size > 0 {
+                let body_bytes = r.recv_exact(fd, body_size).await?;
+                Ok((Bytes::new(), body_bytes))
+            } else {
+                Ok((Bytes::new(), Bytes::new()))
+            }
+        }
+        .boxed()
+    });
+
+    set_io_uring_recv_frame(Some(recv_fn));
+
+    CURRENT_REACTOR.with(|slot| {
+        *slot.borrow_mut() = Some(reactor);
+    });
+}
+
+pub fn get_current_reactor() -> Option<ReactorTransport> {
+    CURRENT_REACTOR.with(|slot| slot.borrow().clone())
 }
 
 pub fn spawn_rpc_reactor(worker_index: usize, ring: Arc<PerCoreRing>) -> Arc<RpcReactorHandle> {
@@ -667,8 +714,7 @@ impl ReactorTransport {
     }
 }
 
-#[async_trait]
-impl RpcTransport for ReactorTransport {
+impl IoUringTransport for ReactorTransport {
     async fn send(&self, fd: RawFd, header: Bytes, body: Bytes) -> io::Result<usize> {
         let rx = self.handle.submit_send(fd, header, body);
         match rx.await {
@@ -680,7 +726,61 @@ impl RpcTransport for ReactorTransport {
         }
     }
 
-    async fn recv(&self, fd: RawFd, len: usize) -> io::Result<Bytes> {
+    async fn recv_frame<H: MessageHeaderTrait>(&self, fd: RawFd) -> io::Result<MessageFrame<H>> {
+        let header_size = H::SIZE;
+
+        let header_bytes = self.recv_exact(fd, header_size).await?;
+
+        if header_bytes.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "connection closed during header read",
+            ));
+        }
+
+        if header_bytes.len() != header_size {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "incomplete header: expected {}, got {}",
+                    header_size,
+                    header_bytes.len()
+                ),
+            ));
+        }
+
+        let header = H::decode(&header_bytes);
+        let body_size = header.get_body_size();
+
+        let body = if body_size == 0 {
+            Bytes::new()
+        } else {
+            let body_bytes = self.recv_exact(fd, body_size).await?;
+
+            if body_bytes.len() != body_size {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "incomplete body: expected {}, got {}",
+                        body_size,
+                        body_bytes.len()
+                    ),
+                ));
+            }
+
+            body_bytes
+        };
+
+        Ok(MessageFrame { header, body })
+    }
+
+    fn name(&self) -> &'static str {
+        "reactor_io_uring"
+    }
+}
+
+impl ReactorTransport {
+    async fn recv_exact(&self, fd: RawFd, len: usize) -> io::Result<Bytes> {
         if len == 0 {
             return Ok(Bytes::new());
         }
@@ -733,9 +833,5 @@ impl RpcTransport for ReactorTransport {
 
         let buf = buffer.expect("recv buffer must be initialized");
         Ok(Bytes::from(buf))
-    }
-
-    fn name(&self) -> &'static str {
-        "reactor_io_uring"
     }
 }

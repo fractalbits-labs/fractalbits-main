@@ -1,49 +1,25 @@
 use futures::future::BoxFuture;
 use std::cell::RefCell;
-use std::io::{self, IoSlice};
+use std::io::{self};
 use std::os::fd::RawFd;
 use std::sync::Arc;
 
-pub trait ZeroCopySender: Send + Sync + 'static {
-    fn send_vectored(&self, fd: RawFd, bufs: &[IoSlice<'_>]) -> io::Result<usize>;
-}
+use bytes::Bytes;
+
+pub type RecvFrameFunction = Arc<
+    dyn Fn(RawFd, usize, usize) -> BoxFuture<'static, io::Result<(Bytes, Bytes)>> + Send + Sync,
+>;
 
 thread_local! {
-    static ZERO_COPY_SENDER: RefCell<Option<Arc<dyn ZeroCopySender>>> = RefCell::new(None);
+    static IO_URING_RECV_FRAME: RefCell<Option<RecvFrameFunction>> = const { RefCell::new(None) };
 }
 
-pub fn set_current_zero_copy_sender(sender: Option<Arc<dyn ZeroCopySender>>) {
-    ZERO_COPY_SENDER.with(|slot| {
-        *slot.borrow_mut() = sender;
+pub fn set_io_uring_recv_frame(func: Option<RecvFrameFunction>) {
+    IO_URING_RECV_FRAME.with(|slot| {
+        *slot.borrow_mut() = func;
     });
 }
 
-pub fn current_zero_copy_sender() -> Option<Arc<dyn ZeroCopySender>> {
-    ZERO_COPY_SENDER.with(|slot| slot.borrow().as_ref().map(Arc::clone))
-}
-
-pub fn clear_current_zero_copy_sender() {
-    set_current_zero_copy_sender(None);
-}
-
-pub trait IoUringDriver: Send + Sync + 'static {
-    fn recv(&self, fd: RawFd, len: usize) -> BoxFuture<'static, io::Result<Vec<u8>>>;
-}
-
-thread_local! {
-    static IO_URING_DRIVER: RefCell<Option<Arc<dyn IoUringDriver>>> = RefCell::new(None);
-}
-
-pub fn set_current_io_uring_driver(driver: Option<Arc<dyn IoUringDriver>>) {
-    IO_URING_DRIVER.with(|slot| {
-        *slot.borrow_mut() = driver;
-    });
-}
-
-pub fn current_io_uring_driver() -> Option<Arc<dyn IoUringDriver>> {
-    IO_URING_DRIVER.with(|slot| slot.borrow().as_ref().map(Arc::clone))
-}
-
-pub fn clear_current_io_uring_driver() {
-    set_current_io_uring_driver(None);
+pub fn get_io_uring_recv_frame() -> Option<RecvFrameFunction> {
+    IO_URING_RECV_FRAME.with(|slot| slot.borrow().as_ref().map(Arc::clone))
 }

@@ -1,4 +1,4 @@
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use metrics::{counter, gauge};
 use parking_lot::Mutex;
 use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
@@ -26,14 +26,14 @@ use tokio_retry::{
     Retry,
     strategy::{FixedInterval, jitter},
 };
-use tokio_stream::StreamExt;
-use tokio_util::codec::FramedRead;
 use tracing::{debug, warn};
 
-use crate::{
-    RpcError,
-    transport::{RpcTransport, current_transport},
-};
+#[cfg(not(feature = "io_uring"))]
+use tokio_stream::StreamExt;
+#[cfg(not(feature = "io_uring"))]
+use tokio_util::codec::FramedRead;
+
+use crate::RpcError;
 
 type RequestMap<Header> = Arc<Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>>;
 
@@ -57,8 +57,6 @@ pub struct RpcClient<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> {
     socket_fd: RawFd,
     is_closed: Arc<AtomicBool>,
     client_session_id: u64,
-    #[allow(unused)]
-    transport: Option<Arc<dyn RpcTransport>>,
     _phantom: PhantomData<Codec>,
 }
 
@@ -164,14 +162,6 @@ where
     }
 
     async fn new_internal(stream: TcpStream, session_id: u64) -> Result<Self, RpcError> {
-        let transport = current_transport();
-        if let Some(t) = transport.as_ref() {
-            tracing::debug!(
-                rpc_type = Codec::RPC_TYPE,
-                transport = t.name(),
-                "rpc client detected alternate transport"
-            );
-        }
         let rpc_type = Codec::RPC_TYPE;
         let socket_fd = stream.as_raw_fd();
         let (reader, writer) = stream.into_split();
@@ -186,11 +176,8 @@ where
         {
             let sender_requests = requests.clone();
             let is_closed = is_closed.clone();
-            let transport = transport.clone();
             tasks.spawn(async move {
-                if let Err(e) =
-                    Self::send_task(writer, receiver, socket_fd, rpc_type, transport).await
-                {
+                if let Err(e) = Self::send_task(writer, receiver, socket_fd, rpc_type).await {
                     warn!(%rpc_type, %socket_fd, %e, "send task failed");
                 }
                 is_closed.store(true, Ordering::SeqCst);
@@ -202,16 +189,9 @@ where
         {
             let receiver_requests = requests.clone();
             let is_closed = is_closed.clone();
-            let transport = transport.clone();
             tasks.spawn(async move {
-                if let Err(e) = Self::receive_task(
-                    reader,
-                    receiver_requests.clone(),
-                    socket_fd,
-                    rpc_type,
-                    transport,
-                )
-                .await
+                if let Err(e) =
+                    Self::receive_task(reader, receiver_requests.clone(), socket_fd, rpc_type).await
                 {
                     warn!(%rpc_type, %socket_fd, %e, "receive task failed");
                 }
@@ -230,7 +210,6 @@ where
             socket_fd,
             is_closed,
             client_session_id: session_id,
-            transport,
             _phantom: PhantomData,
         })
     }
@@ -240,7 +219,6 @@ where
         mut receiver: Receiver<MessageFrame<Header>>,
         socket_fd: RawFd,
         rpc_type: &'static str,
-        transport: Option<Arc<dyn RpcTransport>>,
     ) -> Result<(), RpcError> {
         let mut header_buf = BytesMut::with_capacity(Header::SIZE);
         while let Some(frame) = receiver.recv().await {
@@ -252,26 +230,16 @@ where
             header_buf.clear();
             header.encode(&mut header_buf);
 
-            if let Some(tp) = transport.as_ref() {
-                tp.send(
-                    socket_fd,
-                    Bytes::copy_from_slice(header_buf.as_ref()),
-                    body.clone(),
-                )
+            writer
+                .write_all(header_buf.as_ref())
                 .await
                 .map_err(RpcError::IoError)?;
-            } else {
+
+            if !body.is_empty() {
                 writer
-                    .write_all(header_buf.as_ref())
+                    .write_all(body.as_ref())
                     .await
                     .map_err(RpcError::IoError)?;
-
-                if !body.is_empty() {
-                    writer
-                        .write_all(body.as_ref())
-                        .await
-                        .map_err(RpcError::IoError)?;
-                }
             }
             writer.flush().await?;
             counter!("rpc_request_sent", "type" => rpc_type, "name" => "all").increment(1);
@@ -285,77 +253,65 @@ where
         requests: RequestMap<Header>,
         socket_fd: RawFd,
         rpc_type: &'static str,
-
-        transport: Option<Arc<dyn RpcTransport>>,
     ) -> Result<(), RpcError> {
-        if let Some(tp) = transport {
+        #[cfg(feature = "io_uring")]
+        {
             drop(receiver);
-            Self::receive_task_transport(tp, socket_fd, &requests, rpc_type).await
-        } else {
+            Self::receive_task_io_uring(socket_fd, &requests, rpc_type).await
+        }
+        #[cfg(not(feature = "io_uring"))]
+        {
             Self::receive_task_tokio(receiver, &requests, socket_fd, rpc_type).await
         }
     }
 
-    async fn receive_task_transport(
-        transport: Arc<dyn RpcTransport>,
+    #[cfg(feature = "io_uring")]
+    async fn receive_task_io_uring(
         socket_fd: RawFd,
         requests: &RequestMap<Header>,
         rpc_type: &'static str,
     ) -> Result<(), RpcError> {
+        use crate::io_uring_support::get_io_uring_recv_frame;
+
+        let recv_fn = get_io_uring_recv_frame().ok_or_else(|| {
+            RpcError::IoError(io::Error::other("no io_uring recv function available"))
+        })?;
+
         let header_size = Header::SIZE;
 
         loop {
-            let header_bytes = transport
-                .recv(socket_fd, header_size)
-                .await
-                .map_err(RpcError::IoError)?;
+            let (header_bytes, body_bytes) = match recv_fn(socket_fd, header_size, 0).await {
+                Ok((h, b)) => (h, b),
+                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                    debug!(
+                        rpc_type = %rpc_type,
+                        %socket_fd,
+                        "connection closed"
+                    );
+                    break;
+                }
+                Err(e) => return Err(RpcError::IoError(e)),
+            };
 
             if header_bytes.is_empty() {
                 debug!(
                     rpc_type = %rpc_type,
                     %socket_fd,
-                    "connection closed during header read"
+                    "connection closed (empty header)"
                 );
                 break;
             }
 
-            if header_bytes.len() != header_size {
-                return Err(RpcError::DecodeError(format!(
-                    "incomplete header: expected {}, got {}",
-                    header_size,
-                    header_bytes.len()
-                )));
-            }
-
             let header = Header::decode(&header_bytes);
             let body_size = header.get_body_size();
-            header_size.checked_add(body_size).ok_or_else(|| {
-                RpcError::DecodeError(format!(
-                    "invalid frame size: header {header_size}, body {body_size}"
-                ))
-            })?;
 
-            let body = if body_size == 0 {
-                bytes::Bytes::new()
+            let body = if body_size > 0 {
+                let (_empty_header, body) = match recv_fn(socket_fd, 0, body_size).await {
+                    Ok((h, b)) => (h, b),
+                    Err(e) => return Err(RpcError::IoError(e)),
+                };
+                body
             } else {
-                let body_bytes = transport
-                    .recv(socket_fd, body_size)
-                    .await
-                    .map_err(RpcError::IoError)?;
-
-                if body_bytes.len() != body_size {
-                    if body_bytes.is_empty() {
-                        return Err(RpcError::DecodeError(
-                            "connection closed during body read".into(),
-                        ));
-                    }
-                    return Err(RpcError::DecodeError(format!(
-                        "incomplete body: expected {}, got {}",
-                        body_size,
-                        body_bytes.len()
-                    )));
-                }
-
                 body_bytes
             };
 
@@ -367,6 +323,7 @@ where
         Ok(())
     }
 
+    #[cfg(not(feature = "io_uring"))]
     async fn receive_task_tokio(
         receiver: OwnedReadHalf,
         requests: &RequestMap<Header>,

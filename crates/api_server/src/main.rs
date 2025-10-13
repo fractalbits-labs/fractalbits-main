@@ -231,7 +231,10 @@ async fn main() {
         app.default_service(web::route().to(any_handler))
     });
 
-    server = server.workers(worker_count);
+    server = server
+        .workers(worker_count)
+        .max_connections(65536)
+        .max_connection_rate(65536);
 
     for listener in http_listeners {
         server = server.listen(listener).unwrap();

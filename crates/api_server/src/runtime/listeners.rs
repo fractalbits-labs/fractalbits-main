@@ -3,7 +3,7 @@ use std::io;
 use std::net::{SocketAddr, TcpListener};
 
 /// Default listen backlog for reuseport listeners.
-const DEFAULT_BACKLOG: i32 = 1024;
+const DEFAULT_BACKLOG: i32 = 65536;
 
 /// Create `SO_REUSEPORT` TCP listeners for the provided address.
 ///

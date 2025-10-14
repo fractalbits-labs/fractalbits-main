@@ -27,22 +27,18 @@ pub struct BlobClient {
 }
 
 impl BlobClient {
-    pub async fn new(
+    pub async fn new_with_data_vg_info(
         blob_storage_config: &BlobStorageConfig,
         rx: Receiver<BlobDeletionRequest>,
         rpc_timeout: Duration,
         data_blob_tracker: Option<Arc<DataBlobTracker>>,
-        rss_clients: Option<
-            Arc<slotmap_conn_pool::ConnPool<Arc<rpc_client_rss::RpcClientRss>, String>>,
-        >,
-        rss_addr: Option<String>,
+        data_vg_info: data_types::DataVgInfo,
     ) -> Result<(Self, Option<Arc<Cache<String, String>>>), BlobStorageError> {
         let (storage, az_status_cache) = Self::create_storage_impl(
             blob_storage_config,
             rpc_timeout,
             data_blob_tracker,
-            rss_clients,
-            rss_addr,
+            data_vg_info,
         )
         .await?;
 
@@ -54,10 +50,7 @@ impl BlobClient {
         blob_storage_config: &BlobStorageConfig,
         rpc_timeout: Duration,
         data_blob_tracker: Option<Arc<DataBlobTracker>>,
-        rss_clients: Option<
-            Arc<slotmap_conn_pool::ConnPool<Arc<rpc_client_rss::RpcClientRss>, String>>,
-        >,
-        rss_addr: Option<String>,
+        data_vg_info: data_types::DataVgInfo,
     ) -> Result<(Arc<BlobStorageImpl>, Option<Arc<Cache<String, String>>>), BlobStorageError> {
         let storage = match &blob_storage_config.backend {
             BlobStorageBackend::S3HybridSingleAz => {
@@ -70,24 +63,13 @@ impl BlobClient {
                         )
                     })?;
 
-                let rss_client = rss_clients
-                    .ok_or_else(|| {
-                        BlobStorageError::Config(
-                            "RSS client required for S3 hybrid backend with DataVgProxy".into(),
-                        )
-                    })?
-                    .checkout(rss_addr.ok_or_else(|| {
-                        BlobStorageError::Config(
-                            "RSS address required for S3 hybrid backend".into(),
-                        )
-                    })?)
-                    .await
-                    .map_err(|e| {
-                        BlobStorageError::Config(format!("Failed to checkout RSS client: {}", e))
-                    })?;
-
                 BlobStorageImpl::HybridSingleAz(
-                    S3HybridSingleAzStorage::new(rss_client, s3_hybrid_config, rpc_timeout).await?,
+                    S3HybridSingleAzStorage::new_with_data_vg_info(
+                        data_vg_info.clone(),
+                        s3_hybrid_config,
+                        rpc_timeout,
+                    )
+                    .await?,
                 )
             }
             BlobStorageBackend::S3ExpressMultiAz => {

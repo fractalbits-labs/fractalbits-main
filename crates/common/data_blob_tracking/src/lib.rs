@@ -55,6 +55,26 @@ impl DataBlobTracker {
         }
     }
 
+    pub fn with_clients(
+        rss_endpoint: String,
+        rss_client: Arc<RpcClientRss>,
+        nss_endpoint: String,
+        nss_client: Arc<RpcClientNss>,
+    ) -> Self {
+        let rss_conn_pool = ConnPool::new();
+        rss_conn_pool.pooled(rss_endpoint.clone(), rss_client);
+
+        let nss_conn_pool = ConnPool::new();
+        nss_conn_pool.pooled(nss_endpoint.clone(), nss_client);
+
+        Self {
+            rss_conn_pool,
+            rss_endpoint,
+            nss_conn_pool,
+            nss_endpoint,
+        }
+    }
+
     /// Checkout an RSS client from the connection pool for use with rpc_retry macro
     async fn checkout_rpc_client_rss(
         &self,

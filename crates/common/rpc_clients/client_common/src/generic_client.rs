@@ -51,12 +51,13 @@ pub trait RpcCodec<Header: MessageHeaderTrait>:
     const RPC_TYPE: &'static str;
 }
 
+#[derive(Clone)]
 pub struct RpcClient<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> {
     requests: RequestMap<Header>,
     sender: Sender<MessageFrame<Header>>,
-    next_id: AtomicU32,
+    next_id: Arc<AtomicU32>,
     #[allow(unused)]
-    tasks: JoinSet<()>,
+    tasks: Arc<parking_lot::Mutex<JoinSet<()>>>,
     socket_fd: RawFd,
     is_closed: Arc<AtomicBool>,
     client_session_id: u64,
@@ -73,9 +74,13 @@ enum DrainFrom {
 
 impl<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> Drop for RpcClient<Codec, Header> {
     fn drop(&mut self) {
-        debug!(rpc_type = Codec::RPC_TYPE, socket_fd = %self.socket_fd, "RpcClient dropped");
-        // Just try to make metrics (`rpc_request_pending_in_resp_map`) accurate
-        Self::drain_pending_requests(self.socket_fd, &self.requests, DrainFrom::RpcClient);
+        if Arc::strong_count(&self.tasks) == 1 {
+            debug!(rpc_type = Codec::RPC_TYPE, socket_fd = %self.socket_fd, "Last RpcClient clone dropped, aborting tasks");
+            if let Some(mut tasks) = self.tasks.try_lock() {
+                tasks.abort_all();
+            }
+            Self::drain_pending_requests(self.socket_fd, &self.requests, DrainFrom::RpcClient);
+        }
     }
 }
 
@@ -152,7 +157,10 @@ where
     {
         let client = Self::new_internal(stream, session_id).await?;
         // Set the next request ID to continue from where we left off
-        client.next_id.store(next_request_id, Ordering::SeqCst);
+        client
+            .next_id
+            .as_ref()
+            .store(next_request_id, Ordering::SeqCst);
 
         // For reconnection with existing session state, perform handshake with session_id
         let rpc_type = Codec::RPC_TYPE;
@@ -208,8 +216,8 @@ where
         Ok(RpcClient {
             requests,
             sender,
-            next_id: AtomicU32::new(1),
-            tasks,
+            next_id: Arc::new(AtomicU32::new(1)),
+            tasks: Arc::new(parking_lot::Mutex::new(tasks)),
             socket_fd,
             is_closed,
             client_session_id: session_id,
@@ -593,7 +601,7 @@ where
         Ok(stream)
     }
 
-    async fn establish_connection(
+    pub async fn establish_connection(
         addr_key: String,
         session_id: Option<u64>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>>

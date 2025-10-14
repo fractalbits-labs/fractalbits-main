@@ -11,8 +11,8 @@ pub struct PerCoreBuilder {
     core_ids: Arc<Vec<CoreId>>,
 }
 
-impl PerCoreBuilder {
-    pub fn new() -> Self {
+impl Default for PerCoreBuilder {
+    fn default() -> Self {
         let core_ids = core_affinity::get_core_ids().unwrap_or_default();
         if core_ids.is_empty() {
             warn!("core affinity metadata unavailable; workers will not be pinned");
@@ -23,6 +23,12 @@ impl PerCoreBuilder {
             worker_limit,
             core_ids: Arc::new(core_ids),
         }
+    }
+}
+
+impl PerCoreBuilder {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn build_context(&self) -> io::Result<Arc<PerCoreContext>> {

@@ -1,20 +1,17 @@
 use crate::DataVgError;
 use bytes::Bytes;
 use data_types::{DataBlobGuid, DataVgInfo, QuorumConfig};
-use futures::{
-    future::BoxFuture,
-    stream::{FuturesUnordered, StreamExt},
-};
+use futures::stream::{FuturesUnordered, StreamExt};
 use metrics::histogram;
 use rand::seq::SliceRandom;
 use rpc_client_bss::RpcClientBss;
-use rpc_client_common::{RpcError, bss_rpc_retry};
-use slotmap_conn_pool::{ConnPool, Poolable};
+use rpc_client_common::{RpcError, checkout_rpc_client};
 use std::{
     sync::{Arc, atomic::AtomicU64},
     time::{Duration, Instant},
 };
-use tracing::{debug, error, warn};
+use tokio::sync::RwLock;
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 struct InFlightGuard<'a> {
@@ -35,44 +32,46 @@ impl<'a> Drop for InFlightGuard<'a> {
     }
 }
 
-struct BssNodeWithPool {
-    #[allow(dead_code)]
-    node_id: String,
+struct BssConnection {
     address: String,
-    pool: ConnPool<Arc<RpcClientBss>, String>,
+    client: RwLock<Option<Arc<RpcClientBss>>>,
     in_flight_requests: AtomicU64,
 }
 
-struct BssNodePoolWrapper {
-    pool: ConnPool<Arc<RpcClientBss>, String>,
-    address: String,
-}
+impl BssConnection {
+    fn new(address: String) -> Self {
+        Self {
+            address,
+            client: RwLock::new(None),
+            in_flight_requests: AtomicU64::new(0),
+        }
+    }
 
-impl BssNodePoolWrapper {
-    async fn checkout_rpc_client_bss(&self) -> Result<Arc<RpcClientBss>, slotmap_conn_pool::Error> {
-        let start = Instant::now();
-        let client = self.pool.checkout(self.address.clone()).await?;
-        histogram!("checkout_rpc_client_nanos", "type" => "bss_datavg")
-            .record(start.elapsed().as_nanos() as f64);
-        Ok(client)
+    async fn get_client(
+        &self,
+    ) -> Result<Arc<RpcClientBss>, Box<dyn std::error::Error + Send + Sync>> {
+        checkout_rpc_client(&self.client, &self.address, |addr| async move {
+            RpcClientBss::new_from_address(addr).await
+        })
+        .await
     }
 }
 
-struct VolumeWithPools {
+struct VolumeWithConnections {
     volume_id: u16,
-    bss_nodes: Vec<BssNodeWithPool>,
+    bss_nodes: Vec<Arc<BssConnection>>,
 }
 
 pub struct DataVgProxy {
-    volumes: Vec<VolumeWithPools>,
+    volumes: Vec<VolumeWithConnections>,
     round_robin_counter: AtomicU64,
     quorum_config: QuorumConfig,
     rpc_timeout: Duration,
 }
 
 impl DataVgProxy {
-    pub async fn new(data_vg_info: DataVgInfo, rpc_timeout: Duration) -> Result<Self, DataVgError> {
-        debug!(
+    pub fn new(data_vg_info: DataVgInfo, rpc_timeout: Duration) -> Result<Self, DataVgError> {
+        info!(
             "Initializing DataVgProxy with {} volumes",
             data_vg_info.volumes.len()
         );
@@ -83,53 +82,34 @@ impl DataVgProxy {
             )
         })?;
 
-        let mut volumes_with_pools = Vec::new();
+        let mut volumes_with_connections = Vec::new();
 
         for volume in data_vg_info.volumes {
-            let mut bss_nodes_with_pools = Vec::new();
+            let mut bss_connections = Vec::new();
 
             for bss_node in volume.bss_nodes {
                 let address = format!("{}:{}", bss_node.ip, bss_node.port);
                 debug!(
-                    "Creating dedicated connection pool for BSS node {}: {}",
+                    "Creating BSS connection tracker for node {}: {}",
                     bss_node.node_id, address
                 );
 
-                debug!("Creating single connection to BSS {}", address);
-                let pool = ConnPool::new();
-                let client = Arc::new(
-                    <RpcClientBss as Poolable>::new(address.clone())
-                        .await
-                        .map_err(|e| {
-                            DataVgError::InitializationError(format!(
-                                "Failed to connect to BSS {}: {}",
-                                address, e
-                            ))
-                        })?,
-                );
-                pool.pooled(address.clone(), client);
-
-                bss_nodes_with_pools.push(BssNodeWithPool {
-                    node_id: bss_node.node_id,
-                    address,
-                    pool,
-                    in_flight_requests: AtomicU64::new(0),
-                });
+                bss_connections.push(Arc::new(BssConnection::new(address)));
             }
 
-            volumes_with_pools.push(VolumeWithPools {
+            volumes_with_connections.push(VolumeWithConnections {
                 volume_id: volume.volume_id,
-                bss_nodes: bss_nodes_with_pools,
+                bss_nodes: bss_connections,
             });
         }
 
         debug!(
             "DataVgProxy initialized successfully with {} volumes",
-            volumes_with_pools.len()
+            volumes_with_connections.len()
         );
 
         Ok(Self {
-            volumes: volumes_with_pools,
+            volumes: volumes_with_connections,
             round_robin_counter: AtomicU64::new(0),
             quorum_config,
             rpc_timeout,
@@ -147,55 +127,93 @@ impl DataVgProxy {
 
     async fn get_blob_from_node_instance(
         &self,
-        bss_node: &BssNodeWithPool,
+        bss_connection: &BssConnection,
         blob_guid: DataBlobGuid,
         block_number: u32,
     ) -> Result<Bytes, RpcError> {
-        tracing::debug!(%blob_guid, bss_address=%bss_node.address, block_number, "get_blob_from_node_instance calling BSS");
+        use rpc_client_common::ErrorRetryable;
 
-        let pool_for_retry = BssNodePoolWrapper {
-            pool: bss_node.pool.clone(),
-            address: bss_node.address.clone(),
-        };
+        tracing::debug!(%blob_guid, bss_address=%bss_connection.address, block_number, "get_blob_from_node_instance calling BSS");
+
+        let bss_client = bss_connection.get_client().await.map_err(|e| {
+            RpcError::InternalRequestError(format!("Failed to get BSS client: {}", e))
+        })?;
 
         let mut body = Bytes::new();
-        bss_rpc_retry!(
-            pool_for_retry,
-            get_data_blob(blob_guid, block_number, &mut body, Some(self.rpc_timeout))
-        )
-        .await?;
+        let mut retries = 3;
+        let mut backoff = Duration::from_millis(5);
+        let mut retry_count = 0u32;
 
-        tracing::debug!(%blob_guid, bss_address=%bss_node.address, block_number, data_size=body.len(), "get_blob_from_node_instance result");
+        loop {
+            match bss_client
+                .get_data_blob(
+                    blob_guid,
+                    block_number,
+                    &mut body,
+                    Some(self.rpc_timeout),
+                    retry_count,
+                )
+                .await
+            {
+                Ok(()) => break,
+                Err(e) if e.retryable() && retries > 0 => {
+                    retries -= 1;
+                    retry_count += 1;
+                    tokio::time::sleep(backoff).await;
+                    backoff = backoff.saturating_mul(2);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        tracing::debug!(%blob_guid, bss_address=%bss_connection.address, block_number, data_size=body.len(), "get_blob_from_node_instance result");
 
         Ok(body)
     }
 
-    fn delete_blob_from_node(
-        bss_node: &BssNodeWithPool,
+    async fn delete_blob_from_node(
+        bss_connection: Arc<BssConnection>,
         blob_guid: DataBlobGuid,
         block_number: u32,
         rpc_timeout: Duration,
-    ) -> BoxFuture<'static, (String, Result<(), RpcError>)> {
+    ) -> (String, Result<(), RpcError>) {
+        use rpc_client_common::ErrorRetryable;
+
         let start_node = Instant::now();
-        let address = bss_node.address.clone();
-        let pool_for_retry = BssNodePoolWrapper {
-            pool: bss_node.pool.clone(),
-            address: address.clone(),
-        };
+        let address = bss_connection.address.clone();
 
-        Box::pin(async move {
-            let result = bss_rpc_retry!(
-                pool_for_retry,
-                delete_data_blob(blob_guid, block_number, Some(rpc_timeout))
-            )
-            .await;
+        let result = async {
+            let bss_client = bss_connection.get_client().await.map_err(|e| {
+                RpcError::InternalRequestError(format!("Failed to get BSS client: {}", e))
+            })?;
 
-            let result_label = if result.is_ok() { "success" } else { "failure" };
-            histogram!("datavg_delete_blob_node_nanos", "bss_node" => address.clone(), "result" => result_label)
-                .record(start_node.elapsed().as_nanos() as f64);
+            let mut retries = 3;
+            let mut backoff = Duration::from_millis(5);
+            let mut retry_count = 0u32;
 
-            (address, result)
-        })
+            loop {
+                match bss_client
+                    .delete_data_blob(blob_guid, block_number, Some(rpc_timeout), retry_count)
+                    .await
+                {
+                    Ok(()) => return Ok(()),
+                    Err(e) if e.retryable() && retries > 0 => {
+                        retries -= 1;
+                        retry_count += 1;
+                        tokio::time::sleep(backoff).await;
+                        backoff = backoff.saturating_mul(2);
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        .await;
+
+        let result_label = if result.is_ok() { "success" } else { "failure" };
+        histogram!("datavg_delete_blob_node_nanos", "bss_node" => address.clone(), "result" => result_label)
+            .record(start_node.elapsed().as_nanos() as f64);
+
+        (address, result)
     }
 
     /// Create a new data blob GUID with a fresh UUID and selected volume
@@ -236,15 +254,14 @@ impl DataVgProxy {
 
         let mut write_futures = FuturesUnordered::new();
         for &index in &bss_node_indices {
-            let bss_node = &selected_volume.bss_nodes[index];
-            let future = Self::put_blob_to_node(
+            let bss_node = selected_volume.bss_nodes[index].clone();
+            write_futures.push(Self::put_blob_to_node(
                 bss_node,
                 blob_guid,
                 block_number,
                 body.clone(),
                 rpc_timeout,
-            );
-            write_futures.push(future);
+            ));
         }
 
         let mut successful_writes = 0;
@@ -265,7 +282,8 @@ impl DataVgProxy {
 
             // Check if we've achieved write quorum
             if successful_writes >= write_quorum {
-                tokio::spawn(async move {
+                // Spawn remaining writes as background task for eventual consistency
+                tokio::task::spawn_local(async move {
                     while let Some((addr, res)) = write_futures.next().await {
                         match res {
                             Ok(()) => {
@@ -306,33 +324,56 @@ impl DataVgProxy {
         )))
     }
 
-    fn put_blob_to_node(
-        bss_node: &BssNodeWithPool,
+    async fn put_blob_to_node(
+        bss_connection: Arc<BssConnection>,
         blob_guid: DataBlobGuid,
         block_number: u32,
         body: Bytes,
         rpc_timeout: Duration,
-    ) -> BoxFuture<'static, (String, Result<(), RpcError>)> {
+    ) -> (String, Result<(), RpcError>) {
+        use rpc_client_common::ErrorRetryable;
+
         let start_node = Instant::now();
-        let address = bss_node.address.clone();
-        let wrapper = BssNodePoolWrapper {
-            pool: bss_node.pool.clone(),
-            address: address.clone(),
-        };
+        let address = bss_connection.address.clone();
 
-        Box::pin(async move {
-            let result = bss_rpc_retry!(
-                wrapper,
-                put_data_blob(blob_guid, block_number, body.clone(), Some(rpc_timeout))
-            )
-            .await;
+        let result = async {
+            let bss_client = bss_connection.get_client().await.map_err(|e| {
+                RpcError::InternalRequestError(format!("Failed to get BSS client: {}", e))
+            })?;
 
-            let result_label = if result.is_ok() { "success" } else { "failure" };
-            histogram!("datavg_put_blob_node_nanos", "bss_node" => address.clone(), "result" => result_label)
-                .record(start_node.elapsed().as_nanos() as f64);
+            let mut retries = 3;
+            let mut backoff = Duration::from_millis(5);
+            let mut retry_count = 0u32;
 
-            (address, result)
-        })
+            loop {
+                match bss_client
+                    .put_data_blob(
+                        blob_guid,
+                        block_number,
+                        body.clone(),
+                        Some(rpc_timeout),
+                        retry_count,
+                    )
+                    .await
+                {
+                    Ok(()) => return Ok(()),
+                    Err(e) if e.retryable() && retries > 0 => {
+                        retries -= 1;
+                        retry_count += 1;
+                        tokio::time::sleep(backoff).await;
+                        backoff = backoff.saturating_mul(2);
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        .await;
+
+        let result_label = if result.is_ok() { "success" } else { "failure" };
+        histogram!("datavg_put_blob_node_nanos", "bss_node" => address.clone(), "result" => result_label)
+            .record(start_node.elapsed().as_nanos() as f64);
+
+        (address, result)
     }
 
     /// Multi-BSS get_blob
@@ -402,32 +443,18 @@ impl DataVgProxy {
             volume.bss_nodes.len()
         );
 
-        let rpc_timeout = self.rpc_timeout;
         let _read_quorum = self.quorum_config.r as usize;
 
-        // Spawn all read tasks immediately
+        // Create read futures for all nodes
         let mut read_futures = FuturesUnordered::new();
-        for bss_node in &volume.bss_nodes {
-            let address = bss_node.address.clone();
-            let pool_wrapper = BssNodePoolWrapper {
-                pool: bss_node.pool.clone(),
-                address: address.clone(),
-            };
-
-            let read_task = tokio::spawn(async move {
-                let result = async {
-                    let mut local = Bytes::new();
-                    bss_rpc_retry!(
-                        pool_wrapper,
-                        get_data_blob(blob_guid, block_number, &mut local, Some(rpc_timeout))
-                    )
-                    .await?;
-                    Ok::<Bytes, RpcError>(local)
-                }
-                .await;
+        for bss_connection in &volume.bss_nodes {
+            let fut =
+                Self::get_blob_from_node_instance(self, bss_connection, blob_guid, block_number);
+            let address = bss_connection.address.clone();
+            read_futures.push(async move {
+                let result = fut.await;
                 (address, result)
             });
-            read_futures.push(read_task);
         }
 
         let mut successful_reads = 0;
@@ -435,15 +462,7 @@ impl DataVgProxy {
 
         // Wait until we get a successful read (quorum of 1) or all fail
         // TODO: quorum writeback
-        while let Some(join_result) = read_futures.next().await {
-            let (address, result) = match join_result {
-                Ok(task_result) => task_result,
-                Err(_join_error) => {
-                    warn!("Task join error for read operation");
-                    continue;
-                }
-            };
-
+        while let Some((address, result)) = read_futures.next().await {
             match result {
                 Ok(blob_data) => {
                     successful_reads += 1;
@@ -509,9 +528,12 @@ impl DataVgProxy {
 
         let mut delete_futures = FuturesUnordered::new();
         for bss_node in &volume.bss_nodes {
-            let future =
-                Self::delete_blob_from_node(bss_node, blob_guid, block_number, rpc_timeout);
-            delete_futures.push(future);
+            delete_futures.push(Self::delete_blob_from_node(
+                bss_node.clone(),
+                blob_guid,
+                block_number,
+                rpc_timeout,
+            ));
         }
 
         let mut successful_deletes = 0;
@@ -533,20 +555,19 @@ impl DataVgProxy {
             }
 
             if successful_deletes >= write_quorum {
-                if !delete_futures.is_empty() {
-                    tokio::spawn(async move {
-                        while let Some((addr, res)) = delete_futures.next().await {
-                            match res {
-                                Ok(()) => {
-                                    debug!("Background delete to {} completed", addr);
-                                }
-                                Err(e) => {
-                                    warn!("Background delete to {} failed: {}", addr, e);
-                                }
+                // Spawn remaining deletes as background task for eventual consistency
+                tokio::task::spawn_local(async move {
+                    while let Some((addr, res)) = delete_futures.next().await {
+                        match res {
+                            Ok(()) => {
+                                debug!("Background delete to {} completed", addr);
+                            }
+                            Err(e) => {
+                                warn!("Background delete to {} failed: {}", addr, e);
                             }
                         }
-                    });
-                }
+                    }
+                });
 
                 histogram!("datavg_delete_blob_nanos", "result" => "success")
                     .record(start.elapsed().as_nanos() as f64);

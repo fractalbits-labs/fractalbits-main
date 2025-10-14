@@ -43,7 +43,7 @@ pub async fn put_object_handler(ctx: ObjectRequestContext) -> Result<HttpRespons
         .app
         .get_blob_client()
         .await
-        .ok_or(S3Error::InternalError)?;
+        .map_err(|_| S3Error::InternalError)?;
     let blob_guid = blob_client.create_data_blob_guid();
 
     // Decide whether to use streaming based on request characteristics
@@ -282,7 +282,7 @@ async fn put_object_streaming_internal(
         .app
         .get_blob_client()
         .await
-        .ok_or(S3Error::InternalError)?;
+        .map_err(|_| S3Error::InternalError)?;
 
     // Convert S3 payload to block stream
     let block_stream = BlockDataStream::new(s3_payload, ObjectLayout::DEFAULT_BLOCK_SIZE);
@@ -518,7 +518,7 @@ async fn put_object_with_no_trailer(
         .app
         .get_blob_client()
         .await
-        .ok_or(S3Error::InternalError)?;
+        .map_err(|_| S3Error::InternalError)?;
     let size = body.len() as u64;
     let block_size = ObjectLayout::DEFAULT_BLOCK_SIZE as usize;
 

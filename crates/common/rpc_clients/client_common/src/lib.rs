@@ -1,4 +1,7 @@
+use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::RwLock;
+use tracing::debug;
 
 pub mod generic_client;
 #[cfg(feature = "io_uring")]
@@ -32,6 +35,8 @@ pub enum RpcError {
     DecodeError(String),
     #[error("Retry")]
     Retry,
+    #[error("Connection closed")]
+    ConnectionClosed,
 }
 
 impl<T> From<tokio::sync::mpsc::error::SendError<T>> for RpcError {
@@ -47,8 +52,47 @@ impl ErrorRetryable for RpcError {
             RpcError::OneshotRecvError(_)
                 | RpcError::InternalRequestError(_)
                 | RpcError::InternalResponseError(_)
+                | RpcError::ConnectionClosed
         )
     }
+}
+
+pub trait Closeable {
+    fn is_closed(&self) -> bool;
+}
+
+pub async fn checkout_rpc_client<T, F, Fut>(
+    client_lock: &RwLock<Option<Arc<T>>>,
+    address: &str,
+    create_fn: F,
+) -> Result<Arc<T>, Box<dyn std::error::Error + Send + Sync>>
+where
+    T: Closeable + Send + Sync,
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<T, Box<dyn std::error::Error + Send + Sync>>>,
+{
+    {
+        let client = client_lock.read().await;
+        if let Some(client) = client.as_ref()
+            && !client.is_closed()
+        {
+            return Ok(client.clone());
+        }
+    }
+
+    let mut client = client_lock.write().await;
+
+    if let Some(existing_client) = client.as_ref()
+        && !existing_client.is_closed()
+    {
+        return Ok(existing_client.clone());
+    }
+
+    debug!("Creating RPC connection for {}", address);
+    let new_client = Arc::new(create_fn(address.to_string()).await?);
+    *client = Some(new_client.clone());
+
+    Ok(new_client)
 }
 
 pub struct InflightRpcGuard {
@@ -98,6 +142,7 @@ macro_rules! rpc_retry {
                     },
                     Err(e) => {
                         if e.retryable() && retries > 0 {
+                            drop(rpc_client);
                             retries -= 1;
                             retry_count += 1;  // Increment for next retry
                             tokio::time::sleep(backoff).await;
@@ -169,6 +214,7 @@ macro_rules! nss_rpc_retry_with_session {
                             },
                             Err(e) => {
                                 if e.retryable() && retries > 0 {
+                                    drop(rpc_client);
                                     retries -= 1;
                                     retry_count += 1;
                                     tokio::time::sleep(backoff).await;
@@ -193,6 +239,7 @@ macro_rules! nss_rpc_retry_with_session {
                             },
                             Err(e) => {
                                 if e.retryable() && retries > 0 {
+                                    drop(rpc_client);
                                     retries -= 1;
                                     retry_count += 1;
                                     tokio::time::sleep(backoff).await;
@@ -233,6 +280,7 @@ macro_rules! rss_rpc_retry_with_session {
                     },
                     Err(e) => {
                         if e.retryable() && retries > 0 {
+                            drop(rpc_client);
                             retries -= 1;
                             retry_count += 1;
                             tokio::time::sleep(backoff).await;

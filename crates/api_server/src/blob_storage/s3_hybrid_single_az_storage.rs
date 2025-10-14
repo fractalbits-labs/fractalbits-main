@@ -8,7 +8,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::OnceCell;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -18,42 +17,23 @@ pub struct S3HybridSingleAzStorage {
     data_blob_in_s3_bucket: String,
 }
 
-static DATA_VG_INFO: OnceCell<DataVgInfo> = OnceCell::const_new();
-
 impl S3HybridSingleAzStorage {
-    pub async fn new(
-        rss_client: Arc<rpc_client_rss::RpcClientRss>,
+    pub async fn new_with_data_vg_info(
+        data_vg_info: DataVgInfo,
         s3_hybrid_config: &S3HybridSingleAzConfig,
         rpc_timeout: Duration,
     ) -> Result<Self, BlobStorageError> {
-        let data_vg_info = DATA_VG_INFO
-            .get_or_try_init(|| {
-                let rss_client = rss_client.clone();
-                async move {
-                    debug!("Fetching DataVg configuration from RSS...");
-                    rss_client
-                        .get_data_vg_info(Some(rpc_timeout))
-                        .await
-                        .map_err(|e| {
-                            BlobStorageError::Config(format!(
-                                "Failed to fetch DataVg config: {}",
-                                e
-                            ))
-                        })
-                }
-            })
-            .await?
-            .clone();
+        debug!("Initializing S3HybridSingleAzStorage with pre-fetched DataVgInfo");
 
-        let data_vg_proxy = Arc::new(DataVgProxy::new(data_vg_info, rpc_timeout).await.map_err(
-            |e| BlobStorageError::Config(format!("Failed to initialize DataVgProxy: {}", e)),
-        )?);
+        let data_vg_proxy = Arc::new(DataVgProxy::new(data_vg_info, rpc_timeout).map_err(|e| {
+            BlobStorageError::Config(format!("Failed to initialize DataVgProxy: {}", e))
+        })?);
 
         let client_s3 = create_s3_client(
             &s3_hybrid_config.s3_host,
             s3_hybrid_config.s3_port,
             &s3_hybrid_config.s3_region,
-            false, // force_path_style not needed for hybrid storage
+            false,
         )
         .await;
 

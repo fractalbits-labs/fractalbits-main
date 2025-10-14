@@ -42,7 +42,7 @@ fn load_private_key(key_path: &PathBuf) -> Result<PKey<Private>, Box<dyn std::er
     Ok(key)
 }
 
-#[actix_web::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     // AWS SDK suppression filter
     let third_party_filter = "tower_http=warn,hyper_util=warn,aws_smithy=warn,aws_sdk=warn,actix_web=warn,actix_server=warn,h2=warn";
@@ -135,6 +135,24 @@ async fn main() {
         config.allow_missing_or_bad_signature = true;
     }
 
+    // Fetch DataVgInfo from RSS in main thread before starting workers
+    info!("Fetching DataVgInfo from RSS at {}", config.rss_addr);
+    let rss_client = rpc_client_rss::RpcClientRss::new_from_address(config.rss_addr.clone())
+        .await
+        .expect("Failed to create RSS client in main thread");
+
+    let data_vg_info = rss_client
+        .get_data_vg_info(Some(config.rpc_timeout()))
+        .await
+        .expect("Failed to fetch DataVgInfo from RSS");
+
+    info!(
+        "Successfully fetched DataVgInfo with {} volumes",
+        data_vg_info.volumes.len()
+    );
+    config.data_vg_info = Some(data_vg_info);
+    drop(rss_client);
+
     let config = Arc::new(config);
     let port = config.port;
     let mgmt_port = config.mgmt_port;
@@ -153,8 +171,6 @@ async fn main() {
     let cache_coordinator: Arc<CacheCoordinator<Versioned<String>>> =
         Arc::new(CacheCoordinator::new());
     let az_status_coordinator: Arc<CacheCoordinator<String>> = Arc::new(CacheCoordinator::new());
-
-    let per_core_builder = PerCoreBuilder::new(); //per_core_rings.clone(), per_core_reactors.clone());
 
     let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
     let mgmt_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), mgmt_port);
@@ -175,21 +191,34 @@ async fn main() {
         "Starting unified server with reuseport listeners (thread-per-core)"
     );
 
-    let config_clone = config.clone();
-    let cache_coordinator_clone = cache_coordinator.clone();
-    let az_status_coordinator_clone = az_status_coordinator.clone();
-    let web_root_clone = web_root.clone();
+    // Pre-create one AppState per possible worker index
+    // Note: PerCoreBuilder may return worker_index up to core_count (not worker_count)
+    // due to how the factory is called multiple times per worker
+    let max_worker_index = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let app_states: Vec<Arc<AppState>> = (0..max_worker_index)
+        .map(|_| {
+            Arc::new(AppState::new_per_core_sync(
+                config.clone(),
+                cache_coordinator.clone(),
+                az_status_coordinator.clone(),
+            ))
+        })
+        .collect();
+    let app_states = Arc::new(app_states);
 
+    let web_root_clone = web_root.clone();
+    let per_core_builder = PerCoreBuilder::new();
     let mut server = HttpServer::new(move || {
         let per_core_ctx = per_core_builder
             .build_context()
             .unwrap_or_else(|e| panic!("failed to init per-core context: {e}"));
         per_core_builder.pin_current_thread(per_core_ctx.worker_index());
-        let app_state = Arc::new(AppState::new_per_core_sync(
-            config_clone.clone(),
-            cache_coordinator_clone.clone(),
-            az_status_coordinator_clone.clone(),
-        ));
+
+        // Use the pre-created AppState for this worker
+        let worker_index = per_core_ctx.worker_index();
+        let app_state = app_states[worker_index].clone();
 
         let mut app = App::new()
             .app_data(web::Data::new(app_state))

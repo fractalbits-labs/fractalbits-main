@@ -1,4 +1,4 @@
-use rpc_client_common::{RpcClient as GenericRpcClient, RpcError};
+use rpc_client_common::{Closeable, RpcClient as GenericRpcClient, RpcError};
 use rpc_codec_common::MessageFrame;
 use slotmap_conn_pool::Poolable;
 use std::time::Duration;
@@ -30,26 +30,37 @@ impl RpcClient {
 }
 
 impl RpcClient {
+    pub async fn new_from_address(
+        address: String,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::new_internal(address, None).await
+    }
+
     async fn new_internal(
         address: String,
         session_id: Option<u64>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let inner = match session_id {
-            Some(id) => {
-                <GenericRpcClient<rss_codec::MessageCodec, rss_codec::MessageHeader> as Poolable>::new_with_session_id(
-                    address,
-                    id,
-                )
-                .await?
-            }
-            None => {
-                <GenericRpcClient<rss_codec::MessageCodec, rss_codec::MessageHeader> as Poolable>::new(
-                    address,
-                )
-                .await?
-            }
-        };
+        let inner = GenericRpcClient::<rss_codec::MessageCodec, rss_codec::MessageHeader>::establish_connection(
+            address,
+            session_id,
+        )
+        .await?;
         Ok(RpcClient { inner })
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.inner.is_closed()
+    }
+
+    #[allow(dead_code)]
+    fn get_session_state(&self) -> (u64, u32) {
+        self.inner.get_session_state()
+    }
+}
+
+impl Closeable for RpcClient {
+    fn is_closed(&self) -> bool {
+        self.inner.is_closed()
     }
 }
 

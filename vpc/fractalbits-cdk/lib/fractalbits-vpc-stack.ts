@@ -312,18 +312,19 @@ export class FractalbitsVpcStack extends cdk.Stack {
     const servicePort = 8088;
     const mirrordPort = 9999;
 
-    // NSS PrivateLink - include nss-B only for s3ExpressMultiAz
-    const nssTargets =
-      dataBlobStorage === "s3ExpressMultiAz"
-        ? [instances["nss-A"], instances["nss-B"]]
-        : [instances["nss-A"]];
-    const nssPrivateLink = createPrivateLinkNlb(
-      this,
-      "Nss",
-      this.vpc,
-      nssTargets,
-      servicePort,
-    );
+    // NSS PrivateLink - only for s3ExpressMultiAz mode
+    // For single-AZ, use direct instance IP to avoid VPC endpoint latency
+    let nssPrivateLink: any;
+    if (dataBlobStorage === "s3ExpressMultiAz") {
+      const nssTargets = [instances["nss-A"], instances["nss-B"]];
+      nssPrivateLink = createPrivateLinkNlb(
+        this,
+        "Nss",
+        this.vpc,
+        nssTargets,
+        servicePort,
+      );
+    }
 
     // Only create mirrord for s3ExpressMultiAz mode
     let mirrordPrivateLink: any;
@@ -345,6 +346,12 @@ export class FractalbitsVpcStack extends cdk.Stack {
       servicePort,
     );
 
+    // Determine NSS endpoint based on mode
+    const nssEndpoint =
+      dataBlobStorage === "s3ExpressMultiAz"
+        ? nssPrivateLink.endpointDns
+        : `${instances["nss-A"].instancePrivateIp}`;
+
     // Reusable function to create bootstrap options for api_server and gui_server
     const createApiServerBootstrapOptions = (serviceName: string) => {
       if (dataBlobStorage === "s3ExpressMultiAz") {
@@ -355,10 +362,11 @@ export class FractalbitsVpcStack extends cdk.Stack {
           `--rss_endpoint=${rssPrivateLink.endpointDns} `
         );
       } else {
+        // Single-AZ: use direct NSS IP to avoid VPC endpoint latency
         return (
           `${forBenchFlag} ${serviceName} ` +
           `--bucket=${bucketName} ` +
-          `--nss_endpoint=${nssPrivateLink.endpointDns} ` +
+          `--nss_endpoint=${nssEndpoint} ` +
           `--rss_endpoint=${rssPrivateLink.endpointDns} `
         );
       }
@@ -452,7 +460,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
         id: "rss-A",
         bootstrapOptions:
           `${forBenchFlag} root_server ` +
-          `--nss_endpoint=${nssPrivateLink.endpointDns} ` +
+          `--nss_endpoint=${nssEndpoint} ` +
           `--nss_a_id=${nssA} ` +
           (nssB ? `--nss_b_id=${nssB} ` : "") +
           `--volume_a_id=${ebsVolumeAId} ` +
@@ -466,7 +474,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
         id: "rss-B",
         bootstrapOptions:
           `${forBenchFlag} root_server ` +
-          `--nss_endpoint=${nssPrivateLink.endpointDns} ` +
+          `--nss_endpoint=${nssEndpoint} ` +
           `--nss_a_id=${nssA} ` +
           `--volume_a_id=${ebsVolumeAId}`,
       },
@@ -531,10 +539,18 @@ export class FractalbitsVpcStack extends cdk.Stack {
       });
     }
 
-    new cdk.CfnOutput(this, "NssEndpointDns", {
-      value: nssPrivateLink.endpointDns,
-      description: "VPC Endpoint DNS for NSS service",
-    });
+    // NSS endpoint output - conditional based on mode
+    if (dataBlobStorage === "s3ExpressMultiAz") {
+      new cdk.CfnOutput(this, "NssEndpointDns", {
+        value: nssPrivateLink.endpointDns,
+        description: "VPC Endpoint DNS for NSS service",
+      });
+    } else {
+      new cdk.CfnOutput(this, "NssPrivateIp", {
+        value: instances["nss-A"].instancePrivateIp,
+        description: "Private IP of NSS-A instance (direct connection)",
+      });
+    }
 
     this.nlbLoadBalancerDnsName = nlb.loadBalancerDnsName;
 

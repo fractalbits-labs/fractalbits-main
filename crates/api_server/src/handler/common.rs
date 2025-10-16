@@ -13,7 +13,7 @@ use crate::{
 };
 use actix_web::http::header::{self, HeaderMap};
 use futures::StreamExt;
-use rand::{RngCore, rngs::OsRng};
+use rand::Rng;
 use rkyv::{self, rancor::Error};
 use rpc_client_common::nss_rpc_retry;
 use s3_error::S3Error;
@@ -217,7 +217,7 @@ pub fn object_headers(
 
 // Not using md5 as etag for speed reason
 pub fn gen_etag() -> String {
-    let mut random = [0u8; 16];
-    OsRng.fill_bytes(&mut random);
+    let mut rng = rand::thread_rng();
+    let random: [u8; 16] = rng.r#gen();
     hex::encode(random)
 }

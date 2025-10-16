@@ -533,12 +533,14 @@ async fn put_object_with_no_trailer(
                 S3Error::InternalError
             })?;
     } else {
-        let chunks = body.chunks(block_size);
-        let mut futures = Vec::new();
+        let num_chunks = body.len().div_ceil(block_size);
+        let mut futures = Vec::with_capacity(num_chunks);
 
-        for (block_num, chunk) in chunks.enumerate() {
+        for block_num in 0..num_chunks {
             let blob_client = blob_client.clone();
-            let chunk_bytes = bytes::Bytes::copy_from_slice(chunk);
+            let start = block_num * block_size;
+            let end = ((block_num + 1) * block_size).min(body.len());
+            let chunk_bytes = body.slice(start..end);
 
             let future = async move {
                 blob_client

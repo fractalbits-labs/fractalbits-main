@@ -108,19 +108,6 @@ where
         })
     }
 
-    #[cfg(not(feature = "io_uring"))]
-    pub async fn new(stream: TcpStream) -> Result<Self, RpcError>
-    where
-        Header: Default,
-    {
-        let stream = Self::configure_tcp_socket(stream).map_err(|e| {
-            RpcError::IoError(io::Error::other(format!(
-                "failed to configure tcp stream: {e}"
-            )))
-        })?;
-        Self::new_internal(stream).await
-    }
-
     #[cfg(feature = "io_uring")]
     async fn create_raw_socket_io_uring(addr: SocketAddr) -> Result<(RawFd, Socket), io::Error> {
         use socket2::{Domain, Protocol, Type};
@@ -128,17 +115,7 @@ where
         let domain = Domain::for_address(addr);
         let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
 
-        socket.set_recv_buffer_size(16 * 1024 * 1024)?;
-        socket.set_send_buffer_size(16 * 1024 * 1024)?;
-
-        let keepalive = TcpKeepalive::new()
-            .with_time(Duration::from_secs(5))
-            .with_interval(Duration::from_secs(2))
-            .with_retries(2);
-        socket.set_tcp_keepalive(&keepalive)?;
-
-        socket.set_nodelay(true)?;
-        socket.set_nonblocking(true)?;
+        Self::configure_tcp_socket(&socket)?;
 
         match socket.connect(&addr.into()) {
             Ok(_) => {}
@@ -499,153 +476,92 @@ where
     }
 }
 
-impl<Codec, Header> RpcClient<Codec, Header>
-where
-    Codec: RpcCodec<Header>,
-    Header: MessageHeaderTrait + Clone + Send + Sync + 'static,
-{
-    #[cfg(not(feature = "io_uring"))]
-    async fn connect_with_retry(
-        addr_key: &str,
-    ) -> Result<TcpStream, Box<dyn std::error::Error + Send + Sync>> {
-        debug!("Trying to connect to {addr_key}");
+macro_rules! establish_connection_with_retry {
+    ($addr_key:expr, $connect_fn:expr) => {{
         const MAX_CONNECTION_RETRIES: usize = 100 * 3600;
-
         let start = std::time::Instant::now();
         let retry_strategy = FixedInterval::from_millis(10)
             .map(jitter)
             .take(MAX_CONNECTION_RETRIES);
 
-        let stream = Retry::spawn(retry_strategy, || async {
-            let socket_addr = Self::resolve_address(addr_key).await?;
-            TcpStream::connect(socket_addr).await
-        })
-        .await
-        .map_err(|e| {
-            warn!(rpc_type = %Codec::RPC_TYPE, addr = %addr_key, error = %e, "failed to connect RPC server");
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })?;
+        let client = Retry::spawn(retry_strategy, $connect_fn)
+            .await
+            .map_err(|e| {
+                warn!(rpc_type = %Codec::RPC_TYPE, addr = %$addr_key, error = %e, "failed to connect RPC server");
+                RpcError::IoError(io::Error::other(e.to_string()))
+            })?;
 
-        let connect_duration = start.elapsed();
-        if connect_duration > Duration::from_secs(1) {
+        let duration = start.elapsed();
+        if duration > Duration::from_secs(1) {
             warn!(
                 rpc_type = %Codec::RPC_TYPE,
-                addr = %addr_key,
-                duration_ms = %connect_duration.as_millis(),
+                addr = %$addr_key,
+                duration_ms = %duration.as_millis(),
                 "Slow connection establishment to RPC server"
             );
-        } else if connect_duration > Duration::from_millis(100) {
+        } else if duration > Duration::from_millis(100) {
             debug!(
                 rpc_type = %Codec::RPC_TYPE,
-                addr = %addr_key,
-                duration_ms = %connect_duration.as_millis(),
-                "Connection established to RPC server"
-            );
-        }
-
-        Ok(stream)
-    }
-
-    #[cfg(not(feature = "io_uring"))]
-    pub async fn establish_connection(
-        addr_key: String,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>>
-    where
-        Header: Default,
-    {
-        let stream = Self::connect_with_retry(&addr_key).await?;
-        let configured_stream = Self::configure_tcp_socket(stream)?;
-        Self::new(configured_stream)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-    }
-
-    #[cfg(feature = "io_uring")]
-    pub async fn establish_connection(
-        addr_key: String,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>>
-    where
-        Header: Default,
-    {
-        debug!("Trying to connect to {addr_key} via io_uring");
-        const MAX_CONNECTION_RETRIES: usize = 100 * 3600;
-
-        let start = std::time::Instant::now();
-        let retry_strategy = FixedInterval::from_millis(10)
-            .map(jitter)
-            .take(MAX_CONNECTION_RETRIES);
-
-        let socket_addr = Retry::spawn(retry_strategy, || async {
-            Self::resolve_address(&addr_key).await
-        })
-        .await
-        .map_err(|e| {
-            warn!(rpc_type = %Codec::RPC_TYPE, addr = %addr_key, error = %e, "failed to resolve RPC server address");
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        })?;
-
-        let client = Self::new_internal_io_uring(socket_addr)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-
-        let connect_duration = start.elapsed();
-        if connect_duration > Duration::from_secs(1) {
-            warn!(
-                rpc_type = %Codec::RPC_TYPE,
-                addr = %addr_key,
-                duration_ms = %connect_duration.as_millis(),
-                "Slow connection establishment to RPC server"
-            );
-        } else if connect_duration > Duration::from_millis(100) {
-            debug!(
-                rpc_type = %Codec::RPC_TYPE,
-                addr = %addr_key,
-                duration_ms = %connect_duration.as_millis(),
+                addr = %$addr_key,
+                duration_ms = %duration.as_millis(),
                 "Connection established to RPC server"
             );
         }
 
         Ok(client)
-    }
+    }};
+}
 
-    #[cfg(not(feature = "io_uring"))]
-    fn configure_tcp_socket(
-        stream: TcpStream,
-    ) -> Result<TcpStream, Box<dyn std::error::Error + Send + Sync>> {
-        // Configure socket
-        let std_stream = stream
-            .into_std()
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-        let socket = Socket::from(std_stream);
+impl<Codec, Header> RpcClient<Codec, Header>
+where
+    Codec: RpcCodec<Header>,
+    Header: MessageHeaderTrait + Clone + Send + Sync + 'static,
+{
+    fn configure_tcp_socket(socket: &Socket) -> Result<(), io::Error> {
+        socket.set_recv_buffer_size(16 * 1024 * 1024)?;
+        socket.set_send_buffer_size(16 * 1024 * 1024)?;
 
-        // Set 16MB buffers for data-intensive operations
-        socket
-            .set_recv_buffer_size(16 * 1024 * 1024)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-        socket
-            .set_send_buffer_size(16 * 1024 * 1024)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-
-        // Configure aggressive keepalive for internal network
         let keepalive = TcpKeepalive::new()
             .with_time(Duration::from_secs(5))
             .with_interval(Duration::from_secs(2))
             .with_retries(2);
-        socket
-            .set_tcp_keepalive(&keepalive)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        socket.set_tcp_keepalive(&keepalive)?;
 
-        // Set TCP_NODELAY for low latency
-        socket
-            .set_nodelay(true)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        socket.set_nodelay(true)?;
+        socket.set_nonblocking(true)?;
 
-        // Convert back to tokio TcpStream
-        let std_stream: std::net::TcpStream = socket.into();
-        std_stream
-            .set_nonblocking(true)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-        TcpStream::from_std(std_stream)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        Ok(())
+    }
+
+    #[cfg(not(feature = "io_uring"))]
+    pub async fn establish_connection(addr_key: String) -> Result<Self, RpcError>
+    where
+        Header: Default,
+    {
+        debug!("Trying to connect to {addr_key}");
+        establish_connection_with_retry!(&addr_key, || async {
+            let socket_addr = Self::resolve_address(&addr_key).await?;
+            let stream = TcpStream::connect(socket_addr).await?;
+
+            let std_stream = stream.into_std().map_err(RpcError::IoError)?;
+            let socket = Socket::from(std_stream);
+            Self::configure_tcp_socket(&socket).map_err(RpcError::IoError)?;
+            let std_stream: std::net::TcpStream = socket.into();
+            let configured_stream = TcpStream::from_std(std_stream).map_err(RpcError::IoError)?;
+
+            Self::new_internal(configured_stream).await
+        })
+    }
+
+    #[cfg(feature = "io_uring")]
+    pub async fn establish_connection(addr_key: String) -> Result<Self, RpcError>
+    where
+        Header: Default,
+    {
+        debug!("Trying to connect to {addr_key} via io_uring");
+        establish_connection_with_retry!(&addr_key, || async {
+            let socket_addr = Self::resolve_address(&addr_key).await?;
+            Self::new_internal_io_uring(socket_addr).await
+        })
     }
 }

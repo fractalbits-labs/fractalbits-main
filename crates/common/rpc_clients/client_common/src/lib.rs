@@ -101,7 +101,15 @@ where
         let new_client =
             GenericRpcClient::<Codec, Header>::establish_connection(self.address.clone())
                 .await
-                .map_err(|_e| RpcError::ConnectionClosed)?;
+                .map_err(|e| {
+                    tracing::error!(
+                        rpc_type = Codec::RPC_TYPE,
+                        address = %self.address,
+                        error = %e,
+                        "Failed to establish RPC connection"
+                    );
+                    RpcError::ConnectionClosed
+                })?;
 
         *write = Some(new_client);
         Ok(())

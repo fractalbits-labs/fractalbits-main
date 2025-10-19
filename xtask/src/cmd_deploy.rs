@@ -122,8 +122,14 @@ pub fn build(
                 info "Building Rust projects for $rust_target ($rust_cpu)";
                 RUSTFLAGS="-C target-cpu=$rust_cpu"
                 $[build_envs] cargo zigbuild
+                    --target $rust_target $rust_build_opt --workspace
+                    --exclude xtask
+                    --exclude fractalbits-bootstrap
+                    --exclude api_server;
+                info "Building api_server ..."; // for some additional features (e.g rpc_io_uring)
+                $[build_envs] cargo zigbuild
                     --target $rust_target $rust_build_opt
-                    --workspace --exclude xtask --exclude fractalbits-bootstrap;
+                    --package api_server;
             }?;
 
             // Copy Rust binaries to deploy directory (excluding fractalbits-bootstrap)

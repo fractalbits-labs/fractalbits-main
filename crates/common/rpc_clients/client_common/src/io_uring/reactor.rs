@@ -20,11 +20,20 @@ use tracing::{debug, error, info, warn};
 pub enum RpcTask {
     Noop,
     Send(SendTask),
+    SendZc(SendZcTask),
     Recv(RecvTask),
 }
 
 #[derive(Debug)]
 pub struct SendTask {
+    pub fd: RawFd,
+    pub header: Bytes,
+    pub body: Bytes,
+    pub completion: oneshot::Sender<io::Result<()>>,
+}
+
+#[derive(Debug)]
+pub struct SendZcTask {
     pub fd: RawFd,
     pub header: Bytes,
     pub body: Bytes,
@@ -135,6 +144,36 @@ impl RpcReactorHandle {
                 worker_index = self.worker_index,
                 error = %err,
                 "failed to enqueue send task"
+            );
+        }
+        rx
+    }
+
+    pub fn submit_send_zc(
+        &self,
+        fd: RawFd,
+        header: Bytes,
+        body: Bytes,
+    ) -> oneshot::Receiver<io::Result<()>> {
+        let (tx, mut rx) = oneshot::channel();
+        let header_len = header.len();
+        let body_len = body.len();
+        let task = RpcTask::SendZc(SendZcTask {
+            fd,
+            header,
+            body,
+            completion: tx,
+        });
+        debug!(
+            worker_index = self.worker_index,
+            fd, header_len, body_len, "enqueue zero-copy send task"
+        );
+        if let Err(err) = self.sender.send(RpcCommand::Task(task)) {
+            rx.close();
+            warn!(
+                worker_index = self.worker_index,
+                error = %err,
+                "failed to enqueue zero-copy send task"
             );
         }
         rx
@@ -331,6 +370,7 @@ fn process_command(handle: &Arc<RpcReactorHandle>, cmd: RpcCommand) -> bool {
                     );
                 }
                 RpcTask::Send(task) => handle_send(handle, task),
+                RpcTask::SendZc(task) => handle_send_zc(handle, task),
                 RpcTask::Recv(task) => handle_recv(handle, task),
             }
             true
@@ -355,6 +395,27 @@ fn handle_send(handle: &Arc<RpcReactorHandle>, task: SendTask) {
             fd,
             error = %err,
             "failed to submit send task"
+        );
+    }
+}
+
+fn handle_send_zc(handle: &Arc<RpcReactorHandle>, task: SendZcTask) {
+    let SendZcTask {
+        fd,
+        header,
+        body,
+        completion,
+    } = task;
+
+    if let Err(err) = handle
+        .io
+        .submit_send_zc(handle.worker_index, fd, header, body, completion)
+    {
+        warn!(
+            worker_index = handle.worker_index,
+            fd,
+            error = %err,
+            "failed to submit zero-copy send task"
         );
     }
 }
@@ -384,6 +445,7 @@ struct ReactorIo {
     next_uring_id: AtomicU64,
     pending_recv: Mutex<HashMap<u64, PendingRecv>>,
     pending_send: Mutex<HashMap<u64, PendingSend>>,
+    pending_send_zc: Mutex<HashMap<u64, PendingSendZc>>,
 }
 
 impl ReactorIo {
@@ -393,6 +455,7 @@ impl ReactorIo {
             next_uring_id: AtomicU64::new(1),
             pending_recv: Mutex::new(HashMap::new()),
             pending_send: Mutex::new(HashMap::new()),
+            pending_send_zc: Mutex::new(HashMap::new()),
         }
     }
 
@@ -525,24 +588,122 @@ impl ReactorIo {
         }
     }
 
+    fn submit_send_zc(
+        &self,
+        worker_index: usize,
+        fd: RawFd,
+        header: Bytes,
+        body: Bytes,
+        completion: oneshot::Sender<io::Result<()>>,
+    ) -> io::Result<()> {
+        let user_data = self.next_uring_id.fetch_add(1, Ordering::Relaxed);
+
+        debug!(
+            worker_index,
+            fd,
+            header_len = header.len(),
+            body_len = body.len(),
+            user_data,
+            "submitting zero-copy send to io_uring"
+        );
+
+        let mut iovecs = Box::new([
+            libc::iovec {
+                iov_base: header.as_ptr() as *mut libc::c_void,
+                iov_len: header.len(),
+            },
+            libc::iovec {
+                iov_base: body.as_ptr() as *mut libc::c_void,
+                iov_len: body.len(),
+            },
+        ]);
+
+        let msg = Box::new(libc::msghdr {
+            msg_name: std::ptr::null_mut(),
+            msg_namelen: 0,
+            msg_iov: iovecs.as_mut_ptr(),
+            msg_iovlen: 2,
+            msg_control: std::ptr::null_mut(),
+            msg_controllen: 0,
+            msg_flags: 0,
+        });
+
+        let expected_total = header.len() + body.len();
+
+        let mut pending = self
+            .pending_send_zc
+            .lock()
+            .expect("pending send zc map poisoned");
+
+        pending.insert(
+            user_data,
+            PendingSendZc {
+                fd,
+                expected_total,
+                _header: header,
+                _body: body,
+                _iovecs: SendableIoVec(iovecs),
+                _msg: SendableMsgHdr(msg),
+                completion,
+                data_completed: false,
+                send_result: None,
+            },
+        );
+
+        let pending_entry = pending.get(&user_data).unwrap();
+        let msg_ptr = pending_entry._msg.0.as_ref() as *const libc::msghdr;
+        let entry = io_uring::opcode::SendMsgZc::new(io_uring::types::Fd(fd), msg_ptr)
+            .build()
+            .user_data(user_data);
+
+        let submit_result: io::Result<()> = self.ring.with_lock(|ring| {
+            unsafe {
+                if ring.submission().push(&entry).is_err() {
+                    ring.submit()?;
+                    ring.submission()
+                        .push(&entry)
+                        .map_err(|_| io::Error::other("submission queue full after submit"))?;
+                }
+            }
+            Ok(())
+        });
+
+        if let Err(err) = submit_result {
+            if let Some(send) = pending.remove(&user_data) {
+                let _ = send.completion.send(Err(err));
+            }
+            return Err(io::Error::other(
+                "failed to push zero-copy send to submission queue",
+            ));
+        }
+
+        Ok(())
+    }
+
     fn poll_completions(&self, worker_index: usize) {
         let mut completions = Vec::new();
+        let mut notifications = Vec::new();
         self.ring.with_lock(|ring| {
             let mut cq = ring.completion();
             for cqe in &mut cq {
                 if io_uring::cqueue::notif(cqe.flags()) {
-                    continue;
+                    notifications.push((cqe.user_data(), cqe.result()));
+                } else {
+                    completions.push((cqe.user_data(), cqe.result()));
                 }
-                completions.push((cqe.user_data(), cqe.result()));
             }
         });
 
-        if completions.is_empty() {
+        if completions.is_empty() && notifications.is_empty() {
             return;
         }
 
         let mut pending_recv = self.pending_recv.lock().expect("pending recv map poisoned");
         let mut pending_send = self.pending_send.lock().expect("pending send map poisoned");
+        let mut pending_send_zc = self
+            .pending_send_zc
+            .lock()
+            .expect("pending send zc map poisoned");
 
         for (user_data, result) in completions {
             if user_data == 0 {
@@ -625,10 +786,105 @@ impl ReactorIo {
                 continue;
             }
 
-            if !pending_recv.contains_key(&user_data) {
+            // Check if this is a zero-copy send data completion (notification will come later)
+            if let Some(send) = pending_send_zc.get_mut(&user_data) {
+                if result < 0 {
+                    let err = io::Error::from_raw_os_error(-result);
+                    error!(
+                        worker_index,
+                        fd = send.fd,
+                        user_data,
+                        error = %err,
+                        "zero-copy send data completion with error"
+                    );
+                    send.send_result = Some(Err(err));
+                    send.data_completed = true;
+                    continue;
+                }
+
+                let written = result as usize;
+                if written != send.expected_total {
+                    error!(
+                        worker_index,
+                        fd = send.fd,
+                        user_data,
+                        written,
+                        expected = send.expected_total,
+                        "partial zero-copy send detected"
+                    );
+                    send.send_result = Some(Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        format!(
+                            "partial zero-copy send: wrote {} bytes, expected {}",
+                            written, send.expected_total
+                        ),
+                    )));
+                    send.data_completed = true;
+                    continue;
+                }
+
+                debug!(
+                    worker_index,
+                    fd = send.fd,
+                    user_data,
+                    written,
+                    "zero-copy send data completion (waiting for notification)"
+                );
+                send.send_result = Some(Ok(()));
+                send.data_completed = true;
+                continue;
+            }
+
+            if !pending_recv.contains_key(&user_data)
+                && !pending_send.contains_key(&user_data)
+                && !pending_send_zc.contains_key(&user_data)
+            {
                 warn!(
                     worker_index,
                     user_data, "received completion for unknown operation"
+                );
+            }
+        }
+
+        for (user_data, _result) in notifications {
+            if user_data == 0 {
+                debug!(
+                    worker_index,
+                    user_data, "notification without pending entry"
+                );
+                continue;
+            }
+
+            if let Some(send) = pending_send_zc.remove(&user_data) {
+                debug!(
+                    worker_index,
+                    fd = send.fd,
+                    user_data,
+                    data_completed = send.data_completed,
+                    "zero-copy send notification received, kernel done with buffers"
+                );
+
+                if !send.data_completed {
+                    warn!(
+                        worker_index,
+                        fd = send.fd,
+                        user_data,
+                        "received notification before data completion"
+                    );
+                }
+
+                if let Some(result) = send.send_result {
+                    let _ = send.completion.send(result);
+                } else {
+                    let _ = send.completion.send(Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "notification received but no send result stored",
+                    )));
+                }
+            } else {
+                warn!(
+                    worker_index,
+                    user_data, "received notification for unknown zero-copy send operation"
                 );
             }
         }
@@ -645,7 +901,12 @@ impl ReactorIo {
             .lock()
             .expect("pending send map poisoned")
             .is_empty();
-        has_recv || has_send
+        let has_send_zc = !self
+            .pending_send_zc
+            .lock()
+            .expect("pending send zc map poisoned")
+            .is_empty();
+        has_recv || has_send || has_send_zc
     }
 
     fn flush_submissions(&self) -> io::Result<usize> {
@@ -676,6 +937,18 @@ struct PendingSend {
     completion: oneshot::Sender<io::Result<()>>,
 }
 
+struct PendingSendZc {
+    fd: RawFd,
+    expected_total: usize,
+    _header: Bytes,
+    _body: Bytes,
+    _iovecs: SendableIoVec,
+    _msg: SendableMsgHdr,
+    completion: oneshot::Sender<io::Result<()>>,
+    data_completed: bool,
+    send_result: Option<io::Result<()>>,
+}
+
 #[derive(Clone)]
 pub struct ReactorTransport {
     handle: Arc<RpcReactorHandle>,
@@ -697,10 +970,18 @@ impl ReactorTransport {
         }
     }
 
-    pub async fn recv_frame<H: MessageHeaderTrait>(
-        &self,
-        fd: RawFd,
-    ) -> io::Result<MessageFrame<H>> {
+    pub async fn zero_copy_send(&self, fd: RawFd, header: Bytes, body: Bytes) -> io::Result<()> {
+        let rx = self.handle.submit_send_zc(fd, header, body);
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "rpc reactor zero-copy send cancelled",
+            )),
+        }
+    }
+
+    pub async fn recv<H: MessageHeaderTrait>(&self, fd: RawFd) -> io::Result<MessageFrame<H>> {
         let header_size = H::SIZE;
         let header_vec = self.recv_exact(fd, header_size).await?;
         if header_vec.len() != header_size {

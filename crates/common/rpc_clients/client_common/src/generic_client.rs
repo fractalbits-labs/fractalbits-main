@@ -299,7 +299,7 @@ where
         rpc_type: &'static str,
     ) -> Result<(), RpcError> {
         let transport = io_uring::get_current_reactor().expect("io_uring reactor missing");
-        while let Ok(frame) = transport.recv_frame(socket_fd).await {
+        while let Ok(frame) = transport.recv(socket_fd).await {
             Self::handle_incoming_frame(frame, requests, socket_fd, rpc_type);
         }
 

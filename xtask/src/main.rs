@@ -140,6 +140,13 @@ pub enum DeployCommand {
             long_help = "Zig extra build options in format: key=value,key2=value2"
         )]
         zig_extra_build: Vec<String>,
+
+        #[clap(
+            long,
+            value_delimiter = ',',
+            long_help = "Api server extra build environment variables in format: KEY=value,KEY2=value2"
+        )]
+        api_server_build_env: Vec<String>,
     },
 
     #[clap(about = "Upload prebuilt binaries to s3 builds bucket")]
@@ -471,7 +478,8 @@ async fn main() -> CmdResult {
                 target,
                 release,
                 zig_extra_build,
-            } => cmd_deploy::build(target, release, zig_extra_build)?,
+                api_server_build_env,
+            } => cmd_deploy::build(target, release, &zig_extra_build, &api_server_build_env)?,
             DeployCommand::Upload => cmd_deploy::upload()?,
             DeployCommand::CreateVpc => cmd_deploy::create_vpc()?,
             DeployCommand::DestroyVpc => cmd_deploy::destroy_vpc()?,

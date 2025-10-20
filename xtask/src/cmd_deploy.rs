@@ -62,7 +62,8 @@ const ZIG_BINS: &[&str] = &["nss_server", "bss_server", "test_art"];
 pub fn build(
     deploy_target: DeployTarget,
     release_mode: bool,
-    zig_extra_build: Vec<String>,
+    zig_extra_build: &[String],
+    api_server_build_env: &[String],
 ) -> CmdResult {
     let (zig_build_opt, rust_build_opt, build_dir) = if release_mode {
         ("--release=safe", "--release", "release")
@@ -126,8 +127,8 @@ pub fn build(
                     --exclude xtask
                     --exclude fractalbits-bootstrap
                     --exclude api_server;
-                info "Building api_server ..."; // for some additional features (e.g rpc_io_uring)
-                $[build_envs] cargo zigbuild
+                info "Building api_server ...";
+                $[api_server_build_env] $[build_envs] cargo zigbuild
                     --target $rust_target $rust_build_opt
                     --package api_server;
             }?;

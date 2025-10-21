@@ -7,4 +7,4 @@ pub use reactor::{
     ReactorTransport, RpcCommand, RpcReactorHandle, RpcTask, get_current_reactor,
     set_current_reactor, spawn_rpc_reactor,
 };
-pub use ring::{PerCoreRing, SharedRing};
+pub use ring::PerCoreRing;

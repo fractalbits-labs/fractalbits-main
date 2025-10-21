@@ -202,7 +202,7 @@ fn main() -> std::io::Result<()> {
                                     PerCoreRing::new(worker_idx, &uring_config)
                                         .expect("Failed to create io_uring ring"),
                                 );
-                                let reactor_handle = spawn_rpc_reactor(worker_idx, ring);
+                                let reactor_handle = spawn_rpc_reactor(worker_idx, core_id, ring);
                                 let transport = ReactorTransport::new(reactor_handle);
                                 set_current_reactor(transport);
                                 info!(worker_idx, "io_uring reactor initialized in worker thread");

@@ -1,8 +1,8 @@
 use super::ring::PerCoreRing;
 use crate::{MessageFrame, MessageHeaderTrait};
 use bytes::Bytes;
-use core_affinity;
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, unbounded};
+use core_affinity::{self, CoreId};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 use libc;
 use metrics::gauge;
 use std::cell::RefCell;
@@ -12,7 +12,6 @@ use std::os::fd::RawFd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, warn};
 
@@ -69,6 +68,7 @@ impl ReactorMetrics {
 
 pub struct RpcReactorHandle {
     worker_index: usize,
+    core_id: CoreId,
     sender: Sender<RpcCommand>,
     closed: AtomicBool,
     join_handle: Mutex<Option<JoinHandle<()>>>,
@@ -76,9 +76,15 @@ pub struct RpcReactorHandle {
 }
 
 impl RpcReactorHandle {
-    fn new(worker_index: usize, sender: Sender<RpcCommand>, io: Arc<ReactorIo>) -> Self {
+    fn new(
+        worker_index: usize,
+        core_id: CoreId,
+        sender: Sender<RpcCommand>,
+        io: Arc<ReactorIo>,
+    ) -> Self {
         Self {
             worker_index,
+            core_id,
             sender,
             closed: AtomicBool::new(false),
             join_handle: Mutex::new(None),
@@ -211,10 +217,14 @@ pub fn get_current_reactor() -> Option<ReactorTransport> {
     CURRENT_REACTOR.with(|slot| slot.borrow().clone())
 }
 
-pub fn spawn_rpc_reactor(worker_index: usize, ring: Arc<PerCoreRing>) -> Arc<RpcReactorHandle> {
+pub fn spawn_rpc_reactor(
+    worker_index: usize,
+    core_id: CoreId,
+    ring: Arc<PerCoreRing>,
+) -> Arc<RpcReactorHandle> {
     let (tx, rx) = unbounded::<RpcCommand>();
     let io = Arc::new(ReactorIo::new(ring));
-    let handle = Arc::new(RpcReactorHandle::new(worker_index, tx, io));
+    let handle = Arc::new(RpcReactorHandle::new(worker_index, core_id, tx, io));
     let thread_handle = Arc::clone(&handle);
     let join = thread::Builder::new()
         .name(format!("rpc-reactor-{worker_index}"))
@@ -226,28 +236,20 @@ pub fn spawn_rpc_reactor(worker_index: usize, ring: Arc<PerCoreRing>) -> Arc<Rpc
 
 fn reactor_thread(handle: Arc<RpcReactorHandle>, rx: Receiver<RpcCommand>) {
     let worker_index = handle.worker_index;
-
-    if let Some(core_ids) = core_affinity::get_core_ids()
-        && core_ids.len() > 1
-    {
-        let core_index = (worker_index % (core_ids.len() - 1)) + 1;
-        let core = core_ids[core_index];
-        if core_affinity::set_for_current(core) {
-            info!(
-                worker_index,
-                core_id = core.id,
-                "rpc reactor thread pinned to core (skipping core 0)"
-            );
-        } else {
-            warn!(
-                worker_index,
-                core_id = core.id,
-                "failed to pin rpc reactor thread to core"
-            );
-        }
+    let core_id = handle.core_id;
+    if core_affinity::set_for_current(core_id) {
+        info!(
+            %worker_index,
+            core_id = %core_id.id,
+            "rpc reactor thread pinned to core"
+        );
+    } else {
+        warn!(
+            %worker_index,
+            core_id = %core_id.id,
+            "failed to pin rpc reactor thread to core"
+        );
     }
-
-    info!(worker_index, "rpc reactor thread started");
 
     let mut running = true;
     let mut metrics = ReactorMetrics::default();
@@ -268,44 +270,27 @@ fn reactor_thread(handle: Arc<RpcReactorHandle>, rx: Receiver<RpcCommand>) {
             }
         }
 
-        if batch_count > 0
-            && let Err(err) = handle.io.flush_submissions()
-        {
-            warn!(worker_index, error = %err, "failed to flush io_uring submissions");
-        }
-
-        handle.io.poll_completions(worker_index);
-
-        if !running {
-            break;
-        }
-
         metric_update_counter += 1;
         if metric_update_counter.is_multiple_of(1000) {
             metrics.update_queue_depth(rx.len(), worker_index);
         }
 
-        if batch_count == 0 {
-            match rx.recv_timeout(Duration::from_micros(100)) {
-                Ok(cmd) => {
-                    if !process_command(&handle, cmd) {
-                        running = false;
-                    } else if let Err(err) = handle.io.flush_submissions() {
-                        warn!(worker_index, error = %err, "failed to flush io_uring submissions");
-                    }
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    let shutdown_seen = handle.closed.load(Ordering::Acquire);
-                    if shutdown_seen && !handle.io.has_pending_operations() {
-                        running = false;
-                    }
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    debug!(worker_index, "rpc reactor command channel closed");
-                    running = false;
-                }
+        if batch_count > 0 {
+            if let Err(err) = handle.io.flush_submissions() {
+                warn!(worker_index, error = %err, "failed to flush io_uring submissions");
+            }
+        } else {
+            if let Err(err) = handle.io.submit_and_wait_with_timeout(100_000) {
+                warn!(worker_index, error = %err, "failed to wait on io_uring");
+            }
+
+            let shutdown_seen = handle.closed.load(Ordering::Acquire);
+            if shutdown_seen && !handle.io.has_pending_operations() {
+                running = false;
             }
         }
+
+        handle.io.poll_completions(worker_index);
     }
 
     handle.closed.store(true, Ordering::Release);
@@ -808,6 +793,32 @@ impl ReactorIo {
 
     fn flush_submissions(&self) -> io::Result<usize> {
         self.ring.with_lock(|ring| ring.submit())
+    }
+
+    fn submit_and_wait_with_timeout(&self, timeout_ns: u64) -> io::Result<()> {
+        self.ring.with_lock(|ring| {
+            let timeout_sec = timeout_ns / 1_000_000_000;
+            let timeout_nsec = (timeout_ns % 1_000_000_000) as u32;
+            let timeout_spec = io_uring::types::Timespec::new()
+                .sec(timeout_sec)
+                .nsec(timeout_nsec);
+
+            unsafe {
+                let timeout_sqe = io_uring::opcode::Timeout::new(&timeout_spec)
+                    .build()
+                    .user_data(0);
+
+                if ring.submission().push(&timeout_sqe).is_err() {
+                    ring.submit()?;
+                    ring.submission()
+                        .push(&timeout_sqe)
+                        .map_err(|_| io::Error::other("failed to push timeout"))?;
+                }
+            }
+
+            ring.submit_and_wait(1)?;
+            Ok(())
+        })
     }
 }
 

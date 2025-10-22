@@ -33,6 +33,7 @@ pub const S3EXPRESS_REMOTE_BUCKET_CONFIG: &str = "s3express-remote-bucket-config
 pub fn common_setup() -> CmdResult {
     create_network_tuning_sysctl_file()?;
     install_rpms(&["amazon-cloudwatch-agent", "nmap-ncat", "perf", "lldb"])?;
+    setup_serial_console_password()?;
     Ok(())
 }
 
@@ -821,6 +822,14 @@ echo "XPS configured for TX steering" >&2
         mkdir -p $ETC_PATH;
         echo $systemd_unit_content > ${ETC_PATH}ena-irq-affinity.service;
         systemctl enable --now ${ETC_PATH}ena-irq-affinity.service;
+    }?;
+    Ok(())
+}
+
+pub fn setup_serial_console_password() -> CmdResult {
+    run_cmd! {
+        info "Setting password for ec2-user to enable serial console access";
+        echo "ec2-user:fractalbits!" | chpasswd;
     }?;
     Ok(())
 }

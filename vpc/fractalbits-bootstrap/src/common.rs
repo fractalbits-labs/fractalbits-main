@@ -742,8 +742,8 @@ else
 fi
 
 echo "Configuring interrupt coalescing" >&2
-if ethtool -C $iface rx-usecs 64 tx-usecs 64 adaptive-rx off 2>&1; then
-    echo "Interrupt coalescing configured: rx-usecs=64 tx-usecs=64 adaptive-rx=off" >&2
+if ethtool -C $iface rx-usecs 0 tx-usecs 0 adaptive-rx off 2>&1; then
+    echo "Interrupt coalescing configured: rx-usecs=0 tx-usecs=0 adaptive-rx=off" >&2
 else
     echo "Interrupt coalescing configuration failed or not supported" >&2
 fi

@@ -80,7 +80,7 @@ pub fn create_put_workload_config(
     duration: {duration}
 
     # Concurrent operations to run per warp instance.
-    concurrent: 192
+    concurrent: 96
 
     # Use POST Object operations for upload.
     # post: false

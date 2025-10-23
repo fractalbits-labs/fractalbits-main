@@ -1,14 +1,81 @@
 use std::time::{Duration, Instant};
 
 use crate::client::RpcClient;
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use data_types::DataVgInfo;
 use metrics::histogram;
 use prost::Message as PbMessage;
-use rpc_client_common::{InflightRpcGuard, RpcError};
-use rpc_codec_common::MessageFrame;
+use rpc_client_common::{InflightRpcGuard, RpcError, get_request_bump};
+use rpc_codec_common::{BumpBuf, MessageFrame};
 use rss_codec::*;
 use tracing::{error, warn};
+
+enum EncodeBuffer<'bump> {
+    Bump(BumpBuf<'bump>),
+    Heap(BytesMut),
+}
+
+impl<'bump> EncodeBuffer<'bump> {
+    fn new(trace_id: Option<u64>) -> Self {
+        if let Some(tid) = trace_id
+            && let Some(bump) = get_request_bump(tid)
+        {
+            return Self::Bump(BumpBuf::with_capacity_in(512, bump));
+        }
+        Self::Heap(BytesMut::new())
+    }
+
+    fn freeze(self) -> Bytes {
+        match self {
+            Self::Bump(buf) => buf.freeze(),
+            Self::Heap(buf) => buf.freeze(),
+        }
+    }
+}
+
+unsafe impl<'bump> BufMut for EncodeBuffer<'bump> {
+    fn remaining_mut(&self) -> usize {
+        match self {
+            Self::Bump(buf) => buf.remaining_mut(),
+            Self::Heap(buf) => buf.remaining_mut(),
+        }
+    }
+
+    fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
+        match self {
+            Self::Bump(buf) => buf.chunk_mut(),
+            Self::Heap(buf) => buf.chunk_mut(),
+        }
+    }
+
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        match self {
+            Self::Bump(buf) => unsafe { buf.advance_mut(cnt) },
+            Self::Heap(buf) => unsafe { buf.advance_mut(cnt) },
+        }
+    }
+
+    fn put_slice(&mut self, src: &[u8]) {
+        match self {
+            Self::Bump(buf) => buf.put_slice(src),
+            Self::Heap(buf) => buf.put_slice(src),
+        }
+    }
+
+    fn put_u8(&mut self, n: u8) {
+        match self {
+            Self::Bump(buf) => buf.put_u8(n),
+            Self::Heap(buf) => buf.put_u8(n),
+        }
+    }
+}
+
+fn encode_protobuf<M: PbMessage>(msg: M, trace_id: Option<u64>) -> Result<Bytes, RpcError> {
+    let mut body_bytes = EncodeBuffer::new(trace_id);
+    msg.encode(&mut body_bytes)
+        .map_err(|e| RpcError::EncodeError(e.to_string()))?;
+    Ok(body_bytes.freeze())
+}
 
 impl RpcClient {
     pub async fn put(
@@ -17,6 +84,7 @@ impl RpcClient {
         key: &str,
         value: &str,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "put");
@@ -34,13 +102,10 @@ impl RpcClient {
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count;
 
-        let mut body_bytes = BytesMut::new();
-        body.encode(&mut body_bytes)
-            .map_err(|e| RpcError::EncodeError(e.to_string()))?;
-
-        let frame = MessageFrame::new(header, body_bytes.freeze());
+        let body_bytes = encode_protobuf(body, trace_id)?;
+        let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -76,6 +141,7 @@ impl RpcClient {
         &self,
         key: &str,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(i64, String), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get");
@@ -91,13 +157,10 @@ impl RpcClient {
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count;
 
-        let mut body_bytes = BytesMut::new();
-        body.encode(&mut body_bytes)
-            .map_err(|e| RpcError::EncodeError(e.to_string()))?;
-
-        let frame = MessageFrame::new(header, body_bytes.freeze());
+        let body_bytes = encode_protobuf(body, trace_id)?;
+        let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -133,6 +196,7 @@ impl RpcClient {
         &self,
         key: &str,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "delete");
@@ -148,13 +212,10 @@ impl RpcClient {
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count;
 
-        let mut body_bytes = BytesMut::new();
-        body.encode(&mut body_bytes)
-            .map_err(|e| RpcError::EncodeError(e.to_string()))?;
-
-        let frame = MessageFrame::new(header, body_bytes.freeze());
+        let body_bytes = encode_protobuf(body, trace_id)?;
+        let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 error!(rpc=%"delete", %request_id, %key, error=?e, "rss rpc failed");
@@ -182,6 +243,7 @@ impl RpcClient {
         &self,
         instance_id: &str,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<String, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get_nss_role");
@@ -197,13 +259,10 @@ impl RpcClient {
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count;
 
-        let mut body_bytes = BytesMut::new();
-        body.encode(&mut body_bytes)
-            .map_err(|e| RpcError::EncodeError(e.to_string()))?;
-
-        let frame = MessageFrame::new(header, body_bytes.freeze());
+        let body_bytes = encode_protobuf(body, trace_id)?;
+        let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -233,6 +292,7 @@ impl RpcClient {
         &self,
         prefix: &str,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<Vec<String>, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "list");
@@ -248,13 +308,10 @@ impl RpcClient {
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count;
 
-        let mut body_bytes = BytesMut::new();
-        body.encode(&mut body_bytes)
-            .map_err(|e| RpcError::EncodeError(e.to_string()))?;
-
-        let frame = MessageFrame::new(header, body_bytes.freeze());
+        let body_bytes = encode_protobuf(body, trace_id)?;
+        let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -286,6 +343,7 @@ impl RpcClient {
         &self,
         instance_id: &str,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "send_heartbeat");
@@ -301,13 +359,10 @@ impl RpcClient {
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count;
 
-        let mut body_bytes = BytesMut::new();
-        body.encode(&mut body_bytes)
-            .map_err(|e| RpcError::EncodeError(e.to_string()))?;
-
-        let frame = MessageFrame::new(header, body_bytes.freeze());
+        let body_bytes = encode_protobuf(body, trace_id)?;
+        let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -336,6 +391,7 @@ impl RpcClient {
     pub async fn get_az_status(
         &self,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<AzStatusMap, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get_az_status");
@@ -350,7 +406,7 @@ impl RpcClient {
 
         let frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
-            .send_request(header.id, frame, timeout)
+            .send_request(header.id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -381,6 +437,7 @@ impl RpcClient {
         az_id: &str,
         status: &str,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "set_az_status");
@@ -397,13 +454,10 @@ impl RpcClient {
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count;
 
-        let mut body_bytes = BytesMut::new();
-        body.encode(&mut body_bytes)
-            .map_err(|e| RpcError::EncodeError(e.to_string()))?;
-
-        let frame = MessageFrame::new(header, body_bytes.freeze());
+        let body_bytes = encode_protobuf(body, trace_id)?;
+        let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -435,6 +489,7 @@ impl RpcClient {
         api_key_id: &str,
         is_multi_az: bool,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "create_bucket");
@@ -453,13 +508,10 @@ impl RpcClient {
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count;
 
-        let mut body_bytes = BytesMut::new();
-        body.encode(&mut body_bytes)
-            .map_err(|e| RpcError::EncodeError(e.to_string()))?;
-
-        let frame = MessageFrame::new(header, body_bytes.freeze());
+        let body_bytes = encode_protobuf(body, trace_id)?;
+        let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -490,6 +542,7 @@ impl RpcClient {
         bucket_name: &str,
         api_key_id: &str,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "delete_bucket");
@@ -506,13 +559,10 @@ impl RpcClient {
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count;
 
-        let mut body_bytes = BytesMut::new();
-        body.encode(&mut body_bytes)
-            .map_err(|e| RpcError::EncodeError(e.to_string()))?;
-
-        let frame = MessageFrame::new(header, body_bytes.freeze());
+        let body_bytes = encode_protobuf(body, trace_id)?;
+        let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -541,6 +591,7 @@ impl RpcClient {
     pub async fn get_data_vg_info(
         &self,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
     ) -> Result<DataVgInfo, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get_data_vg_info");
         let start = Instant::now();
@@ -552,13 +603,10 @@ impl RpcClient {
         header.command = Command::GetDataVgInfo;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
 
-        let mut body_bytes = BytesMut::new();
-        body.encode(&mut body_bytes)
-            .map_err(|e| RpcError::EncodeError(e.to_string()))?;
-
-        let frame = MessageFrame::new(header, body_bytes.freeze());
+        let body_bytes = encode_protobuf(body, trace_id)?;
+        let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -601,6 +649,7 @@ impl RpcClient {
     pub async fn get_metadata_vg_info_json(
         &self,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<String, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get_metadata_vg_info_json");
@@ -617,7 +666,7 @@ impl RpcClient {
             .map_err(|e| RpcError::EncodeError(e.to_string()))?;
         let frame = MessageFrame::new(header, body_bytes.freeze());
         let resp_frame = self
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {

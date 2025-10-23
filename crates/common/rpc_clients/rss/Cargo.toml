@@ -9,6 +9,7 @@ serde_json.workspace = true
 tokio.workspace = true
 prost.workspace = true
 bytes.workspace = true
+bumpalo.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tokio-util.workspace = true

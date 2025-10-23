@@ -120,6 +120,7 @@ impl DataVgProxy {
                     block_number,
                     &mut body,
                     Some(self.rpc_timeout),
+                    None,
                     retry_count,
                 )
                 .await
@@ -158,7 +159,13 @@ impl DataVgProxy {
 
             loop {
                 match bss_client
-                    .delete_data_blob(blob_guid, block_number, Some(rpc_timeout), retry_count)
+                    .delete_data_blob(
+                        blob_guid,
+                        block_number,
+                        Some(rpc_timeout),
+                        None,
+                        retry_count,
+                    )
                     .await
                 {
                     Ok(()) => return Ok(()),
@@ -313,6 +320,7 @@ impl DataVgProxy {
                         block_number,
                         body.clone(),
                         Some(rpc_timeout),
+                        None,
                         retry_count,
                     )
                     .await

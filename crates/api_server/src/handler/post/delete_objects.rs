@@ -88,6 +88,7 @@ pub async fn delete_objects_handler(
             key,
             None, // No checksum value needed for delete
             actix_web::dev::Payload::None,
+            ctx.trace_id,
         );
         match delete_object_handler(delete_ctx).await {
             Ok(_) => {

@@ -57,6 +57,9 @@ pub struct MessageHeader {
     /// The version of the protocol implementation that originated this message.
     pub protocol: u16,
 
+    /// Trace ID for distributed tracing and bump allocator lookup
+    pub trace_id: u64,
+
     pub checksum_algo: u8,
 
     /// Flag to indicate if this is a new metadata blob (vs update)
@@ -66,7 +69,7 @@ pub struct MessageHeader {
     // Note rust arrays of sizes from 0 to 32 (inclusive) implement the Default trait if the element
     // type allows it. As a stopgap, trait implementations are statically generated up to size 32.
     // See [doc](https://doc.rust-lang.org/std/primitive.array.html) for more details.
-    reserved1: [u8; 32],
+    reserved1: [u8; 24],
     reserved2: [u8; 32],
     reserved3: [u8; 32],
     reserved4: [u8; 32],
@@ -109,13 +112,13 @@ impl MessageHeader {
         dst.put(bytes);
     }
 
-    pub fn decode(src: &Bytes) -> Self {
+    pub fn decode_bytes(src: &Bytes) -> Self {
         let header_bytes = &src.chunk()[0..Self::SIZE];
         // TODO: verify header checksum
         bytemuck::pod_read_unaligned::<Self>(header_bytes).to_owned()
     }
 
-    pub fn get_size(src: &mut BytesMut) -> usize {
+    pub fn get_size_bytes(src: &mut BytesMut) -> usize {
         let offset = std::mem::offset_of!(MessageHeader, size);
         let mut bytes = [0u8; 4];
         bytes.copy_from_slice(&src[offset..offset + 4]);
@@ -130,11 +133,12 @@ impl MessageHeaderTrait for MessageHeader {
         self.encode(dst)
     }
 
-    fn decode(src: &Bytes) -> Self {
-        Self::decode(src)
+    fn decode(src: &[u8]) -> Self {
+        // TODO: verify header checksum
+        bytemuck::pod_read_unaligned::<Self>(&src[..Self::SIZE]).to_owned()
     }
 
-    fn get_size(src: &BytesMut) -> usize {
+    fn get_size(src: &[u8]) -> usize {
         let offset = std::mem::offset_of!(MessageHeader, size);
         let mut bytes = [0u8; 4];
         bytes.copy_from_slice(&src[offset..offset + 4]);
@@ -163,5 +167,13 @@ impl MessageHeaderTrait for MessageHeader {
 
     fn set_retry_count(&mut self, retry_count: u32) {
         self.retry_count = retry_count;
+    }
+
+    fn get_trace_id(&self) -> u64 {
+        self.trace_id
+    }
+
+    fn set_trace_id(&mut self, trace_id: u64) {
+        self.trace_id = trace_id;
     }
 }

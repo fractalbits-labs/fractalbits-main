@@ -54,11 +54,17 @@ pub async fn get_raw_object(
     app: &AppState,
     root_blob_name: &str,
     key: &str,
+    trace_id: Option<u64>,
 ) -> Result<ObjectLayout, S3Error> {
     let nss_client = app.get_nss_rpc_client();
     let resp = nss_rpc_retry!(
         nss_client,
-        get_inode(root_blob_name, key, Some(app.config.rpc_timeout()))
+        get_inode(
+            root_blob_name,
+            key,
+            Some(app.config.rpc_timeout()),
+            trace_id
+        )
     )
     .await?;
 
@@ -77,6 +83,7 @@ pub async fn get_raw_object(
     Ok(object)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn list_raw_objects(
     app: &AppState,
     root_blob_name: &str,
@@ -85,6 +92,7 @@ pub async fn list_raw_objects(
     delimiter: &str,
     start_after: &str,
     skip_mpu_parts: bool,
+    trace_id: Option<u64>,
 ) -> Result<Vec<(String, ObjectLayout)>, S3Error> {
     let nss_client = app.get_nss_rpc_client();
     let resp = nss_rpc_retry!(
@@ -96,7 +104,8 @@ pub async fn list_raw_objects(
             &delimiter,
             &start_after,
             skip_mpu_parts,
-            Some(app.config.rpc_timeout())
+            Some(app.config.rpc_timeout()),
+            trace_id
         )
     )
     .await?;

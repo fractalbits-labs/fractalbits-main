@@ -8,7 +8,9 @@ use tracing::{debug, error};
 pub mod generic_client;
 #[cfg(feature = "io_uring")]
 pub mod io_uring;
-pub use generic_client::RpcCodec;
+pub use generic_client::{
+    RpcCodec, get_request_bump, register_request_bump, unregister_request_bump,
+};
 pub use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 
 use generic_client::RpcClient as GenericRpcClient;
@@ -120,18 +122,21 @@ where
         self.next_id.fetch_add(1, Ordering::SeqCst)
     }
 
-    pub async fn send_request(
+    pub async fn send_request<B: AsRef<[u8]>>(
         &self,
         request_id: u32,
-        frame: MessageFrame<Header>,
+        frame: MessageFrame<Header, B>,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
     ) -> Result<MessageFrame<Header>, RpcError> {
         self.ensure_connected().await?;
         let client = {
             let read = self.inner.read().await;
             Arc::clone(read.as_ref().unwrap())
         };
-        client.send_request(request_id, frame, timeout).await
+        client
+            .send_request(request_id, frame, timeout, trace_id)
+            .await
     }
 }
 

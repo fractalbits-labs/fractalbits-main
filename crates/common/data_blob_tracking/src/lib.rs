@@ -62,6 +62,7 @@ impl DataBlobTracker {
                 tracking_root_blob_name,
                 &key,
                 Bytes::copy_from_slice(metadata),
+                None,
                 None
             )
         )
@@ -78,7 +79,7 @@ impl DataBlobTracker {
         let key = format!("single/{blob_key}");
         match nss_rpc_retry!(
             &self.nss_client,
-            get_inode(tracking_root_blob_name, &key, None)
+            get_inode(tracking_root_blob_name, &key, None, None)
         )
         .await
         {
@@ -105,7 +106,7 @@ impl DataBlobTracker {
         let key = format!("single/{blob_key}");
         match nss_rpc_retry!(
             &self.nss_client,
-            delete_inode(tracking_root_blob_name, &key, None)
+            delete_inode(tracking_root_blob_name, &key, None, None)
         )
         .await
         {
@@ -126,7 +127,7 @@ impl DataBlobTracker {
         let key = format!("single/{trimmed_key}");
         match nss_rpc_retry!(
             &self.nss_client,
-            delete_inode(tracking_root_blob_name, &key, None)
+            delete_inode(tracking_root_blob_name, &key, None, None)
         )
         .await
         {
@@ -150,6 +151,7 @@ impl DataBlobTracker {
                 tracking_root_blob_name,
                 &key,
                 Bytes::copy_from_slice(timestamp),
+                None,
                 None
             )
         )
@@ -166,7 +168,7 @@ impl DataBlobTracker {
         let key = format!("deleted/{blob_key}");
         match nss_rpc_retry!(
             &self.nss_client,
-            get_inode(tracking_root_blob_name, &key, None)
+            get_inode(tracking_root_blob_name, &key, None, None)
         )
         .await
         {
@@ -195,7 +197,7 @@ impl DataBlobTracker {
         let key = format!("deleted/{trimmed_key}");
         match nss_rpc_retry!(
             &self.nss_client,
-            get_inode(tracking_root_blob_name, &key, None)
+            get_inode(tracking_root_blob_name, &key, None, None)
         )
         .await
         {
@@ -219,7 +221,7 @@ impl DataBlobTracker {
         let key = format!("deleted/{blob_key}");
         match nss_rpc_retry!(
             &self.nss_client,
-            delete_inode(tracking_root_blob_name, &key, None)
+            delete_inode(tracking_root_blob_name, &key, None, None)
         )
         .await
         {
@@ -258,6 +260,7 @@ impl DataBlobTracker {
                 "",
                 &search_start_after,
                 false,
+                None,
                 None
             )
         )
@@ -316,6 +319,7 @@ impl DataBlobTracker {
                 "",
                 &search_start_after,
                 false,
+                None,
                 None
             )
         )
@@ -350,7 +354,7 @@ impl DataBlobTracker {
         &self,
     ) -> Result<Vec<(String, Option<String>)>, DataBlobTrackingError> {
         let prefix = "bucket:";
-        let bucket_values = rss_rpc_retry!(&self.rss_client, list(prefix, None)).await?;
+        let bucket_values = rss_rpc_retry!(&self.rss_client, list(prefix, None, None)).await?;
 
         let mut buckets = Vec::new();
         for bucket_value in &bucket_values {
@@ -387,7 +391,7 @@ impl DataBlobTracker {
         &self,
         timeout: Option<Duration>,
     ) -> Result<AzStatusMap, DataBlobTrackingError> {
-        rss_rpc_retry!(&self.rss_client, get_az_status(timeout))
+        rss_rpc_retry!(&self.rss_client, get_az_status(timeout, None))
             .await
             .map_err(|e| e.into())
     }
@@ -399,8 +403,11 @@ impl DataBlobTracker {
         status: &str,
         timeout: Option<Duration>,
     ) -> Result<(), DataBlobTrackingError> {
-        rss_rpc_retry!(&self.rss_client, set_az_status(az_id, status, timeout))
-            .await
-            .map_err(|e| e.into())
+        rss_rpc_retry!(
+            &self.rss_client,
+            set_az_status(az_id, status, timeout, None)
+        )
+        .await
+        .map_err(|e| e.into())
     }
 }

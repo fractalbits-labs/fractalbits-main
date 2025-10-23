@@ -741,13 +741,6 @@ else
     echo "RSS configuration failed or not supported (using hardware default)" >&2
 fi
 
-echo "Configuring interrupt coalescing" >&2
-if ethtool -C $iface rx-usecs 0 tx-usecs 0 adaptive-rx off 2>&1; then
-    echo "Interrupt coalescing configured: rx-usecs=0 tx-usecs=0 adaptive-rx=off" >&2
-else
-    echo "Interrupt coalescing configuration failed or not supported" >&2
-fi
-
 cpus_per_queue=$((num_cpus / num_queues))
 echo "Spreading $num_queues queues across $num_cpus CPUs ($cpus_per_queue CPUs per queue)" >&2
 

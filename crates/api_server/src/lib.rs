@@ -20,7 +20,10 @@ use rpc_client_rss::RpcClientRss;
 
 pub use cache_registry::CacheCoordinator;
 use std::{
-    sync::{Arc, atomic::AtomicBool},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
     time::Duration,
 };
 use tokio::sync::{
@@ -29,6 +32,10 @@ use tokio::sync::{
 };
 use tracing::debug;
 pub type BlobId = uuid::Uuid;
+
+thread_local! {
+    static REQUEST_COUNTER: AtomicU32 = const { AtomicU32::new(0) };
+}
 
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
@@ -39,6 +46,7 @@ pub struct AppState {
     pub cache_coordinator: Arc<CacheCoordinator<Versioned<String>>>,
     pub az_status_coordinator: Arc<CacheCoordinator<String>>,
     pub az_status_enabled: AtomicBool,
+    pub worker_id: u16,
 
     rpc_client_nss: RpcClientNss,
     rpc_client_rss: RpcClientRss,
@@ -55,6 +63,7 @@ impl AppState {
         config: Arc<Config>,
         cache_coordinator: Arc<CacheCoordinator<Versioned<String>>>,
         az_status_coordinator: Arc<CacheCoordinator<String>>,
+        worker_id: u16,
     ) -> Self {
         debug!("Initializing per-core AppState with lazy RPC client connections");
 
@@ -83,8 +92,22 @@ impl AppState {
             cache_coordinator,
             az_status_coordinator,
             az_status_enabled: AtomicBool::new(false),
+            worker_id,
             data_blob_tracker: OnceCell::new(),
         }
+    }
+
+    pub fn generate_trace_id(&self) -> u64 {
+        let counter = REQUEST_COUNTER.with(|c| c.fetch_add(1, Ordering::Relaxed));
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Format: [8 bits worker_id][32 bits timestamp][24 bits counter]
+        ((self.worker_id as u64) << 56)
+            | ((timestamp & 0xFFFFFFFF) << 24)
+            | ((counter as u64) & 0xFFFFFF)
     }
 
     pub fn get_nss_rpc_client(&self) -> &RpcClientNss {
@@ -105,7 +128,7 @@ impl AppState {
                 let rss_client = self.get_rss_rpc_client();
 
                 let data_vg_info = rss_client
-                    .get_data_vg_info(Some(self.config.rpc_timeout()))
+                    .get_data_vg_info(Some(self.config.rpc_timeout()), None)
                     .await
                     .map_err(|e| format!("Failed to fetch DataVgInfo from RSS: {}", e))?;
 
@@ -157,8 +180,11 @@ impl AppState {
         }
 
         let rss_client = self.get_rss_rpc_client();
-        let (version, data) =
-            rss_rpc_retry!(rss_client, get(&full_key, Some(self.config.rpc_timeout()))).await?;
+        let (version, data) = rss_rpc_retry!(
+            rss_client,
+            get(&full_key, Some(self.config.rpc_timeout()), None)
+        )
+        .await?;
         let json = Versioned::new(version, data);
         self.cache.insert(full_key, json.clone()).await;
         Ok((
@@ -184,7 +210,8 @@ impl AppState {
                 versioned_data.version,
                 &full_key,
                 &versioned_data.data,
-                Some(self.config.rpc_timeout())
+                Some(self.config.rpc_timeout()),
+                None
             )
         )
         .await?;
@@ -199,7 +226,7 @@ impl AppState {
         let rss_client = self.get_rss_rpc_client();
         rss_rpc_retry!(
             rss_client,
-            delete(&full_key, Some(self.config.rpc_timeout()))
+            delete(&full_key, Some(self.config.rpc_timeout()), None)
         )
         .await?;
         self.cache.invalidate(&full_key).await;
@@ -209,8 +236,11 @@ impl AppState {
     pub async fn list_api_keys(&self) -> Result<Vec<ApiKey>, RpcError> {
         let prefix = "api_key:".to_string();
         let rss_client = self.get_rss_rpc_client();
-        let kvs =
-            rss_rpc_retry!(rss_client, list(&prefix, Some(self.config.rpc_timeout()))).await?;
+        let kvs = rss_rpc_retry!(
+            rss_client,
+            list(&prefix, Some(self.config.rpc_timeout()), None)
+        )
+        .await?;
         Ok(kvs
             .iter()
             .map(|x| serde_json::from_slice(x.as_bytes()).unwrap())
@@ -235,8 +265,11 @@ impl AppState {
         }
 
         let rss_client = self.get_rss_rpc_client();
-        let (version, data) =
-            rss_rpc_retry!(rss_client, get(&full_key, Some(self.config.rpc_timeout()))).await?;
+        let (version, data) = rss_rpc_retry!(
+            rss_client,
+            get(&full_key, Some(self.config.rpc_timeout()), None)
+        )
+        .await?;
         let json = Versioned::new(version, data);
         self.cache.insert(full_key, json.clone()).await;
         Ok((
@@ -259,7 +292,8 @@ impl AppState {
                 bucket_name,
                 api_key_id,
                 is_multi_az,
-                Some(self.config.rpc_timeout())
+                Some(self.config.rpc_timeout()),
+                None
             )
         )
         .await?;
@@ -275,7 +309,12 @@ impl AppState {
         let rss_client = self.get_rss_rpc_client();
         rss_rpc_retry!(
             rss_client,
-            delete_bucket(bucket_name, api_key_id, Some(self.config.rpc_timeout()))
+            delete_bucket(
+                bucket_name,
+                api_key_id,
+                Some(self.config.rpc_timeout()),
+                None
+            )
         )
         .await?;
 
@@ -292,8 +331,11 @@ impl AppState {
     pub async fn list_buckets(&self) -> Result<Vec<Bucket>, RpcError> {
         let prefix = "bucket:".to_string();
         let rss_client = self.get_rss_rpc_client();
-        let kvs =
-            rss_rpc_retry!(rss_client, list(&prefix, Some(self.config.rpc_timeout()))).await?;
+        let kvs = rss_rpc_retry!(
+            rss_client,
+            list(&prefix, Some(self.config.rpc_timeout()), None)
+        )
+        .await?;
         Ok(kvs
             .iter()
             .map(|x| serde_json::from_slice(x.as_bytes()).unwrap())

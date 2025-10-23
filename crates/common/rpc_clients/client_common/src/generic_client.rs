@@ -3,7 +3,6 @@ use crate::RpcError;
 use crate::io_uring;
 use bytes::BytesMut;
 use metrics::{counter, gauge};
-use parking_lot::Mutex;
 use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 use socket2::{Socket, TcpKeepalive};
 use std::collections::HashMap;
@@ -17,10 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use strum::AsRefStr;
-use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
-    oneshot,
-};
+use tokio::sync::oneshot;
 use tokio::task::AbortHandle;
 use tokio_retry::{
     Retry,
@@ -28,7 +24,32 @@ use tokio_retry::{
 };
 use tracing::{debug, warn};
 
-type RequestMap<Header> = Arc<Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>>;
+use bumpalo::Bump;
+use std::cell::RefCell;
+
+thread_local! {
+    static REQUEST_BUMPS: RefCell<HashMap<u64, &'static Bump>> =
+        RefCell::new(HashMap::new());
+}
+
+pub fn register_request_bump(trace_id: u64, bump: &Bump) {
+    REQUEST_BUMPS.with(|map| {
+        map.borrow_mut().insert(trace_id, unsafe {
+            std::mem::transmute::<&Bump, &'static Bump>(bump)
+        });
+    });
+}
+
+pub fn unregister_request_bump(trace_id: u64) {
+    REQUEST_BUMPS.with(|map| map.borrow_mut().remove(&trace_id));
+}
+
+pub fn get_request_bump(trace_id: u64) -> Option<&'static Bump> {
+    REQUEST_BUMPS.with(|map| map.borrow().get(&trace_id).copied())
+}
+
+type RequestMap<Header> =
+    Arc<parking_lot::Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>>;
 
 pub trait RpcCodec<Header: MessageHeaderTrait>:
     Default
@@ -43,8 +64,10 @@ pub trait RpcCodec<Header: MessageHeaderTrait>:
 
 pub struct RpcClient<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> {
     requests: RequestMap<Header>,
-    sender: Sender<MessageFrame<Header>>,
-    send_task_handle: AbortHandle,
+    #[cfg(not(feature = "io_uring"))]
+    writer: Arc<tokio::sync::Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+    #[cfg(feature = "io_uring")]
+    writer_fd: RawFd,
     recv_task_handle: AbortHandle,
     socket_fd: RawFd,
     is_closed: Arc<AtomicBool>,
@@ -59,7 +82,6 @@ pub struct RpcClient<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> {
 #[derive(AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 enum DrainFrom {
-    SendTask,
     ReceiveTask,
     RpcClient,
 }
@@ -67,7 +89,6 @@ enum DrainFrom {
 impl<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> Drop for RpcClient<Codec, Header> {
     fn drop(&mut self) {
         debug!(rpc_type = Codec::RPC_TYPE, socket_fd = %self.socket_fd, "RpcClient dropped, aborting tasks");
-        self.send_task_handle.abort();
         self.recv_task_handle.abort();
         Self::drain_pending_requests(self.socket_fd, &self.requests, DrainFrom::RpcClient);
     }
@@ -120,24 +141,9 @@ where
         let rpc_type = Codec::RPC_TYPE;
         let socket_fd = stream.as_raw_fd();
         let (reader, writer) = stream.into_split();
-        let requests: Arc<Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-        let (sender, receiver) = mpsc::channel::<MessageFrame<Header>>(1024);
+        let requests: RequestMap<Header> = Arc::new(parking_lot::Mutex::new(HashMap::new()));
         let is_closed = Arc::new(AtomicBool::new(false));
-
-        // Send task
-        let send_handle = {
-            let sender_requests = requests.clone();
-            let is_closed = is_closed.clone();
-            tokio::spawn(async move {
-                if let Err(e) = Self::send_task_tokio(writer, receiver, socket_fd, rpc_type).await {
-                    warn!(%rpc_type, %socket_fd, %e, "send task failed");
-                }
-                is_closed.store(true, Ordering::SeqCst);
-                Self::drain_pending_requests(socket_fd, &sender_requests, DrainFrom::SendTask);
-            })
-            .abort_handle()
-        };
+        let writer = Arc::new(tokio::sync::Mutex::new(writer));
 
         // Receive task
         let recv_handle = {
@@ -159,8 +165,7 @@ where
 
         Ok(RpcClient {
             requests,
-            sender,
-            send_task_handle: send_handle,
+            writer,
             recv_task_handle: recv_handle,
             socket_fd,
             is_closed,
@@ -175,24 +180,8 @@ where
             .await
             .map_err(RpcError::IoError)?;
 
-        let requests: Arc<Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-        let (sender, receiver) = mpsc::channel::<MessageFrame<Header>>(1024);
+        let requests: RequestMap<Header> = Arc::new(parking_lot::Mutex::new(HashMap::new()));
         let is_closed = Arc::new(AtomicBool::new(false));
-
-        // Send task
-        let send_handle = {
-            let sender_requests = requests.clone();
-            let is_closed = is_closed.clone();
-            tokio::spawn(async move {
-                if let Err(e) = Self::send_task_io_uring(receiver, socket_fd, rpc_type).await {
-                    warn!(%rpc_type, %socket_fd, %e, "send task failed");
-                }
-                is_closed.store(true, Ordering::SeqCst);
-                Self::drain_pending_requests(socket_fd, &sender_requests, DrainFrom::SendTask);
-            })
-            .abort_handle()
-        };
 
         // Receive task
         let recv_handle = {
@@ -214,146 +203,13 @@ where
 
         Ok(RpcClient {
             requests,
-            sender,
-            send_task_handle: send_handle,
+            writer_fd: socket_fd,
             recv_task_handle: recv_handle,
             socket_fd,
             is_closed,
             _socket_owner: socket,
             _phantom: PhantomData,
         })
-    }
-
-    #[cfg(not(feature = "io_uring"))]
-    async fn send_task_tokio(
-        mut writer: tokio::net::tcp::OwnedWriteHalf,
-        mut receiver: Receiver<MessageFrame<Header>>,
-        socket_fd: RawFd,
-        rpc_type: &'static str,
-    ) -> Result<(), RpcError> {
-        use tokio::io::AsyncWriteExt;
-
-        const MAX_BATCH_SIZE: usize = 32;
-        let mut batch = Vec::with_capacity(MAX_BATCH_SIZE);
-        let mut encoded_frames = Vec::with_capacity(MAX_BATCH_SIZE);
-
-        loop {
-            batch.clear();
-            let count = receiver.recv_many(&mut batch, MAX_BATCH_SIZE).await;
-            if count == 0 {
-                break;
-            }
-
-            gauge!("rpc_request_pending_in_send_queue", "type" => rpc_type).decrement(count as f64);
-            counter!("rpc_send_batch_size", "type" => rpc_type).increment(count as u64);
-
-            encoded_frames.clear();
-            for frame in batch.drain(..) {
-                let request_id = frame.header.get_id();
-                debug!(%rpc_type, %socket_fd, %request_id, "sending request");
-
-                let mut header_buf = BytesMut::with_capacity(Header::SIZE);
-                frame.header.encode(&mut header_buf);
-                encoded_frames.push((header_buf.freeze(), frame.body));
-            }
-
-            let total_len: usize = encoded_frames.iter().map(|(h, b)| h.len() + b.len()).sum();
-            let mut total_written = 0;
-
-            while total_written < total_len {
-                let mut iov = Vec::with_capacity(encoded_frames.len() * 2);
-                let mut current = 0;
-
-                for (header, body) in &encoded_frames {
-                    let header_end = current + header.len();
-                    let body_end = header_end + body.len();
-
-                    if total_written < header_end {
-                        let offset = if total_written > current {
-                            total_written - current
-                        } else {
-                            0
-                        };
-                        iov.push(IoSlice::new(&header[offset..]));
-                        if !body.is_empty() {
-                            iov.push(IoSlice::new(body));
-                        }
-                    } else if total_written < body_end && !body.is_empty() {
-                        let offset = total_written - header_end;
-                        iov.push(IoSlice::new(&body[offset..]));
-                    }
-
-                    current = body_end;
-                }
-
-                let written = writer
-                    .write_vectored(&iov)
-                    .await
-                    .map_err(RpcError::IoError)?;
-
-                if written == 0 {
-                    return Err(RpcError::IoError(io::Error::new(
-                        io::ErrorKind::WriteZero,
-                        "failed to write whole buffer",
-                    )));
-                }
-
-                total_written += written;
-            }
-
-            counter!("rpc_request_sent", "type" => rpc_type, "name" => "all")
-                .increment(encoded_frames.len() as u64);
-        }
-
-        warn!(%rpc_type, %socket_fd, "sender closed, send message task quit");
-        Ok(())
-    }
-
-    #[cfg(feature = "io_uring")]
-    async fn send_task_io_uring(
-        mut receiver: Receiver<MessageFrame<Header>>,
-        socket_fd: RawFd,
-        rpc_type: &'static str,
-    ) -> Result<(), RpcError> {
-        const MAX_BATCH_SIZE: usize = 32;
-        let mut batch = Vec::with_capacity(MAX_BATCH_SIZE);
-
-        loop {
-            batch.clear();
-            let count = receiver.recv_many(&mut batch, MAX_BATCH_SIZE).await;
-            if count == 0 {
-                break;
-            }
-
-            gauge!("rpc_request_pending_in_send_queue", "type" => rpc_type).decrement(count as f64);
-            counter!("rpc_send_batch_size", "type" => rpc_type).increment(count as u64);
-
-            for frame in batch.drain(..) {
-                let request_id = frame.header.get_id();
-                debug!(%rpc_type, %socket_fd, %request_id, "sending request via io_uring");
-
-                let mut header_buf = BytesMut::with_capacity(Header::SIZE);
-                frame.header.encode(&mut header_buf);
-                let header = header_buf.freeze();
-
-                let iov = if frame.body.is_empty() {
-                    vec![IoSlice::new(&header)]
-                } else {
-                    vec![IoSlice::new(&header), IoSlice::new(&frame.body)]
-                };
-
-                let transport = io_uring::get_current_reactor().expect("io_uring reactor missing");
-                transport
-                    .send_vectored(socket_fd, &iov, false)
-                    .await
-                    .map_err(RpcError::IoError)?;
-
-                counter!("rpc_request_sent", "type" => rpc_type, "name" => "all").increment(1);
-            }
-        }
-
-        warn!(%rpc_type, %socket_fd, "sender closed, send message task quit");
-        Ok(())
     }
 
     #[cfg(feature = "io_uring")]
@@ -432,13 +288,16 @@ where
         }
     }
 
-    async fn send_request_internal(
+    #[cfg(not(feature = "io_uring"))]
+    async fn send_request_internal<B: AsRef<[u8]>>(
         &self,
         request_id: u32,
         retry_count: u32,
-        mut frame: MessageFrame<Header>,
+        mut frame: MessageFrame<Header, B>,
         timeout: Option<Duration>,
     ) -> Result<MessageFrame<Header>, RpcError> {
+        use tokio::io::AsyncWriteExt;
+
         if self.is_closed.load(Ordering::SeqCst) {
             return Err(RpcError::InternalRequestError(
                 "Connection is closed".into(),
@@ -446,6 +305,7 @@ where
         }
 
         let rpc_type = Codec::RPC_TYPE;
+        let trace_id = frame.header.get_trace_id();
         frame.header.set_id(request_id);
         frame.header.set_retry_count(retry_count);
 
@@ -453,11 +313,26 @@ where
         self.requests.lock().insert(request_id, tx);
         gauge!("rpc_request_pending_in_resp_map", "type" => rpc_type).increment(1.0);
 
-        self.sender
-            .send(frame)
+        debug!(%rpc_type, socket_fd=%self.socket_fd, %request_id, %trace_id, "sending request");
+
+        let mut header_bytes = BytesMut::with_capacity(Header::SIZE);
+        frame.header.encode(&mut header_bytes);
+        let body_buf = frame.body.as_ref();
+        let iov = if body_buf.is_empty() {
+            vec![IoSlice::new(&header_bytes[..])]
+        } else {
+            vec![IoSlice::new(&header_bytes[..]), IoSlice::new(body_buf)]
+        };
+
+        let mut writer = self.writer.lock().await;
+        writer
+            .write_vectored(&iov)
             .await
-            .map_err(|e| RpcError::InternalRequestError(e.to_string()))?;
-        gauge!("rpc_request_pending_in_send_queue", "type" => rpc_type).increment(1.0);
+            .map_err(RpcError::IoError)?;
+
+        counter!("rpc_request_sent", "type" => rpc_type, "name" => "all").increment(1);
+
+        drop(writer);
 
         let result = match timeout {
             None => rx.await,
@@ -472,12 +347,73 @@ where
         result.map_err(|e| RpcError::InternalResponseError(e.to_string()))
     }
 
-    pub async fn send_request(
+    #[cfg(feature = "io_uring")]
+    async fn send_request_internal<B: AsRef<[u8]>>(
         &self,
         request_id: u32,
-        frame: MessageFrame<Header>,
-        timeout: Option<std::time::Duration>,
+        retry_count: u32,
+        mut frame: MessageFrame<Header, B>,
+        timeout: Option<Duration>,
     ) -> Result<MessageFrame<Header>, RpcError> {
+        if self.is_closed.load(Ordering::SeqCst) {
+            return Err(RpcError::InternalRequestError(
+                "Connection is closed".into(),
+            ));
+        }
+
+        let rpc_type = Codec::RPC_TYPE;
+        let trace_id = frame.header.get_trace_id();
+        frame.header.set_id(request_id);
+        frame.header.set_retry_count(retry_count);
+
+        let (tx, rx) = oneshot::channel();
+        self.requests.lock().insert(request_id, tx);
+        gauge!("rpc_request_pending_in_resp_map", "type" => rpc_type).increment(1.0);
+
+        debug!(%rpc_type, socket_fd=%self.socket_fd, %request_id, %trace_id, "sending request via io_uring");
+
+        let mut header_bytes = BytesMut::with_capacity(Header::SIZE);
+        frame.header.encode(&mut header_bytes);
+        let header = header_bytes.freeze();
+
+        let body_buf = frame.body.as_ref();
+        let iov = if body_buf.is_empty() {
+            vec![IoSlice::new(&header)]
+        } else {
+            vec![IoSlice::new(&header), IoSlice::new(body_buf)]
+        };
+
+        let transport = io_uring::get_current_reactor().expect("io_uring reactor missing");
+        transport
+            .send_vectored(self.writer_fd, &iov, false)
+            .await
+            .map_err(RpcError::IoError)?;
+
+        counter!("rpc_request_sent", "type" => rpc_type, "name" => "all").increment(1);
+
+        let result = match timeout {
+            None => rx.await,
+            Some(rpc_timeout) => match tokio::time::timeout(rpc_timeout, rx).await {
+                Ok(result) => result,
+                Err(_) => {
+                    warn!(%rpc_type, socket_fd=%self.socket_fd, %request_id, "rpc request timeout via io_uring");
+                    return Err(RpcError::InternalResponseError("timeout".into()));
+                }
+            },
+        };
+        result.map_err(|e| RpcError::InternalResponseError(e.to_string()))
+    }
+
+    pub async fn send_request<B: AsRef<[u8]>>(
+        &self,
+        request_id: u32,
+        mut frame: MessageFrame<Header, B>,
+        timeout: Option<std::time::Duration>,
+        trace_id: Option<u64>,
+    ) -> Result<MessageFrame<Header>, RpcError> {
+        if let Some(trace_id) = trace_id {
+            frame.header.set_trace_id(trace_id);
+        }
         self.send_request_internal(request_id, 0, frame, timeout)
             .await
     }

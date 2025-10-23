@@ -99,7 +99,13 @@ pub async fn list_parts_handler(
         .into_inner();
 
     let max_parts = query_opts.max_parts.unwrap_or(1000);
-    let object = get_raw_object(&ctx.app, &bucket.root_blob_name, &ctx.key).await?;
+    let object = get_raw_object(
+        &ctx.app,
+        &bucket.root_blob_name,
+        &ctx.key,
+        Some(ctx.trace_id),
+    )
+    .await?;
     if object.version_id.simple().to_string() != query_opts.upload_id {
         return Err(S3Error::NoSuchUpload);
     }
@@ -145,6 +151,7 @@ async fn fetch_mpu_parts(
         "",
         "",
         false,
+        None,
     )
     .await?;
     let mut parts = Vec::with_capacity(mpus.len());

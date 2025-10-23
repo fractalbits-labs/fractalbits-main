@@ -93,7 +93,13 @@ pub async fn get_object_handler(ctx: ObjectRequestContext) -> Result<HttpRespons
     let checksum_mode_enabled = header_opts.x_amz_checksum_mode_enabled;
 
     // Get the raw object
-    let object = get_raw_object(&ctx.app, &bucket.root_blob_name, &ctx.key).await?;
+    let object = get_raw_object(
+        &ctx.app,
+        &bucket.root_blob_name,
+        &ctx.key,
+        Some(ctx.trace_id),
+    )
+    .await?;
     let total_size = object.size()?;
     histogram!("object_size", "operation" => "get").record(total_size as f64);
 
@@ -233,6 +239,7 @@ pub async fn get_object_content(
                     "",
                     "",
                     false,
+                    None,
                 )
                 .await?;
                 // Do filtering if there is part_number option
@@ -318,6 +325,7 @@ async fn get_object_range_content(
                     "",
                     "",
                     false,
+                    None,
                 )
                 .await?;
 

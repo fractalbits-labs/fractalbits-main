@@ -16,7 +16,13 @@ pub async fn head_object_handler(ctx: ObjectRequestContext) -> Result<HttpRespon
     let checksum_mode_enabled = header_opts.x_amz_checksum_mode_enabled;
 
     // Get the raw object
-    let obj = get_raw_object(&ctx.app, &bucket.root_blob_name, &ctx.key).await?;
+    let obj = get_raw_object(
+        &ctx.app,
+        &bucket.root_blob_name,
+        &ctx.key,
+        Some(ctx.trace_id),
+    )
+    .await?;
 
     // Build the response with proper headers
     let mut response = HttpResponse::Ok();

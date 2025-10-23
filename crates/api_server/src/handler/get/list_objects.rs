@@ -141,8 +141,16 @@ pub async fn list_objects_handler(ctx: ObjectRequestContext) -> Result<HttpRespo
         start_after
     );
 
-    let (objs, common_prefixes, next_continuation_token) =
-        list_objects(ctx.app, &bucket, max_keys, prefix, delimiter, start_after).await?;
+    let (objs, common_prefixes, next_continuation_token) = list_objects(
+        ctx.app,
+        &bucket,
+        max_keys,
+        prefix,
+        delimiter,
+        start_after,
+        ctx.trace_id,
+    )
+    .await?;
 
     tracing::debug!(
         "list_objects returned {} objects, {} common_prefixes",

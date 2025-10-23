@@ -15,6 +15,7 @@ impl RpcClient {
         block_number: u32,
         body: Bytes,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "put_data_blob");
@@ -30,7 +31,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, body);
         self
-            .send_request(request_id, msg_frame, timeout)
+            .send_request(request_id, msg_frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -47,6 +48,7 @@ impl RpcClient {
         block_number: u32,
         body: &mut Bytes,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "get_data_blob");
@@ -62,7 +64,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
-            .send_request(header.id, msg_frame, timeout)
+            .send_request(header.id, msg_frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -79,6 +81,7 @@ impl RpcClient {
         blob_guid: DataBlobGuid,
         block_number: u32,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "delete_data_blob");
@@ -94,7 +97,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         self
-            .send_request(header.id, msg_frame, timeout)
+            .send_request(header.id, msg_frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -115,6 +118,7 @@ impl RpcClient {
         is_new: bool,
         body: Bytes,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "put_metadata_blob");
@@ -132,7 +136,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, body);
         self
-            .send_request(request_id, msg_frame, timeout)
+            .send_request(request_id, msg_frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -143,6 +147,7 @@ impl RpcClient {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn get_metadata_blob(
         &self,
         blob_guid: MetaBlobGuid,
@@ -150,6 +155,7 @@ impl RpcClient {
         version: u64,
         body: &mut Bytes,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<u64, RpcError> {
         let _guard = InflightRpcGuard::new("bss", "get_metadata_blob");
@@ -166,7 +172,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
-            .send_request(header.id, msg_frame, timeout)
+            .send_request(header.id, msg_frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -183,6 +189,7 @@ impl RpcClient {
         blob_guid: MetaBlobGuid,
         block_number: u32,
         timeout: Option<Duration>,
+        trace_id: Option<u64>,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "delete_metadata_blob");
@@ -198,7 +205,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         self
-            .send_request(header.id, msg_frame, timeout)
+            .send_request(header.id, msg_frame, timeout, trace_id)
             .await
             .map_err(|e| {
                 if !e.retryable() {

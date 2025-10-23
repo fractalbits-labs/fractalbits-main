@@ -240,6 +240,7 @@ pub async fn copy_object_handler(
         ctx.key,
         ctx.checksum_value, // Pass through the original checksum value
         actix_web::dev::Payload::from(actix_body_bytes),
+        ctx.trace_id,
     );
     let _put_response = put_object_handler(new_ctx).await?;
 
@@ -265,7 +266,7 @@ async fn get_copy_source_object(
     }
 
     let source_bucket = bucket::resolve_bucket(app.clone(), source_bucket_name.clone()).await?;
-    let source_obj = get_raw_object(&app, &source_bucket.root_blob_name, &source_key).await?;
+    let source_obj = get_raw_object(&app, &source_bucket.root_blob_name, &source_key, None).await?;
     let (source_obj_content, _) =
         get_object_content_as_bytes(app, &source_bucket, &source_obj, source_key, None).await?;
     Ok((source_obj, source_obj_content))

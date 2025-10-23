@@ -61,6 +61,7 @@ pub async fn upload_part_handler(
         part_key,
         ctx.checksum_value, // Pass through the original checksum value
         ctx.payload,
+        ctx.trace_id,
     );
 
     // Call put_object_handler to store the part

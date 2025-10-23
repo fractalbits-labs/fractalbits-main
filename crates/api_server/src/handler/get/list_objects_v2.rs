@@ -248,8 +248,16 @@ pub async fn list_objects_v2_handler(
         start_after
     );
 
-    let (objs, common_prefixes, next_continuation_token) =
-        list_objects(ctx.app, &bucket, max_keys, prefix, delimiter, start_after).await?;
+    let (objs, common_prefixes, next_continuation_token) = list_objects(
+        ctx.app,
+        &bucket,
+        max_keys,
+        prefix,
+        delimiter,
+        start_after,
+        ctx.trace_id,
+    )
+    .await?;
 
     tracing::debug!(
         "list_objects returned {} objects, {} common_prefixes",
@@ -279,6 +287,7 @@ pub async fn list_objects(
     prefix: String,
     delimiter: String,
     start_after: String,
+    trace_id: u64,
 ) -> Result<(Vec<Object>, Vec<Prefix>, Option<String>), S3Error> {
     tracing::debug!(
         "NSS list_inodes call with root_blob_name='{}', max_keys={}, prefix='{}', delimiter='{}', start_after='{}'",
@@ -299,7 +308,8 @@ pub async fn list_objects(
             &delimiter,
             &start_after,
             true,
-            Some(app.config.rpc_timeout())
+            Some(app.config.rpc_timeout()),
+            Some(trace_id)
         )
     )
     .await?;

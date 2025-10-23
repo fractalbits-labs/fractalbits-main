@@ -22,7 +22,12 @@ pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<HttpResp
     let nss_client = ctx.app.get_nss_rpc_client();
     let resp = nss_rpc_retry!(
         nss_client,
-        delete_inode(&bucket.root_blob_name, &ctx.key, Some(rpc_timeout))
+        delete_inode(
+            &bucket.root_blob_name,
+            &ctx.key,
+            Some(rpc_timeout),
+            Some(ctx.trace_id)
+        )
     )
     .await?;
 
@@ -95,12 +100,18 @@ pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<HttpResp
                         "",
                         "",
                         false,
+                        None,
                     )
                     .await?;
                     for (mpu_key, mpu_obj) in mpus.iter() {
                         nss_rpc_retry!(
                             nss_client,
-                            delete_inode(&bucket.root_blob_name, &mpu_key, Some(rpc_timeout))
+                            delete_inode(
+                                &bucket.root_blob_name,
+                                &mpu_key,
+                                Some(rpc_timeout),
+                                Some(ctx.trace_id)
+                            )
                         )
                         .await?;
                         // Delete blob for each multipart upload part

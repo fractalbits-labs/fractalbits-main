@@ -13,6 +13,7 @@ use actix_web::{
     web::{self, Payload},
 };
 use bucket::BucketEndpoint;
+use bumpalo::Bump;
 use common::{
     authorization::Authorization, checksum::ChecksumValue, request::extract::*, s3_error::S3Error,
     signature::check_signature,
@@ -35,6 +36,7 @@ pub struct BucketRequestContext {
     pub api_key: Versioned<ApiKey>,
     pub bucket_name: String,
     pub payload: actix_web::dev::Payload,
+    pub trace_id: u64,
 }
 
 impl BucketRequestContext {
@@ -44,6 +46,7 @@ impl BucketRequestContext {
         api_key: Versioned<ApiKey>,
         bucket_name: String,
         payload: actix_web::dev::Payload,
+        trace_id: u64,
     ) -> Self {
         Self {
             app,
@@ -51,6 +54,7 @@ impl BucketRequestContext {
             api_key,
             bucket_name,
             payload,
+            trace_id,
         }
     }
 
@@ -68,6 +72,7 @@ pub struct ObjectRequestContext {
     pub key: String,
     pub checksum_value: Option<ChecksumValue>,
     pub payload: actix_web::dev::Payload,
+    pub trace_id: u64,
 }
 
 impl ObjectRequestContext {
@@ -81,6 +86,7 @@ impl ObjectRequestContext {
         key: String,
         checksum_value: Option<ChecksumValue>,
         payload: actix_web::dev::Payload,
+        trace_id: u64,
     ) -> Self {
         Self {
             app,
@@ -91,11 +97,29 @@ impl ObjectRequestContext {
             key,
             checksum_value,
             payload,
+            trace_id,
         }
     }
 
     pub async fn resolve_bucket(&self) -> Result<Bucket, S3Error> {
         bucket::resolve_bucket(self.app.clone(), self.bucket_name.clone()).await
+    }
+}
+
+struct RequestBumpGuard {
+    trace_id: u64,
+}
+
+impl RequestBumpGuard {
+    fn new(trace_id: u64, bump: &bumpalo::Bump) -> Self {
+        rpc_client_common::register_request_bump(trace_id, bump);
+        Self { trace_id }
+    }
+}
+
+impl Drop for RequestBumpGuard {
+    fn drop(&mut self) {
+        rpc_client_common::unregister_request_bump(self.trace_id);
     }
 }
 
@@ -211,6 +235,12 @@ async fn any_handler_inner(
     payload: actix_web::dev::Payload,
     endpoint: Endpoint,
 ) -> Result<HttpResponse, S3Error> {
+    let bump = Bump::with_capacity(64 * 1024);
+
+    // Generate trace ID and register bump for RPC calls
+    let trace_id = app.generate_trace_id();
+    let _bump_guard = RequestBumpGuard::new(trace_id, &bump);
+
     let start = Instant::now();
 
     let api_key = check_signature(app.clone(), request, auth.as_ref()).await?;
@@ -239,7 +269,7 @@ async fn any_handler_inner(
     match endpoint {
         Endpoint::Bucket(bucket_endpoint) => {
             let bucket_ctx =
-                BucketRequestContext::new(app, request.clone(), api_key, bucket, payload);
+                BucketRequestContext::new(app, request.clone(), api_key, bucket, payload, trace_id);
             bucket_handler(bucket_ctx, bucket_endpoint).await
         }
         ref _object_endpoints => {
@@ -252,6 +282,7 @@ async fn any_handler_inner(
                 key,
                 checksum_value,
                 payload,
+                trace_id,
             );
             match endpoint {
                 Endpoint::Head(head_endpoint) => head_handler(object_ctx, head_endpoint).await,

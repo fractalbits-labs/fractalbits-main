@@ -181,6 +181,7 @@ fn main() -> std::io::Result<()> {
                         config.clone(),
                         cache_coordinator,
                         az_status_coordinator,
+                        worker_idx as u16,
                     ));
 
                     #[cfg(feature = "rpc_io_uring")]

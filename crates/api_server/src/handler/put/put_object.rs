@@ -388,7 +388,8 @@ async fn put_object_streaming_internal(
             &bucket_obj.root_blob_name,
             &ctx.key,
             object_layout_bytes.clone(),
-            Some(ctx.app.config.rpc_timeout())
+            Some(ctx.app.config.rpc_timeout()),
+            Some(ctx.trace_id)
         )
     )
     .await
@@ -605,7 +606,8 @@ async fn put_object_with_no_trailer(
             &bucket.root_blob_name,
             &ctx.key,
             object_layout_bytes.clone(),
-            Some(ctx.app.config.rpc_timeout())
+            Some(ctx.app.config.rpc_timeout()),
+            Some(ctx.trace_id)
         )
     )
     .await

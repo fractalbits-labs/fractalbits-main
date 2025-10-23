@@ -36,15 +36,16 @@ impl RpcClient {
         self.get_connection().gen_request_id()
     }
 
-    pub async fn send_request(
+    pub async fn send_request<B: AsRef<[u8]>>(
         &self,
         request_id: u32,
-        frame: rpc_codec_common::MessageFrame<nss_codec::MessageHeader>,
+        frame: rpc_codec_common::MessageFrame<nss_codec::MessageHeader, B>,
         timeout: Option<std::time::Duration>,
+        trace_id: Option<u64>,
     ) -> Result<rpc_codec_common::MessageFrame<nss_codec::MessageHeader>, rpc_client_common::RpcError>
     {
         self.get_connection()
-            .send_request(request_id, frame, timeout)
+            .send_request(request_id, frame, timeout, trace_id)
             .await
     }
 }

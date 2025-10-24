@@ -8,6 +8,7 @@ use {yaml_get::*, yaml_mixed::*, yaml_put::*};
 
 pub fn bootstrap(api_server_endpoint: String, bench_client_num: usize) -> CmdResult {
     download_binaries(&["warp"])?;
+    setup_serial_console_password()?;
 
     let client_ips = get_service_ips("bench-client", bench_client_num);
 

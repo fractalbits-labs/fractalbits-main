@@ -78,11 +78,16 @@ pub fn create_systemd_unit_file(service_name: &str, enable_now: bool) -> CmdResu
     let mut requires = "";
     let mut env_settings = String::new();
     let mut managed_service = false;
+    let mut scheduling = "";
     let exec_start = match service_name {
         "api_server" => {
             env_settings = r##"
 Environment="RUST_LOG=info""##
                 .to_string();
+            scheduling = "CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+IOSchedulingClass=realtime
+IOSchedulingPriority=0";
             format!("{BIN_PATH}{service_name} -c {ETC_PATH}{API_SERVER_CONFIG}")
         }
         "gui_server" => {
@@ -150,10 +155,7 @@ BindsTo={requires}
 {restart_settings}
 
 [Service]
-CPUSchedulingPolicy=fifo
-CPUSchedulingPriority=50
-IOSchedulingClass=realtime
-IOSchedulingPriority=0
+{scheduling}
 {auto_restart}
 LimitNOFILE=1000000
 LimitCORE=infinity

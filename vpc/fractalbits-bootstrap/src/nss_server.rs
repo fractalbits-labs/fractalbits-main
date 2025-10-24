@@ -82,7 +82,7 @@ fn create_nss_config(volume_dev: &str) -> CmdResult {
     let art_journal_segment_size = calculate_art_journal_segment_size(volume_dev)?;
 
     let num_cores = num_cpus()?;
-    let net_worker_thread_count = num_cores;
+    let net_worker_thread_count = num_cores / 2;
     let art_thread_dataop_count = num_cores / 2;
     let art_thread_count = art_thread_dataop_count + 4;
 

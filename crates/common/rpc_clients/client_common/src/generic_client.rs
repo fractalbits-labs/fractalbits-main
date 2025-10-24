@@ -1,7 +1,8 @@
 use crate::RpcError;
 use bytes::{Bytes, BytesMut};
 use metrics::{counter, gauge};
-use rpc_codec_common::{BumpBuf, MessageFrame, MessageHeaderTrait};
+use parking_lot::Mutex;
+use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 use socket2::{Socket, TcpKeepalive};
 use std::collections::HashMap;
 use std::io;
@@ -14,7 +15,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use strum::AsRefStr;
-use tokio::sync::oneshot;
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender},
+    oneshot,
+};
 use tokio::task::AbortHandle;
 use tokio_retry::{
     Retry,
@@ -22,32 +26,8 @@ use tokio_retry::{
 };
 use tracing::{debug, warn};
 
-use bumpalo::Bump;
-use std::cell::RefCell;
-use std::ops::Deref;
-use std::rc::Rc;
-
-thread_local! {
-    static REQUEST_BUMPS: RefCell<HashMap<u64, Rc<dyn Deref<Target = Bump>>>> =
-        RefCell::new(HashMap::with_capacity(8192));
-}
-
-pub fn register_request_bump<T: Deref<Target = Bump> + 'static>(trace_id: u64, bump: Rc<T>) {
-    REQUEST_BUMPS.with(|map| {
-        map.borrow_mut().insert(trace_id, bump);
-    });
-}
-
-pub fn unregister_request_bump(trace_id: u64) {
-    REQUEST_BUMPS.with(|map| map.borrow_mut().remove(&trace_id));
-}
-
-pub fn get_request_bump(trace_id: u64) -> Option<Rc<dyn Deref<Target = Bump>>> {
-    REQUEST_BUMPS.with(|map| map.borrow().get(&trace_id).cloned())
-}
-
-type RequestMap<Header> =
-    Arc<parking_lot::Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>>;
+type ZcMessageFrame<Header> = MessageFrame<Header, Vec<Bytes>>;
+type RequestMap<Header> = Arc<Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>>;
 
 pub trait RpcCodec<Header: MessageHeaderTrait>: Default + Clone + Send + Sync + 'static {
     const RPC_TYPE: &'static str;
@@ -55,7 +35,8 @@ pub trait RpcCodec<Header: MessageHeaderTrait>: Default + Clone + Send + Sync + 
 
 pub struct RpcClient<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> {
     requests: RequestMap<Header>,
-    writer: Arc<tokio::sync::Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+    sender: Sender<ZcMessageFrame<Header>>,
+    send_task_handle: AbortHandle,
     recv_task_handle: AbortHandle,
     socket_fd: RawFd,
     is_closed: Arc<AtomicBool>,
@@ -65,6 +46,7 @@ pub struct RpcClient<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> {
 #[derive(AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 enum DrainFrom {
+    SendTask,
     ReceiveTask,
     RpcClient,
 }
@@ -72,6 +54,7 @@ enum DrainFrom {
 impl<Codec: RpcCodec<Header>, Header: MessageHeaderTrait> Drop for RpcClient<Codec, Header> {
     fn drop(&mut self) {
         debug!(rpc_type = Codec::RPC_TYPE, socket_fd = %self.socket_fd, "RpcClient dropped, aborting tasks");
+        self.send_task_handle.abort();
         self.recv_task_handle.abort();
         Self::drain_pending_requests(self.socket_fd, &self.requests, DrainFrom::RpcClient);
     }
@@ -102,15 +85,30 @@ where
         let rpc_type = Codec::RPC_TYPE;
         let socket_fd = stream.as_raw_fd();
         let (reader, writer) = stream.into_split();
-        let requests: RequestMap<Header> = Arc::new(parking_lot::Mutex::new(HashMap::new()));
+        let requests: Arc<Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let (sender, receiver) = mpsc::channel::<ZcMessageFrame<Header>>(1024 * 32);
         let is_closed = Arc::new(AtomicBool::new(false));
-        let writer = Arc::new(tokio::sync::Mutex::new(writer));
+
+        // Send task
+        let send_handle = {
+            let sender_requests = requests.clone();
+            let is_closed = is_closed.clone();
+            tokio::spawn(async move {
+                if let Err(e) = Self::send_task_tokio(writer, receiver, socket_fd, rpc_type).await {
+                    warn!(%rpc_type, %socket_fd, %e, "send task failed");
+                }
+                is_closed.store(true, Ordering::SeqCst);
+                Self::drain_pending_requests(socket_fd, &sender_requests, DrainFrom::SendTask);
+            })
+            .abort_handle()
+        };
 
         // Receive task
         let recv_handle = {
             let receiver_requests = requests.clone();
             let is_closed = is_closed.clone();
-            tokio::task::spawn_local(async move {
+            tokio::spawn(async move {
                 if let Err(e) =
                     Self::receive_task_tokio(reader, &receiver_requests, socket_fd, rpc_type).await
                 {
@@ -126,12 +124,106 @@ where
 
         Ok(RpcClient {
             requests,
-            writer,
+            sender,
+            send_task_handle: send_handle,
             recv_task_handle: recv_handle,
             socket_fd,
             is_closed,
             _phantom: PhantomData,
         })
+    }
+
+    async fn send_task_tokio(
+        mut writer: tokio::net::tcp::OwnedWriteHalf,
+        mut receiver: Receiver<ZcMessageFrame<Header>>,
+        socket_fd: RawFd,
+        rpc_type: &'static str,
+    ) -> Result<(), RpcError> {
+        use tokio::io::AsyncWriteExt;
+
+        const MAX_BATCH_SIZE: usize = 32;
+        let mut batch = Vec::with_capacity(MAX_BATCH_SIZE);
+        let mut encoded_frames: Vec<Vec<Bytes>> = Vec::with_capacity(MAX_BATCH_SIZE);
+
+        loop {
+            batch.clear();
+            let count = receiver.recv_many(&mut batch, MAX_BATCH_SIZE).await;
+            if count == 0 {
+                break;
+            }
+
+            gauge!("rpc_request_pending_in_send_queue", "type" => rpc_type).decrement(count as f64);
+            counter!("rpc_send_batch_size", "type" => rpc_type).increment(count as u64);
+
+            encoded_frames.clear();
+            for frame in batch.drain(..) {
+                let request_id = frame.header.get_id();
+                debug!(%rpc_type, %socket_fd, %request_id, "sending request");
+
+                let mut header_buf = BytesMut::with_capacity(Header::SIZE);
+                frame.header.encode(&mut header_buf);
+
+                let mut all_chunks = vec![header_buf.freeze()];
+                all_chunks.extend(frame.body);
+                encoded_frames.push(all_chunks);
+            }
+
+            let total_len: usize = encoded_frames
+                .iter()
+                .map(|chunks| chunks.iter().map(|chunk| chunk.len()).sum::<usize>())
+                .sum();
+            let mut total_written = 0;
+
+            while total_written < total_len {
+                let mut iov = Vec::with_capacity(encoded_frames.len() * 2);
+                let mut current_offset = 0;
+
+                for chunks in &encoded_frames {
+                    let frame_len: usize = chunks.iter().map(|chunk| chunk.len()).sum();
+                    let frame_start = current_offset;
+                    let frame_end = frame_start + frame_len;
+
+                    if total_written < frame_end {
+                        let skip_in_frame = total_written.saturating_sub(frame_start);
+                        let mut accumulated = 0;
+
+                        for chunk in chunks {
+                            let chunk_start = accumulated;
+                            let chunk_end = chunk_start + chunk.len();
+
+                            if skip_in_frame < chunk_end {
+                                let skip_in_chunk = skip_in_frame.saturating_sub(chunk_start);
+                                iov.push(IoSlice::new(&chunk[skip_in_chunk..]));
+                            }
+
+                            accumulated = chunk_end;
+                        }
+                    }
+
+                    current_offset = frame_end;
+                }
+
+                let written = writer
+                    .write_vectored(&iov)
+                    .await
+                    .map_err(RpcError::IoError)?;
+
+                if written == 0 {
+                    return Err(RpcError::IoError(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "failed to write whole buffer",
+                    )));
+                }
+
+                total_written += written;
+            }
+
+            counter!("rpc_request_sent", "type" => rpc_type, "name" => "all")
+                .increment(encoded_frames.len() as u64);
+        }
+
+        warn!(%rpc_type, %socket_fd, "sender closed, send message task quit");
+        Ok(())
     }
 
     async fn receive_task_tokio(
@@ -159,33 +251,10 @@ where
             // Read body using bump allocator if available
             let body_size = header.get_body_size();
             let body = if body_size > 0 {
-                let trace_id = header.get_trace_id();
-                if trace_id != 0
-                    && let Some(bump_rc) = get_request_bump(trace_id)
-                {
-                    // Use bump allocator for body - read directly into bump buffer
-                    let bump_ref: &Bump = &bump_rc;
-                    let mut bump_buf = BumpBuf::with_capacity_in(body_size, bump_ref);
-
-                    // Read directly into BumpBuf using read_buf (zero-copy)
-                    while bump_buf.len() < body_size {
-                        let n = receiver.read_buf(&mut bump_buf).await?;
-                        if n == 0 {
-                            return Err(RpcError::IoError(std::io::Error::new(
-                                std::io::ErrorKind::UnexpectedEof,
-                                "connection closed while reading body",
-                            )));
-                        }
-                    }
-
-                    bump_buf.freeze()
-                } else {
-                    // No bump allocator, use ByteMut
-                    let mut body_buf = bytes::BytesMut::with_capacity(body_size);
-                    body_buf.resize(body_size, 0);
-                    receiver.read_exact(&mut body_buf).await?;
-                    body_buf.freeze()
-                }
+                let mut body_buf = bytes::BytesMut::with_capacity(body_size);
+                body_buf.resize(body_size, 0);
+                receiver.read_exact(&mut body_buf).await?;
+                body_buf.freeze()
             } else {
                 bytes::Bytes::new()
             };
@@ -238,133 +307,18 @@ where
         }
     }
 
-    async fn send_request_internal<B: AsRef<[u8]>>(
+    pub async fn send_request(
         &self,
         request_id: u32,
-        retry_count: u32,
-        mut frame: MessageFrame<Header, B>,
-        timeout: Option<Duration>,
-    ) -> Result<MessageFrame<Header>, RpcError> {
-        use tokio::io::AsyncWriteExt;
-
-        if self.is_closed.load(Ordering::SeqCst) {
-            return Err(RpcError::InternalRequestError(
-                "Connection is closed".into(),
-            ));
-        }
-
-        let rpc_type = Codec::RPC_TYPE;
-        let trace_id = frame.header.get_trace_id();
-        frame.header.set_id(request_id);
-        frame.header.set_retry_count(retry_count);
-
-        let (tx, rx) = oneshot::channel();
-        self.requests.lock().insert(request_id, tx);
-        gauge!("rpc_request_pending_in_resp_map", "type" => rpc_type).increment(1.0);
-
-        debug!(%rpc_type, socket_fd=%self.socket_fd, %request_id, %trace_id, "sending request");
-
-        let mut header_bytes = BytesMut::with_capacity(Header::SIZE);
-        frame.header.encode(&mut header_bytes);
-        let body_buf = frame.body.as_ref();
-        let iov = if body_buf.is_empty() {
-            vec![IoSlice::new(&header_bytes[..])]
-        } else {
-            vec![IoSlice::new(&header_bytes[..]), IoSlice::new(body_buf)]
-        };
-
-        let mut writer = self.writer.lock().await;
-        writer
-            .write_vectored(&iov)
-            .await
-            .map_err(RpcError::IoError)?;
-
-        counter!("rpc_request_sent", "type" => rpc_type, "name" => "all").increment(1);
-
-        drop(writer);
-
-        let result = match timeout {
-            None => rx.await,
-            Some(rpc_timeout) => match tokio::time::timeout(rpc_timeout, rx).await {
-                Ok(result) => result,
-                Err(_) => {
-                    warn!(%rpc_type, socket_fd=%self.socket_fd, %request_id, "rpc request timeout");
-                    return Err(RpcError::InternalResponseError("timeout".into()));
-                }
-            },
-        };
-        result.map_err(|e| RpcError::InternalResponseError(e.to_string()))
-    }
-
-    async fn send_request_vectored_internal(
-        &self,
-        request_id: u32,
-        retry_count: u32,
-        mut frame: MessageFrame<Header, Vec<Bytes>>,
-        timeout: Option<Duration>,
-    ) -> Result<MessageFrame<Header>, RpcError> {
-        use tokio::io::AsyncWriteExt;
-
-        if self.is_closed.load(Ordering::SeqCst) {
-            return Err(RpcError::InternalRequestError(
-                "Connection is closed".into(),
-            ));
-        }
-
-        let rpc_type = Codec::RPC_TYPE;
-        let trace_id = frame.header.get_trace_id();
-        frame.header.set_id(request_id);
-        frame.header.set_retry_count(retry_count);
-
-        let (tx, rx) = oneshot::channel();
-        self.requests.lock().insert(request_id, tx);
-        gauge!("rpc_request_pending_in_resp_map", "type" => rpc_type).increment(1.0);
-
-        debug!(%rpc_type, socket_fd=%self.socket_fd, %request_id, %trace_id, "sending vectored request");
-
-        let mut header_bytes = BytesMut::with_capacity(Header::SIZE);
-        frame.header.encode(&mut header_bytes);
-
-        let mut iov = Vec::with_capacity(1 + frame.body.len());
-        iov.push(IoSlice::new(&header_bytes[..]));
-        for chunk in &frame.body {
-            iov.push(IoSlice::new(chunk.as_ref()));
-        }
-
-        let mut writer = self.writer.lock().await;
-        writer
-            .write_vectored(&iov)
-            .await
-            .map_err(RpcError::IoError)?;
-
-        counter!("rpc_request_sent", "type" => rpc_type, "name" => "all").increment(1);
-
-        drop(writer);
-
-        let result = match timeout {
-            None => rx.await,
-            Some(rpc_timeout) => match tokio::time::timeout(rpc_timeout, rx).await {
-                Ok(result) => result,
-                Err(_) => {
-                    warn!(%rpc_type, socket_fd=%self.socket_fd, %request_id, "rpc request timeout");
-                    return Err(RpcError::InternalResponseError("timeout".into()));
-                }
-            },
-        };
-        result.map_err(|e| RpcError::InternalResponseError(e.to_string()))
-    }
-
-    pub async fn send_request<B: AsRef<[u8]>>(
-        &self,
-        request_id: u32,
-        mut frame: MessageFrame<Header, B>,
+        mut frame: MessageFrame<Header, Bytes>,
         timeout: Option<std::time::Duration>,
         trace_id: Option<u64>,
     ) -> Result<MessageFrame<Header>, RpcError> {
         if let Some(trace_id) = trace_id {
             frame.header.set_trace_id(trace_id);
         }
-        self.send_request_internal(request_id, 0, frame, timeout)
+        let vectored_frame = MessageFrame::new(frame.header, vec![frame.body]);
+        self.send_request_vectored_internal(request_id, vectored_frame, timeout)
             .await
     }
 
@@ -378,8 +332,47 @@ where
         if let Some(trace_id) = trace_id {
             frame.header.set_trace_id(trace_id);
         }
-        self.send_request_vectored_internal(request_id, 0, frame, timeout)
+        self.send_request_vectored_internal(request_id, frame, timeout)
             .await
+    }
+
+    async fn send_request_vectored_internal(
+        &self,
+        request_id: u32,
+        mut frame: ZcMessageFrame<Header>,
+        timeout: Option<Duration>,
+    ) -> Result<MessageFrame<Header>, RpcError> {
+        if self.is_closed.load(Ordering::SeqCst) {
+            return Err(RpcError::InternalRequestError(
+                "Connection is closed".into(),
+            ));
+        }
+
+        let rpc_type = Codec::RPC_TYPE;
+        frame.header.set_id(request_id);
+        frame.header.set_retry_count(0);
+
+        let (tx, rx) = oneshot::channel();
+        self.requests.lock().insert(request_id, tx);
+        gauge!("rpc_request_pending_in_resp_map", "type" => rpc_type).increment(1.0);
+
+        self.sender
+            .send(frame)
+            .await
+            .map_err(|e| RpcError::InternalRequestError(e.to_string()))?;
+        gauge!("rpc_request_pending_in_send_queue", "type" => rpc_type).increment(1.0);
+
+        let result = match timeout {
+            None => rx.await,
+            Some(rpc_timeout) => match tokio::time::timeout(rpc_timeout, rx).await {
+                Ok(result) => result,
+                Err(_) => {
+                    warn!(%rpc_type, socket_fd=%self.socket_fd, %request_id, "rpc request timeout");
+                    return Err(RpcError::InternalResponseError("timeout".into()));
+                }
+            },
+        };
+        result.map_err(|e| RpcError::InternalResponseError(e.to_string()))
     }
 
     pub fn is_closed(&self) -> bool {

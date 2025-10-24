@@ -8,7 +8,6 @@ tokio.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-tokio-util.workspace = true
 tokio-stream.workspace = true
 uuid.workspace = true
 fake.workspace = true

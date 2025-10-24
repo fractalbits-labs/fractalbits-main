@@ -1,8 +1,5 @@
 use bytes::{Bytes, BytesMut};
 
-mod bump_buf;
-pub use bump_buf::BumpBuf;
-
 pub trait MessageHeaderTrait: Sized + Clone + Copy + Send + Sync + 'static {
     const SIZE: usize;
 

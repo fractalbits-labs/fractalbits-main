@@ -5,5 +5,3 @@ edition = "2024"
 
 [dependencies]
 bytes.workspace = true
-bumpalo.workspace = true
-tokio-util.workspace = true

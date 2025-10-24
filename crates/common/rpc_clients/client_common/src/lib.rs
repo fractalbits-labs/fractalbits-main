@@ -1,6 +1,5 @@
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use prost::Message as PbMessage;
-use rpc_codec_common::BumpBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -9,9 +8,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error};
 
 pub mod generic_client;
-pub use generic_client::{
-    RpcCodec, get_request_bump, register_request_bump, unregister_request_bump,
-};
+pub use generic_client::RpcCodec;
 pub use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 
 use generic_client::RpcClient as GenericRpcClient;
@@ -123,10 +120,10 @@ where
         self.next_id.fetch_add(1, Ordering::SeqCst)
     }
 
-    pub async fn send_request<B: AsRef<[u8]>>(
+    pub async fn send_request(
         &self,
         request_id: u32,
-        frame: MessageFrame<Header, B>,
+        frame: MessageFrame<Header, Bytes>,
         timeout: Option<Duration>,
         trace_id: Option<u64>,
     ) -> Result<MessageFrame<Header>, RpcError> {
@@ -259,87 +256,9 @@ macro_rules! rss_rpc_retry {
     };
 }
 
-pub enum EncodeBuffer {
-    Bump {
-        buf: BumpBuf<'static>,
-        /// Holds the Rc to keep the bump allocator alive.
-        /// The BumpBuf borrows from the bump with a 'static lifetime (via unsafe transmute),
-        /// so we must store the Rc here to prevent the allocator from being freed while
-        /// the buffer still references it.
-        _bump: std::rc::Rc<dyn std::ops::Deref<Target = bumpalo::Bump>>,
-    },
-    Heap(BytesMut),
-}
-
-impl EncodeBuffer {
-    pub fn new(trace_id: Option<u64>) -> Self {
-        if let Some(tid) = trace_id
-            && let Some(bump_rc) = get_request_bump(tid)
-        {
-            // SAFETY: We transmute the bump reference to 'static lifetime to satisfy
-            // BumpBuf's lifetime requirement. This is safe because we store bump_rc
-            // in the _bump field, ensuring the allocator lives as long as the BumpBuf.
-            let buf = unsafe {
-                let bump_ref: &bumpalo::Bump = &bump_rc;
-                let bump_ref_static: &'static bumpalo::Bump = std::mem::transmute(bump_ref);
-                BumpBuf::with_capacity_in(512, bump_ref_static)
-            };
-            return Self::Bump {
-                buf,
-                _bump: bump_rc,
-            };
-        }
-        Self::Heap(BytesMut::new())
-    }
-
-    pub fn freeze(self) -> Bytes {
-        match self {
-            Self::Bump { buf, .. } => buf.freeze(),
-            Self::Heap(buf) => buf.freeze(),
-        }
-    }
-}
-
-unsafe impl BufMut for EncodeBuffer {
-    fn remaining_mut(&self) -> usize {
-        match self {
-            Self::Bump { buf, .. } => buf.remaining_mut(),
-            Self::Heap(buf) => buf.remaining_mut(),
-        }
-    }
-
-    fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
-        match self {
-            Self::Bump { buf, .. } => buf.chunk_mut(),
-            Self::Heap(buf) => buf.chunk_mut(),
-        }
-    }
-
-    unsafe fn advance_mut(&mut self, cnt: usize) {
-        match self {
-            Self::Bump { buf, .. } => unsafe { buf.advance_mut(cnt) },
-            Self::Heap(buf) => unsafe { buf.advance_mut(cnt) },
-        }
-    }
-
-    fn put_slice(&mut self, src: &[u8]) {
-        match self {
-            Self::Bump { buf, .. } => buf.put_slice(src),
-            Self::Heap(buf) => buf.put_slice(src),
-        }
-    }
-
-    fn put_u8(&mut self, n: u8) {
-        match self {
-            Self::Bump { buf, .. } => buf.put_u8(n),
-            Self::Heap(buf) => buf.put_u8(n),
-        }
-    }
-}
-
-pub fn encode_protobuf<M: PbMessage>(msg: M, trace_id: Option<u64>) -> Result<Bytes, RpcError> {
-    let mut body_bytes = EncodeBuffer::new(trace_id);
-    msg.encode(&mut body_bytes)
+pub fn encode_protobuf<M: PbMessage>(msg: M, _trace_id: Option<u64>) -> Result<Bytes, RpcError> {
+    let mut msg_bytes = BytesMut::with_capacity(1024);
+    msg.encode(&mut msg_bytes)
         .map_err(|e| RpcError::EncodeError(e.to_string()))?;
-    Ok(body_bytes.freeze())
+    Ok(msg_bytes.freeze())
 }

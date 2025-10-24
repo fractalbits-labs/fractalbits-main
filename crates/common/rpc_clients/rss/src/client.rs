@@ -14,10 +14,10 @@ impl RpcClient {
         self.inner.gen_request_id()
     }
 
-    pub async fn send_request<B: AsRef<[u8]>>(
+    pub async fn send_request(
         &self,
         request_id: u32,
-        frame: rpc_codec_common::MessageFrame<rss_codec::MessageHeader, B>,
+        frame: rpc_codec_common::MessageFrame<rss_codec::MessageHeader, bytes::Bytes>,
         timeout: Option<std::time::Duration>,
         trace_id: Option<u64>,
     ) -> Result<rpc_codec_common::MessageFrame<rss_codec::MessageHeader>, rpc_client_common::RpcError>

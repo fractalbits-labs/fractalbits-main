@@ -7,10 +7,7 @@ mod head;
 mod post;
 mod put;
 
-use crate::{
-    AppState,
-    bump_pool::{RequestBumpGuard, acquire_bump},
-};
+use crate::AppState;
 use actix_web::{
     HttpRequest, HttpResponse, ResponseError,
     web::{self, Payload},
@@ -222,14 +219,10 @@ async fn any_handler_inner(
     payload: actix_web::dev::Payload,
     endpoint: Endpoint,
 ) -> Result<HttpResponse, S3Error> {
+    let start = Instant::now();
     let endpoint_name = endpoint.as_str();
-    let bump = acquire_bump();
-
     // Generate trace ID and register bump for RPC calls
     let trace_id = app.generate_trace_id();
-    let _bump_guard = RequestBumpGuard::new(trace_id, bump.clone());
-
-    let start = Instant::now();
 
     let api_key = check_signature(app.clone(), request, auth.as_ref()).await?;
     histogram!("verify_request_duration_nanos", "endpoint" => endpoint_name)

@@ -68,7 +68,6 @@ metrics-exporter-prometheus = { workspace = true, optional = true }
 tokio-retry.workspace = true
 moka.workspace = true
 tikv-jemallocator.workspace = true
-bumpalo.workspace = true
 arrayvec.workspace = true
 governor.workspace = true
 futures-util.workspace = true

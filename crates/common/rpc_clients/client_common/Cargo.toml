@@ -8,12 +8,10 @@ metrics = []
 
 [dependencies]
 bytes.workspace = true
-bumpalo.workspace = true
 prost.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
 tokio-stream.workspace = true
 metrics.workspace = true
 tokio-retry.workspace = true

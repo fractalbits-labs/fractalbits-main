@@ -1,7 +1,6 @@
 pub mod api_key_routes;
 pub mod blob_client;
 mod blob_storage;
-mod bump_pool;
 pub mod cache_mgmt;
 mod cache_registry;
 mod config;
@@ -10,7 +9,6 @@ mod object_layout;
 
 pub use blob_client::BlobClient;
 use blob_client::BlobDeletionRequest;
-pub use bump_pool::init_bump_pool;
 pub use config::{BlobStorageBackend, BlobStorageConfig, Config, S3HybridSingleAzConfig};
 pub use data_blob_tracking::{DataBlobTracker, DataBlobTrackingError};
 use data_types::{ApiKey, Bucket, Versioned};

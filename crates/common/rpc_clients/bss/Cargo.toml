@@ -22,6 +22,9 @@ bss_codec.workspace = true
 rpc_codec_common.workspace = true
 data_types.workspace = true
 rand.workspace = true
+chrono.workspace = true
+dashmap.workspace = true
 
 [dev-dependencies]
 tracing-test.workspace = true
+tempfile.workspace = true

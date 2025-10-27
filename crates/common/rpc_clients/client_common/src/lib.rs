@@ -122,6 +122,10 @@ where
         self.next_id.fetch_add(1, Ordering::SeqCst)
     }
 
+    pub fn address(&self) -> &str {
+        &self.address
+    }
+
     pub async fn send_request(
         &self,
         request_id: u32,

@@ -31,7 +31,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, body);
         self
-            .send_request(request_id, msg_frame, timeout, trace_id)
+            .send_request(request_id, msg_frame, timeout, trace_id, Some(crate::OperationType::PutData))
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -65,7 +65,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, chunks);
         self
-            .send_request_vectored(request_id, msg_frame, timeout, trace_id)
+            .send_request_vectored(request_id, msg_frame, timeout, trace_id, Some(crate::OperationType::PutData))
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -98,7 +98,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
-            .send_request(header.id, msg_frame, timeout, trace_id)
+            .send_request(header.id, msg_frame, timeout, trace_id, Some(crate::OperationType::GetData))
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -131,7 +131,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         self
-            .send_request(header.id, msg_frame, timeout, trace_id)
+            .send_request(header.id, msg_frame, timeout, trace_id, Some(crate::OperationType::DeleteData))
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -170,7 +170,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, body);
         self
-            .send_request(request_id, msg_frame, timeout, trace_id)
+            .send_request(request_id, msg_frame, timeout, trace_id, None)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -206,7 +206,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
-            .send_request(header.id, msg_frame, timeout, trace_id)
+            .send_request(header.id, msg_frame, timeout, trace_id, None)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -239,7 +239,7 @@ impl RpcClient {
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         self
-            .send_request(header.id, msg_frame, timeout, trace_id)
+            .send_request(header.id, msg_frame, timeout, trace_id, None)
             .await
             .map_err(|e| {
                 if !e.retryable() {

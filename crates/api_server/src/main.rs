@@ -150,6 +150,32 @@ fn main() -> std::io::Result<()> {
         mgmt_port, worker_count, "Starting server with per-core threads (SO_REUSEPORT)"
     );
 
+    let stats_dir = config.stats_dir.clone();
+    let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel::<()>();
+    let stats_writer_handle = thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to build stats writer runtime");
+
+        rt.block_on(async {
+            match rpc_client_bss::init_stats_writer(stats_dir).await {
+                Ok(mut writer) => {
+                    info!("BSS client stats writer initialized");
+                    let shutdown_rx_async = tokio::task::spawn_blocking(move || {
+                        let _ = shutdown_rx.recv();
+                    });
+                    let _ = shutdown_rx_async.await;
+                    info!("BSS client stats writer shutting down");
+                    writer.stop().await;
+                }
+                Err(e) => {
+                    error!("Failed to initialize BSS stats writer: {}", e);
+                }
+            }
+        });
+    });
+
     let mut handles = Vec::with_capacity(worker_count);
 
     for (worker_idx, core_id) in core_ids.iter().enumerate() {
@@ -290,6 +316,12 @@ fn main() -> std::io::Result<()> {
         if let Err(e) = handle.join() {
             error!("Worker thread {idx} panicked: {e:?}");
         }
+    }
+
+    info!("All worker threads exited, shutting down stats writer");
+    let _ = shutdown_tx.send(());
+    if let Err(e) = stats_writer_handle.join() {
+        error!("Stats writer thread panicked: {e:?}");
     }
 
     Ok(())

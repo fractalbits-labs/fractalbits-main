@@ -177,8 +177,7 @@ impl MessageHeaderTrait for MessageHeader {
         self.trace_id = trace_id;
     }
 
-    fn set_checksum(&mut self) {
-    }
+    fn set_checksum(&mut self) {}
 
     fn verify_checksum(&self) -> bool {
         true

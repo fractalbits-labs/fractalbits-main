@@ -31,6 +31,9 @@ pub fn bootstrap(
 
     create_config(bucket, nss_endpoint, rss_endpoint, remote_az)?;
 
+    info!("Creating directories for api_server");
+    run_cmd!(mkdir -p "/data/local/stats")?;
+
     if for_bench {
         // Try to download tools for micro-benchmarking
         download_binaries(&["rewrk_rpc", "test_art"])?;
@@ -72,6 +75,7 @@ root_domain = ".localhost"
 with_metrics = true
 http_request_timeout_seconds = 5
 rpc_timeout_seconds = 4
+stats_dir = "/data/local/stats"
 allow_missing_or_bad_signature = false
 
 [https]
@@ -126,6 +130,7 @@ root_domain = ".localhost"
 with_metrics = true
 http_request_timeout_seconds = 5
 rpc_timeout_seconds = 4
+stats_dir = "/data/local/stats"
 allow_missing_or_bad_signature = false
 
 [https]

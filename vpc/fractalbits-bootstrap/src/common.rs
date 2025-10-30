@@ -112,6 +112,10 @@ Environment="GUI_WEB_ROOT={GUI_WEB_ROOT}"
             env_settings = r##"
 Environment="RUST_LOG=info""##
                 .to_string();
+            scheduling = "CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+IOSchedulingClass=realtime
+IOSchedulingPriority=0";
             format!("{BIN_PATH}root_server -c {ETC_PATH}{ROOT_SERVER_CONFIG}")
         }
         "bss" => {
@@ -327,31 +331,51 @@ pub fn format_local_nvme_disks(support_storage_twp: bool) -> CmdResult {
         assert_eq!(1, num_nvme_disks);
     }
 
+    let mut fs_type = std::env::var("NVME_FS_TYPE").unwrap_or_else(|_| "ext4".to_string());
     if num_nvme_disks == 1 {
         if support_storage_twp {
-            run_cmd! {
-                info "Creating ext4 on local nvme disks: ${nvme_disks:?} to support torn write prevention";
-                mkfs.ext4 -q $[EXT4_MKFS_OPTS] $[nvme_disks];
-            }?;
-        } else {
-            run_cmd! {
-                info "Creating XFS on local nvme disks: ${nvme_disks:?}";
-                mkfs.xfs -f -q $[nvme_disks];
-            }?;
+            fs_type = "ext4".to_string();
+        };
+
+        match fs_type.as_str() {
+            "ext4" => {
+                run_cmd! {
+                    info "Creating ext4 on local nvme disks: ${nvme_disks:?} with bigalloc and 8K clusters";
+                    mkfs.ext4 -q -I 128 -m 0 -i 16384 -J size=4096 -E lazy_itable_init=0,lazy_journal_init=0 -O dir_index,extent,flex_bg,fast_commit $[nvme_disks];
+                }?;
+            }
+            "xfs" => {
+                run_cmd! {
+                    info "Creating XFS on local nvme disks: ${nvme_disks:?} with metadata optimizations";
+                    mkfs.xfs -f -q -b size=8192 -d agcount=64 -i size=512,sparse=1 -l size=1024m,lazy-count=1 -n size=8192 $[nvme_disks];
+                }?;
+            }
+            _ => {
+                return Err(Error::other(format!(
+                    "Unsupported filesystem type: {fs_type}"
+                )));
+            }
         }
 
+        let uuid = run_fun!(blkid -s UUID -o value $[nvme_disks])?;
+        create_mount_unit(
+            &format!("/dev/disk/by-uuid/{uuid}"),
+            DATA_LOCAL_MNT,
+            &fs_type,
+        )?;
+
         run_cmd! {
-            info "Mounting to $DATA_LOCAL_MNT";
+            info "Mounting $DATA_LOCAL_MNT via systemd with optimized options";
             mkdir -p $DATA_LOCAL_MNT;
-            mount $[nvme_disks] $DATA_LOCAL_MNT;
+            systemctl daemon-reload;
+            systemctl start data-local.mount;
         }?;
 
-        let uuid = run_fun!(blkid -s UUID -o value $[nvme_disks])?;
-        create_mount_unit(&format!("/dev/disk/by-uuid/{uuid}"), DATA_LOCAL_MNT, "xfs")?;
         return Ok(());
     }
 
     const DATA_LOCAL_MNT: &str = "/data/local";
+
     run_cmd! {
         info "Zeroing superblocks";
         mdadm -q --zero-superblock $[nvme_disks];
@@ -359,29 +383,64 @@ pub fn format_local_nvme_disks(support_storage_twp: bool) -> CmdResult {
         info "Creating md0";
         mdadm -q --create /dev/md0 --level=0 --raid-devices=${num_nvme_disks} $[nvme_disks];
 
-        info "Creating XFS on /dev/md0";
-        mkfs.xfs -q /dev/md0;
-
-        info "Mounting to $DATA_LOCAL_MNT";
-        mkdir -p $DATA_LOCAL_MNT;
-        mount /dev/md0 $DATA_LOCAL_MNT;
-
         info "Updating /etc/mdadm/mdadm.conf";
         mkdir -p /etc/mdadm;
         mdadm --detail --scan > /etc/mdadm/mdadm.conf;
+    }?;
+
+    match fs_type.as_str() {
+        "ext4" => {
+            let stripe_width = num_nvme_disks * 128;
+            run_cmd! {
+                info "Creating ext4 on /dev/md0 with bigalloc and 8K clusters";
+                mkfs.ext4 -q -I 128 -m 0 -i 16384 -J size=4096 -E lazy_itable_init=0,lazy_journal_init=0,stride=128,stripe_width=${stripe_width} -O dir_index,extent,flex_bg,fast_commit /dev/md0;
+            }?;
+        }
+        "xfs" => {
+            run_cmd! {
+                info "Creating XFS on /dev/md0 with metadata optimizations";
+                mkfs.xfs -q -b size=8192 -d agcount=64,su=1m,sw=1 -i size=512,sparse=1 -l size=1024m,lazy-count=1 -n size=8192 /dev/md0;
+            }?;
+        }
+        _ => {
+            return Err(Error::other(format!(
+                "Unsupported filesystem type: {fs_type}"
+            )));
+        }
+    }
+
+    run_cmd! {
+        info "Creating mount point directory";
+        mkdir -p $DATA_LOCAL_MNT;
     }?;
 
     let md0_uuid = run_fun!(blkid -s UUID -o value /dev/md0)?;
     create_mount_unit(
         &format!("/dev/disk/by-uuid/{md0_uuid}"),
         DATA_LOCAL_MNT,
-        "xfs",
+        &fs_type,
     )?;
+
+    run_cmd! {
+        info "Mounting $DATA_LOCAL_MNT via systemd with optimized options";
+        systemctl daemon-reload;
+        systemctl start data-local.mount;
+    }?;
 
     Ok(())
 }
 
 pub fn create_mount_unit(what: &str, mount_point: &str, fs_type: &str) -> CmdResult {
+    let mount_options = match fs_type {
+        "xfs" => {
+            "defaults,nofail,noatime,nodiratime,logbufs=8,logbsize=256k,allocsize=1m,largeio,inode64"
+        }
+        "ext4" => {
+            "defaults,nofail,noatime,nodiratime,nobarrier,data=ordered,journal_checksum,delalloc,dioread_nolock"
+        }
+        _ => "defaults,nofail",
+    };
+
     let content = format!(
         r##"[Unit]
 Description=Mount {what} at {mount_point}
@@ -390,7 +449,7 @@ Description=Mount {what} at {mount_point}
 What={what}
 Where={mount_point}
 Type={fs_type}
-Options=defaults,nofail
+Options={mount_options}
 
 [Install]
 WantedBy=multi-user.target

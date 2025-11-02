@@ -5,8 +5,26 @@ use bss_codec::{Command, MessageHeader};
 use bytes::Bytes;
 use data_types::{DataBlobGuid, MetaBlobGuid};
 use rpc_client_common::{InflightRpcGuard, RpcError};
-use rpc_codec_common::MessageFrame;
+use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 use tracing::error;
+
+/// Check the errno field in the response header and return appropriate error
+fn check_response_errno(header: &MessageHeader) -> Result<(), RpcError> {
+    // errno codes from core/common/rpc/rpc_error.zig
+    match header.errno {
+        0 => Ok(()), // OK
+        1 => Err(RpcError::InternalResponseError(
+            "BSS returned InternalError".to_string(),
+        )),
+        2 => Err(RpcError::NotFound),
+        3 => Err(RpcError::ChecksumMismatch), // Corrupted
+        4 => Err(RpcError::Retry),            // SlowDown
+        code => Err(RpcError::InternalResponseError(format!(
+            "Unknown BSS error code: {}",
+            code
+        ))),
+    }
+}
 
 impl RpcClient {
     pub async fn put_data_blob(
@@ -28,9 +46,11 @@ impl RpcClient {
         header.command = Command::PutDataBlob;
         header.size = (MessageHeader::SIZE + body.len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_body_checksum(&body);
+        header.set_checksum();
 
         let msg_frame = MessageFrame::new(header, body);
-        self
+        let resp_frame = self
             .send_request(request_id, msg_frame, timeout, trace_id, Some(crate::OperationType::PutData))
             .await
             .map_err(|e| {
@@ -39,6 +59,7 @@ impl RpcClient {
                 }
                 e
             })?;
+        check_response_errno(&resp_frame.header)?;
         Ok(())
     }
 
@@ -62,9 +83,11 @@ impl RpcClient {
         let total_size: usize = chunks.iter().map(|c| c.len()).sum();
         header.size = (MessageHeader::SIZE + total_size) as u32;
         header.retry_count = retry_count as u8;
+        header.set_body_checksum_vectored(&chunks);
+        header.set_checksum();
 
         let msg_frame = MessageFrame::new(header, chunks);
-        self
+        let resp_frame = self
             .send_request_vectored(request_id, msg_frame, timeout, trace_id, Some(crate::OperationType::PutData))
             .await
             .map_err(|e| {
@@ -73,6 +96,7 @@ impl RpcClient {
                 }
                 e
             })?;
+        check_response_errno(&resp_frame.header)?;
         Ok(())
     }
 
@@ -100,6 +124,7 @@ impl RpcClient {
 
         let total_size = MessageHeader::SIZE + content_len;
         header.aligned_size = total_size.next_multiple_of(4096) as u32;
+        header.set_checksum();
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
@@ -111,6 +136,7 @@ impl RpcClient {
                 }
                 e
             })?;
+        check_response_errno(&resp_frame.header)?;
         *body = resp_frame.body;
         Ok(())
     }
@@ -133,9 +159,10 @@ impl RpcClient {
         header.command = Command::DeleteDataBlob;
         header.size = MessageHeader::SIZE as u32;
         header.retry_count = retry_count as u8;
+        header.set_checksum();
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
-        self
+        let resp_frame = self
             .send_request(header.id, msg_frame, timeout, trace_id, Some(crate::OperationType::DeleteData))
             .await
             .map_err(|e| {
@@ -144,6 +171,7 @@ impl RpcClient {
                 }
                 e
             })?;
+        check_response_errno(&resp_frame.header)?;
         Ok(())
     }
 
@@ -172,9 +200,11 @@ impl RpcClient {
         header.command = Command::PutMetadataBlob;
         header.size = (MessageHeader::SIZE + body.len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_body_checksum(&body);
+        header.set_checksum();
 
         let msg_frame = MessageFrame::new(header, body);
-        self
+        let resp_frame = self
             .send_request(request_id, msg_frame, timeout, trace_id, None)
             .await
             .map_err(|e| {
@@ -183,6 +213,7 @@ impl RpcClient {
                 }
                 e
             })?;
+        check_response_errno(&resp_frame.header)?;
         Ok(())
     }
 
@@ -208,6 +239,7 @@ impl RpcClient {
         header.command = Command::GetMetadataBlob;
         header.size = MessageHeader::SIZE as u32;
         header.retry_count = retry_count as u8;
+        header.set_checksum();
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
@@ -219,6 +251,7 @@ impl RpcClient {
                 }
                 e
             })?;
+        check_response_errno(&resp_frame.header)?;
         *body = resp_frame.body;
         Ok(resp_frame.header.version)
     }
@@ -241,9 +274,10 @@ impl RpcClient {
         header.command = Command::DeleteMetadataBlob;
         header.size = MessageHeader::SIZE as u32;
         header.retry_count = retry_count as u8;
+        header.set_checksum();
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
-        self
+        let resp_frame = self
             .send_request(header.id, msg_frame, timeout, trace_id, None)
             .await
             .map_err(|e| {
@@ -252,6 +286,7 @@ impl RpcClient {
                 }
                 e
             })?;
+        check_response_errno(&resp_frame.header)?;
         Ok(())
     }
 }

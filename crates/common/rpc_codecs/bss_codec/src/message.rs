@@ -3,9 +3,11 @@
 use bytemuck::{Pod, Zeroable};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use rpc_codec_common::MessageHeaderTrait;
+use std::mem::size_of;
+use xxhash_rust::xxh3::Xxh3;
 
 #[repr(C)]
-#[derive(Pod, Default, Debug, Clone, Copy, Zeroable)]
+#[derive(Pod, Debug, Clone, Copy, Zeroable)]
 pub struct MessageHeader {
     /// A checksum covering only the remainder of this header.
     /// This allows the header to be trusted without having to recv() or read() the associated body.
@@ -81,9 +83,34 @@ impl Default for Command {
 unsafe impl Pod for Command {}
 unsafe impl Zeroable for Command {}
 
+impl Default for MessageHeader {
+    fn default() -> Self {
+        Self {
+            proto_version: 1,
+            checksum: 0,
+            size: 0,
+            checksum_body: 0,
+            command: Command::Invalid,
+            id: 0,
+            bucket_id: [0u8; 16],
+            blob_id: [0u8; 16],
+            trace_id: 0,
+            version: 0,
+            block_number: 0,
+            errno: 0,
+            aligned_size: 0,
+            volume_id: 0,
+            retry_count: 0,
+            is_new: 0,
+            reserved1: [0u8; 32],
+        }
+    }
+}
+
 impl MessageHeader {
     const _SIZE_OK: () = assert!(size_of::<Self>() == 128);
     pub const SIZE: usize = size_of::<Self>();
+    pub const PROTO_VERSION: u32 = 1;
 
     pub fn encode(&self, dst: &mut BytesMut) {
         let bytes: &[u8] = bytemuck::bytes_of(self);
@@ -92,7 +119,6 @@ impl MessageHeader {
 
     pub fn decode_bytes(src: &Bytes) -> Self {
         let header_bytes = &src.chunk()[0..Self::SIZE];
-        // TODO: verify header checksum
         bytemuck::pod_read_unaligned::<Self>(header_bytes).to_owned()
     }
 
@@ -101,6 +127,30 @@ impl MessageHeader {
         let mut bytes = [0u8; 4];
         bytes.copy_from_slice(&src[offset..offset + 4]);
         u32::from_le_bytes(bytes) as usize
+    }
+
+    /// Calculate and set the body checksum field.
+    /// The checksum covers the message body after this header.
+    pub fn set_body_checksum(&mut self, body: &[u8]) {
+        self.checksum_body = xxhash_rust::xxh3::xxh3_64(body);
+    }
+
+    /// Calculate and set the body checksum field for vectored I/O.
+    /// The checksum covers all chunks combined.
+    /// Uses streaming API since data is not contiguous.
+    pub fn set_body_checksum_vectored(&mut self, chunks: &[bytes::Bytes]) {
+        let mut hasher = Xxh3::new();
+        for chunk in chunks {
+            hasher.update(chunk);
+        }
+        self.checksum_body = hasher.digest();
+    }
+
+    /// Verify that the body checksum field matches the calculated checksum.
+    /// Returns true if valid, false otherwise.
+    pub fn verify_body_checksum(&self, body: &[u8]) -> bool {
+        let calculated = xxhash_rust::xxh3::xxh3_64(body);
+        self.checksum_body == calculated
     }
 }
 
@@ -112,7 +162,8 @@ impl MessageHeaderTrait for MessageHeader {
     }
 
     fn decode(src: &[u8]) -> Self {
-        // TODO: verify header checksum
+        // Note: Header checksum verification should be done after decode by calling verify_checksum()
+        // This is handled in the generic RPC client (generic_client.rs)
         bytemuck::pod_read_unaligned::<Self>(&src[..Self::SIZE]).to_owned()
     }
 
@@ -154,9 +205,22 @@ impl MessageHeaderTrait for MessageHeader {
     fn set_trace_id(&mut self, trace_id: u64) {
         self.trace_id = trace_id;
     }
-    fn set_checksum(&mut self) {}
+
+    fn set_checksum(&mut self) {
+        let header_bytes: &[u8] = bytemuck::bytes_of(self);
+        let checksum_offset = std::mem::offset_of!(MessageHeader, checksum);
+        let bytes_to_hash = &header_bytes[checksum_offset + size_of::<u64>()..Self::SIZE];
+
+        self.checksum = xxhash_rust::xxh3::xxh3_64(bytes_to_hash);
+    }
 
     fn verify_checksum(&self) -> bool {
-        true
+        let header_bytes: &[u8] = bytemuck::bytes_of(self);
+        let checksum_offset = std::mem::offset_of!(MessageHeader, checksum);
+        let bytes_to_hash = &header_bytes[checksum_offset + size_of::<u64>()..Self::SIZE];
+
+        let calculated = xxhash_rust::xxh3::xxh3_64(bytes_to_hash);
+
+        self.checksum == calculated
     }
 }

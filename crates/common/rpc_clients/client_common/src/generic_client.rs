@@ -24,7 +24,7 @@ use tokio_retry::{
     Retry,
     strategy::{FixedInterval, jitter},
 };
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 type ZcMessageFrame<Header> = MessageFrame<Header, Vec<Bytes>>;
 type RequestMap<Header> = Arc<Mutex<HashMap<u32, oneshot::Sender<MessageFrame<Header>>>>>;
@@ -275,6 +275,14 @@ where
             } else {
                 bytes::Bytes::new()
             };
+
+            // Verify header checksum before processing the frame
+            if !header.verify_checksum() {
+                error!(%rpc_type, %socket_fd, request_id = %header.get_id(),
+                    "Response header checksum verification failed, dropping response");
+                counter!("rpc_response_checksum_failed", "type" => rpc_type).increment(1);
+                continue;
+            }
 
             let frame = MessageFrame::new(header, body);
             Self::handle_incoming_frame(frame, requests, socket_fd, rpc_type);

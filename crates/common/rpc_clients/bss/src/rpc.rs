@@ -47,6 +47,7 @@ impl RpcClient {
         header.block_number = block_number;
         header.command = Command::PutDataBlob;
         header.size = (MessageHeader::SIZE + body.len()) as u32;
+        header.aligned_size = header.size.next_multiple_of(4096);
         header.retry_count = retry_count as u8;
         header.checksum_body = body_checksum;
         header.set_checksum();
@@ -86,6 +87,7 @@ impl RpcClient {
         header.command = Command::PutDataBlob;
         let total_size: usize = chunks.iter().map(|c| c.len()).sum();
         header.size = (MessageHeader::SIZE + total_size) as u32;
+        header.aligned_size = header.size.next_multiple_of(4096);
         header.retry_count = retry_count as u8;
         header.checksum_body = body_checksum;
         header.set_checksum();
@@ -142,6 +144,7 @@ impl RpcClient {
             })?;
         check_response_errno(&resp_frame.header)?;
         *body = resp_frame.body;
+        assert_eq!(content_len, body.len());
         Ok(())
     }
 
@@ -203,6 +206,7 @@ impl RpcClient {
         header.is_new = if is_new { 1 } else { 0 };
         header.command = Command::PutMetadataBlob;
         header.size = (MessageHeader::SIZE + body.len()) as u32;
+        header.aligned_size = header.size.next_multiple_of(4096);
         header.retry_count = retry_count as u8;
         header.set_body_checksum(&body);
         header.set_checksum();

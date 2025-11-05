@@ -46,8 +46,8 @@ impl RpcClient {
         header.volume_id = blob_guid.volume_id;
         header.block_number = block_number;
         header.command = Command::PutDataBlob;
-        header.size = (MessageHeader::SIZE + body.len()) as u32;
-        header.aligned_size = header.size.next_multiple_of(4096);
+        header.content_len = body.len() as u32;
+        header.size = (MessageHeader::SIZE as u32) + header.content_len;
         header.retry_count = retry_count as u8;
         header.checksum_body = body_checksum;
 
@@ -85,8 +85,8 @@ impl RpcClient {
         header.block_number = block_number;
         header.command = Command::PutDataBlob;
         let total_size: usize = chunks.iter().map(|c| c.len()).sum();
-        header.size = (MessageHeader::SIZE + total_size) as u32;
-        header.aligned_size = header.size.next_multiple_of(4096);
+        header.content_len = total_size as u32;
+        header.size = (MessageHeader::SIZE as u32) + header.content_len;
         header.retry_count = retry_count as u8;
         header.checksum_body = body_checksum;
 
@@ -123,11 +123,9 @@ impl RpcClient {
         header.volume_id = blob_guid.volume_id;
         header.block_number = block_number;
         header.command = Command::GetDataBlob;
-        header.size = MessageHeader::SIZE as u32;
         header.retry_count = retry_count as u8;
-
-        let total_size = MessageHeader::SIZE + content_len;
-        header.aligned_size = total_size.next_multiple_of(4096) as u32;
+        header.content_len = content_len as u32;
+        header.size = MessageHeader::SIZE as u32;
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
@@ -201,8 +199,8 @@ impl RpcClient {
         header.version = version;
         header.is_new = if is_new { 1 } else { 0 };
         header.command = Command::PutMetadataBlob;
-        header.size = (MessageHeader::SIZE + body.len()) as u32;
-        header.aligned_size = header.size.next_multiple_of(4096);
+        header.content_len = body.len() as u32;
+        header.size = (MessageHeader::SIZE as u32) + header.content_len;
         header.retry_count = retry_count as u8;
         header.set_body_checksum(&body);
 

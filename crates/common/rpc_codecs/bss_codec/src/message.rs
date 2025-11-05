@@ -44,8 +44,8 @@ pub struct MessageHeader {
     pub block_number: u32,
     /// Errno which can be converted into `std::io::Error`(`from_raw_os_error()`)
     pub errno: i32,
-    /// 4k aligned size (header included), to use for direct-io
-    pub aligned_size: u32,
+    /// Content length (body)
+    pub content_len: u32,
     /// Volume ID for multi-BSS support
     pub volume_id: u16,
     /// Number of retry attempts for this request (0 = first attempt)
@@ -57,7 +57,7 @@ pub struct MessageHeader {
     // Note rust arrays of sizes from 0 to 32 (inclusive) implement the Default trait if the element
     // type allows it. As a stopgap, trait implementations are statically generated up to size 32.
     // See [doc](https://doc.rust-lang.org/std/primitive.array.html) for more details.
-    reserved1: [u8; 32],
+    reserved: [u8; 32],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -102,11 +102,11 @@ impl Default for MessageHeader {
             version: 0,
             block_number: 0,
             errno: 0,
-            aligned_size: 0,
+            content_len: 0,
             volume_id: 0,
             retry_count: 0,
             is_new: 0,
-            reserved1: [0u8; 32],
+            reserved: [0u8; 32],
         }
     }
 }

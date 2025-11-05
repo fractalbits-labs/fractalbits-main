@@ -246,7 +246,7 @@ impl Default for InitConfig {
             for_gui: false,
             data_blob_storage: Default::default(),
             with_https: false,
-            bss_count: 6,
+            bss_count: 1,
             nss_disable_restart_limit: false,
         }
     }
@@ -274,7 +274,7 @@ pub enum ServiceCommand {
         #[clap(
             long,
             long_help = "number of BSS services to create (must be 1 or 6)",
-            default_value = "6"
+            default_value = "1"
         )]
         bss_count: u32,
 

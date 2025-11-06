@@ -391,7 +391,7 @@ fn wait_for_port_ready(port: u16, timeout_secs: u32) -> CmdResult {
 
 pub fn stop_service(service: ServiceName) -> CmdResult {
     let services: Vec<ServiceName> = match service {
-        ServiceName::All => all_services(get_data_blob_storage_setting(), false),
+        ServiceName::All => all_services(get_data_blob_storage_setting(), false, false),
         single_service => vec![single_service],
     };
 
@@ -405,6 +405,7 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
         service.as_ref()
     );
     for service in services {
+        info!("Stopping service: {}", service.as_ref());
         if service == ServiceName::Nss || service == ServiceName::Mirrord {
             // skip stopping managed services directly
             warn!(
@@ -454,6 +455,7 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
 fn all_services(
     data_blob_storage: DataBlobStorage,
     with_managed_service: bool,
+    sort: bool,
 ) -> Vec<ServiceName> {
     let mut services = match data_blob_storage {
         DataBlobStorage::S3HybridSingleAz => {
@@ -488,7 +490,9 @@ fn all_services(
             services
         }
     };
-    services.sort_by_key(|s| s.as_ref().to_string());
+    if sort {
+        services.sort_by_key(|s| s.as_ref().to_string());
+    }
     services
 }
 
@@ -506,7 +510,7 @@ pub fn show_service_status(service: ServiceName) -> CmdResult {
             println!("Service Status:");
             println!("─────────────────────────────────────");
 
-            for svc in all_services(get_data_blob_storage_setting(), true) {
+            for svc in all_services(get_data_blob_storage_setting(), true, true) {
                 if svc == ServiceName::Bss {
                     // Handle BSS template instances using helper functions
                     for bss_service_name in get_bss_service_names() {
@@ -695,7 +699,7 @@ fn create_systemd_unit_files_for_init(
             create_systemd_unit_file(service, build_mode, init_config)?;
         }
         ServiceName::All => {
-            for service in all_services(init_config.data_blob_storage, true) {
+            for service in all_services(init_config.data_blob_storage, true, false) {
                 create_systemd_unit_file(service, build_mode, init_config)?;
             }
         }

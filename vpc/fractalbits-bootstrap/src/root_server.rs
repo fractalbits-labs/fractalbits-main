@@ -3,8 +3,8 @@ use cmd_lib::*;
 use std::io::Error;
 
 const COMMAND_TIMEOUT_SECONDS: u64 = 300;
-const POLL_INTERVAL_SECONDS: u64 = 5;
-const MAX_POLL_ATTEMPTS: u64 = 60;
+const POLL_INTERVAL_SECONDS: u64 = 1;
+const MAX_POLL_ATTEMPTS: u64 = 300;
 
 // Volume group quorum vpc configuration constants
 const TOTAL_BSS_NODES: usize = 6;
@@ -72,6 +72,7 @@ pub fn bootstrap(
             &format!(
                 r##"sudo bash -c "{bootstrap_bin} format_nss --ebs_dev {ebs_dev} &>>{CLOUD_INIT_LOG}""##
             ),
+            false,
         )?;
         info!("Successfully formatted {nss_b_id} (standby)");
     }
@@ -88,6 +89,7 @@ pub fn bootstrap(
         &format!(
             r##"sudo bash -c "{bootstrap_bin} format_nss --ebs_dev {ebs_dev} &>>{CLOUD_INIT_LOG}""##
         ),
+        false,
     )?;
     info!("Successfully formatted {nss_a_id} ({role})");
 
@@ -401,7 +403,7 @@ fn start_follower_root_server(follower_id: &str) -> CmdResult {
     // The follower instance should have already run its own bootstrap process
     // (with no follower_id parameter) to set up configs and systemd unit file
     // We just need to start the service
-    run_cmd_with_ssm(follower_id, "sudo systemctl start rss.service")?;
+    run_cmd_with_ssm(follower_id, "sudo systemctl start rss.service", false)?;
 
     info!("Successfully started rss service on follower {follower_id}");
     Ok(())
@@ -428,14 +430,14 @@ fn wait_for_ssm_ready(instance_id: &str) {
         }
     }
 
+    info!("Waiting for {instance_id} cloud init to be done");
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let result = run_cmd_with_ssm(instance_id, &format!("test -f {BOOTSTRAP_DONE_FILE}"));
+        let result = run_cmd_with_ssm(instance_id, &format!("test -f {BOOTSTRAP_DONE_FILE}"), true);
         match result {
             Ok(()) => break,
             _ => {
-                info!("Waiting for {instance_id} cloud init to be done");
                 std::thread::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECONDS));
             }
         }
@@ -446,9 +448,11 @@ fn wait_for_ssm_ready(instance_id: &str) {
     }
 }
 
-fn run_cmd_with_ssm(instance_id: &str, cmd: &str) -> CmdResult {
+fn run_cmd_with_ssm(instance_id: &str, cmd: &str, quiet: bool) -> CmdResult {
+    if !quiet {
+        info!("Running {cmd} on {instance_id} with SSM");
+    };
     let command_id = run_fun! {
-        info "Running ${cmd} on ${instance_id} with SSM";
         aws ssm send-command
             --instance-ids "$instance_id"
             --document-name "AWS-RunShellScript"
@@ -457,9 +461,11 @@ fn run_cmd_with_ssm(instance_id: &str, cmd: &str) -> CmdResult {
             --query "Command.CommandId"
             --output text
     }?;
-    info!(
-        "Command sent to {instance_id} successfully. Command ID: {command_id}. Polling for results..."
-    );
+    if !quiet {
+        info!(
+            "Command sent to {instance_id} successfully. Command ID: {command_id}. Polling for results..."
+        );
+    }
     let mut attempt = 0;
     loop {
         attempt += 1;
@@ -470,11 +476,15 @@ fn run_cmd_with_ssm(instance_id: &str, cmd: &str) -> CmdResult {
         }?;
         let status = run_fun!(echo $invocation_json | jq -r .Status)?;
 
-        info!("Command status from {instance_id} is: {status}");
+        if !quiet {
+            info!("Command status from {instance_id} is: {status}");
+        }
         match status.as_ref() {
             "Success" => break,
             "Failed" => {
-                error!("Command execution failed on the remote instance.");
+                if !quiet {
+                    warn!("Command execution failed on the remote instance.");
+                }
                 let error_output = run_fun!(echo $invocation_json | jq -r .StandardErrorContent)?;
                 return Err(Error::other(format!(
                     "Remote Error Output:\n---\n{error_output}---"

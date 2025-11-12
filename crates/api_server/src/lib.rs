@@ -239,7 +239,7 @@ impl AppState {
             delete(&full_key, Some(self.config.rpc_timeout()), None)
         )
         .await?;
-        self.cache.invalidate(&full_key).await;
+        self.cache_coordinator.invalidate_entry(&full_key).await;
         Ok(())
     }
 
@@ -308,9 +308,9 @@ impl AppState {
         )
         .await?;
 
-        // Invalidate API key cache since it now has new bucket permissions
-        self.cache
-            .invalidate(&format!("api_key:{api_key_id}"))
+        // Invalidate API key cache across all workers since it now has new bucket permissions
+        self.cache_coordinator
+            .invalidate_entry(&format!("api_key:{api_key_id}"))
             .await;
         Ok(())
     }
@@ -328,12 +328,12 @@ impl AppState {
         )
         .await?;
 
-        // Invalidate both bucket and API key cache
-        self.cache
-            .invalidate(&format!("bucket:{bucket_name}"))
+        // Invalidate both bucket and API key cache across all workers
+        self.cache_coordinator
+            .invalidate_entry(&format!("bucket:{bucket_name}"))
             .await;
-        self.cache
-            .invalidate(&format!("api_key:{api_key_id}"))
+        self.cache_coordinator
+            .invalidate_entry(&format!("api_key:{api_key_id}"))
             .await;
         Ok(())
     }

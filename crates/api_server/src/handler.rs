@@ -147,13 +147,19 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
 
     debug!(%bucket, %key, %client_addr);
 
+    let app_data = req
+        .app_data::<web::Data<Arc<AppState>>>()
+        .ok_or(S3Error::InternalError)?;
+    let app = app_data.get_ref().clone();
+    let trace_id = app.generate_trace_id();
+
     let resource = format!("/{bucket}{key}");
     let endpoint = match Endpoint::from_extractors(&req, &bucket, &key, api_cmd, api_sig.0.clone())
     {
         Err(e) => {
             let api_cmd = api_cmd.map_or("".into(), |cmd| cmd.to_string());
             warn!(%api_cmd, %api_sig, %bucket, %key, %client_addr, error = ?e, "failed to create endpoint");
-            return Ok(e.error_response_with_resource(&resource));
+            return Ok(e.error_response_with_resource(&resource, trace_id));
         }
         Ok(endpoint) => endpoint,
     };
@@ -161,12 +167,6 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
     let endpoint_name = endpoint.as_str();
     let gauge_guard = InflightRequestGuard::new(endpoint_name);
     let http_stats_guard = HttpStatsGuard::new(endpoint_name);
-
-    // Get app state and per-core context
-    let app_data = req
-        .app_data::<web::Data<Arc<AppState>>>()
-        .ok_or(S3Error::InternalError)?;
-    let app = app_data.get_ref().clone();
 
     let result = tokio::time::timeout(
         Duration::from_secs(app.config.http_request_timeout_seconds),
@@ -179,6 +179,7 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
             &req,
             payload.into_inner(),
             endpoint,
+            trace_id,
         ),
     )
     .await;
@@ -191,7 +192,7 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
         Err(_) => {
             error!( endpoint = %endpoint_name, %bucket, %key, %client_addr, "request timed out");
             counter!("request_timeout", "endpoint" => endpoint_name).increment(1);
-            return Ok(S3Error::InternalError.error_response_with_resource(&resource));
+            return Ok(S3Error::InternalError.error_response_with_resource(&resource, trace_id));
         }
     };
 
@@ -205,7 +206,7 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
             histogram!("request_duration_nanos", "status" => format!("{endpoint_name}_Err"))
                 .record(duration.as_nanos() as f64);
             error!(endpoint = %endpoint_name, %bucket, %key, %client_addr, error = ?e, "failed to handle request");
-            Ok(e.error_response_with_resource(&resource))
+            Ok(e.error_response_with_resource(&resource, trace_id))
         }
     }
 }
@@ -220,11 +221,10 @@ async fn any_handler_inner(
     request: &HttpRequest,
     payload: actix_web::dev::Payload,
     endpoint: Endpoint,
+    trace_id: u128,
 ) -> Result<HttpResponse, S3Error> {
     let start = Instant::now();
     let endpoint_name = endpoint.as_str();
-    // Generate trace ID and register bump for RPC calls
-    let trace_id = app.generate_trace_id();
 
     let api_key = check_signature(app.clone(), request, auth.as_ref()).await?;
     histogram!("verify_request_duration_nanos", "endpoint" => endpoint_name)

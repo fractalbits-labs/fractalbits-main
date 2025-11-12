@@ -785,17 +785,23 @@ impl S3Error {
 }
 
 impl S3Error {
-    pub fn error_response_with_resource(&self, resource: &str) -> actix_web::HttpResponse {
+    pub fn error_response_with_resource(
+        &self,
+        resource: &str,
+        request_id: u128,
+    ) -> actix_web::HttpResponse {
         let body = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <Error>
     <Code>{}</Code>
     <Message>{}</Message>
     <Resource>{}</Resource>
+    <RequestId>{:032x}</RequestId>
 </Error>"#,
             self.as_ref(),
             self,
-            resource
+            resource,
+            request_id
         );
 
         actix_web::HttpResponse::build(self.http_status_code())
@@ -811,9 +817,11 @@ impl ResponseError for S3Error {
 <Error>
     <Code>{}</Code>
     <Message>{}</Message>
+    <RequestId>{:032x}</RequestId>
 </Error>"#,
             self.as_ref(),
             self,
+            0u128,
         );
 
         HttpResponse::build(self.http_status_code())

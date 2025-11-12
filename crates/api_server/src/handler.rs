@@ -60,7 +60,7 @@ impl BucketRequestContext {
     }
 
     pub async fn resolve_bucket(&self) -> Result<Bucket, S3Error> {
-        bucket::resolve_bucket(self.app.clone(), self.bucket_name.clone(), self.trace_id).await
+        bucket::resolve_bucket(self.app.clone(), self.bucket_name.clone(), &self.trace_id).await
     }
 }
 
@@ -103,7 +103,7 @@ impl ObjectRequestContext {
     }
 
     pub async fn resolve_bucket(&self) -> Result<Bucket, S3Error> {
-        bucket::resolve_bucket(self.app.clone(), self.bucket_name.clone(), self.trace_id).await
+        bucket::resolve_bucket(self.app.clone(), self.bucket_name.clone(), &self.trace_id).await
     }
 }
 
@@ -185,7 +185,7 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
             &req,
             payload.into_inner(),
             endpoint,
-            trace_id,
+            &trace_id,
         )
         .instrument(span),
     )
@@ -228,7 +228,7 @@ async fn any_handler_inner(
     request: &HttpRequest,
     payload: actix_web::dev::Payload,
     endpoint: Endpoint,
-    trace_id: TraceId,
+    trace_id: &TraceId,
 ) -> Result<HttpResponse, S3Error> {
     let start = Instant::now();
     let endpoint_name = endpoint.as_str();
@@ -256,7 +256,7 @@ async fn any_handler_inner(
     match endpoint {
         Endpoint::Bucket(bucket_endpoint) => {
             let bucket_ctx =
-                BucketRequestContext::new(app, request.clone(), api_key, bucket, payload, trace_id);
+                BucketRequestContext::new(app, request.clone(), api_key, bucket, payload, *trace_id);
             bucket_handler(bucket_ctx, bucket_endpoint).await
         }
         ref _object_endpoints => {
@@ -269,7 +269,7 @@ async fn any_handler_inner(
                 key,
                 checksum_value,
                 payload,
-                trace_id,
+                *trace_id,
             );
             match endpoint {
                 Endpoint::Head(head_endpoint) => head_handler(object_ctx, head_endpoint).await,

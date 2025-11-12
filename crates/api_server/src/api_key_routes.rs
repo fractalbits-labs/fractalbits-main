@@ -36,6 +36,7 @@ pub async fn create_api_key(
     payload: Json<CreateApiKeyRequest>,
 ) -> Result<HttpResponse> {
     info!("Creating API key with name: {}", payload.name);
+    let trace_id = TraceId::new();
     let api_key = Versioned::new(0, ApiKey::new(&payload.name));
     let _key_id = api_key.data.key_id.clone();
     let _serialized_api_key = serde_json::to_string(&api_key.data).map_err(|e| {
@@ -43,14 +44,10 @@ pub async fn create_api_key(
         actix_web::error::ErrorInternalServerError("Failed to serialize API key")
     })?;
 
-    app.put_api_key(&api_key, TraceId::new())
-        .await
-        .map_err(|e| {
-            error!("Failed to put API key to RSS: {:?}", e);
-            actix_web::error::ErrorInternalServerError(format!(
-                "Failed to put API key to RSS: {e:?}"
-            ))
-        })?;
+    app.put_api_key(&api_key, &trace_id).await.map_err(|e| {
+        error!("Failed to put API key to RSS: {:?}", e);
+        actix_web::error::ErrorInternalServerError(format!("Failed to put API key to RSS: {e:?}"))
+    })?;
 
     Ok(HttpResponse::Ok().json(api_key.data))
 }
@@ -58,11 +55,12 @@ pub async fn create_api_key(
 pub async fn delete_api_key(app: Data<Arc<AppState>>, path: Path<String>) -> Result<HttpResponse> {
     let key_id = path.into_inner().trim_start_matches("api_key:").to_string();
     info!("Deleting API key with key_id: {}", key_id);
-    let api_key = app.get_api_key(key_id, TraceId::new()).await.map_err(|e| {
+    let trace_id = TraceId::new();
+    let api_key = app.get_api_key(key_id, &trace_id).await.map_err(|e| {
         error!("Failed to get API key from RSS: {e:?}");
         actix_web::error::ErrorInternalServerError(format!("Failed to get API key from RSS: {e:?}"))
     })?;
-    app.delete_api_key(&api_key.data, TraceId::new())
+    app.delete_api_key(&api_key.data, &trace_id)
         .await
         .map_err(|e| {
             error!("Failed to delete API key from RSS: {e:?}");
@@ -76,7 +74,8 @@ pub async fn delete_api_key(app: Data<Arc<AppState>>, path: Path<String>) -> Res
 
 pub async fn list_api_keys(app: Data<Arc<AppState>>) -> Result<HttpResponse> {
     info!("Listing API keys");
-    let api_keys = app.list_api_keys(TraceId::new()).await.map_err(|e| {
+    let trace_id = TraceId::new();
+    let api_keys = app.list_api_keys(&trace_id).await.map_err(|e| {
         error!("Failed to list API keys from RSS: {:?}", e);
         actix_web::error::ErrorInternalServerError(format!(
             "Failed to list API keys from RSS: {e:?}"

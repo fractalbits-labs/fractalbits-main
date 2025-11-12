@@ -135,8 +135,9 @@ async fn benchmark_nss_read(
             let rpc_client = rpc_client.clone();
             let future = async move {
                 let request_start = Instant::now();
+                let trace_id = TraceId::new();
                 let result = rpc_client
-                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, None, TraceId::new(), 0)
+                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, None, &trace_id, 0)
                     .await
                     .map(|_| ())
                     .map_err(|e| anyhow::anyhow!(e));
@@ -171,8 +172,9 @@ async fn benchmark_nss_read(
             let rpc_client = rpc_client.clone();
             let future = async move {
                 let request_start = Instant::now();
+                let trace_id = TraceId::new();
                 let result = rpc_client
-                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, None, TraceId::new(), 0)
+                    .get_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, None, &trace_id, 0)
                     .await
                     .map(|_| ())
                     .map_err(|e| anyhow::anyhow!(e));
@@ -219,16 +221,9 @@ async fn benchmark_bss_write(
             };
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
+                let trace_id = TraceId::new();
                 let result = rpc_client
-                    .put_data_blob(
-                        blob_guid,
-                        0,
-                        content,
-                        body_checksum,
-                        None,
-                        TraceId::new(),
-                        0,
-                    )
+                    .put_data_blob(blob_guid, 0, content, body_checksum, None, &trace_id, 0)
                     .await
                     .map(|_| ()) // Map Ok(usize) to Ok(())
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorBss to anyhow::Error
@@ -268,16 +263,9 @@ async fn benchmark_bss_write(
             };
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
+                let trace_id = TraceId::new();
                 let result = rpc_client
-                    .put_data_blob(
-                        blob_guid,
-                        0,
-                        content,
-                        body_checksum,
-                        None,
-                        TraceId::new(),
-                        0,
-                    )
+                    .put_data_blob(blob_guid, 0, content, body_checksum, None, &trace_id, 0)
                     .await
                     .map(|_| ()) // Map Ok(usize) to Ok(())
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorBss to anyhow::Error
@@ -317,6 +305,7 @@ async fn benchmark_bss_read(
             let rpc_client = rpc_client.clone();
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
+                let trace_id = TraceId::new();
                 let blob_guid = DataBlobGuid {
                     blob_id: Uuid::parse_str(&uuid).unwrap(),
                     volume_id: 1,
@@ -329,7 +318,7 @@ async fn benchmark_bss_read(
                         &mut content,
                         BLOB_SIZE - 256,
                         None,
-                        TraceId::new(),
+                        &trace_id,
                         0,
                     )
                     .await
@@ -364,6 +353,7 @@ async fn benchmark_bss_read(
             let rpc_client = rpc_client.clone();
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
+                let trace_id = TraceId::new();
                 let blob_guid = DataBlobGuid {
                     blob_id: Uuid::parse_str(&uuid).unwrap(),
                     volume_id: 1,
@@ -376,7 +366,7 @@ async fn benchmark_bss_read(
                         &mut content,
                         BLOB_SIZE - 256,
                         None,
-                        TraceId::new(),
+                        &trace_id,
                         0,
                     )
                     .await
@@ -416,15 +406,9 @@ async fn benchmark_nss_write(
             let value = Bytes::from(vec![b'i'; INODE_SIZE]);
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
+                let trace_id = TraceId::new();
                 let result = rpc_client
-                    .put_inode(
-                        TEST_BUCKET_ROOT_BLOB_NAME,
-                        &key,
-                        value,
-                        None,
-                        TraceId::new(),
-                        0,
-                    )
+                    .put_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, value, None, &trace_id, 0)
                     .await
                     .map(|_| ()) // Map Ok(PutInodeResponse) to Ok(())
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorNss to anyhow::Error
@@ -459,15 +443,9 @@ async fn benchmark_nss_write(
             let value = Bytes::from(vec![b'i'; INODE_SIZE]);
             in_flight_requests.push(Box::pin(async move {
                 let request_start = Instant::now();
+                let trace_id = TraceId::new();
                 let result = rpc_client
-                    .put_inode(
-                        TEST_BUCKET_ROOT_BLOB_NAME,
-                        &key,
-                        value,
-                        None,
-                        TraceId::new(),
-                        0,
-                    )
+                    .put_inode(TEST_BUCKET_ROOT_BLOB_NAME, &key, value, None, &trace_id, 0)
                     .await
                     .map(|_| ()) // Map Ok(PutInodeResponse) to Ok(())
                     .map_err(|e| anyhow::anyhow!(e)); // Convert RpcErrorNss to anyhow::Error

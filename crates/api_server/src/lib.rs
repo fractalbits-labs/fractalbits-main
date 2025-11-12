@@ -118,7 +118,7 @@ impl AppState {
                 let rss_client = self.get_rss_rpc_client();
 
                 let data_vg_info = rss_client
-                    .get_data_vg_info(Some(self.config.rpc_timeout()), TraceId::new())
+                    .get_data_vg_info(Some(self.config.rpc_timeout()), &TraceId::new())
                     .await
                     .map_err(|e| format!("Failed to fetch DataVgInfo from RSS: {}", e))?;
 
@@ -158,7 +158,7 @@ impl AppState {
     pub async fn get_api_key(
         &self,
         key_id: String,
-        trace_id: TraceId,
+        trace_id: &TraceId,
     ) -> Result<Versioned<ApiKey>, RpcError> {
         let full_key = format!("api_key:{key_id}");
         if let Some(json) = self.cache.get(&full_key).await {
@@ -188,14 +188,17 @@ impl AppState {
             .into())
     }
 
-    pub async fn get_test_api_key(&self, trace_id: TraceId) -> Result<Versioned<ApiKey>, RpcError> {
+    pub async fn get_test_api_key(
+        &self,
+        trace_id: &TraceId,
+    ) -> Result<Versioned<ApiKey>, RpcError> {
         self.get_api_key("test_api_key".into(), trace_id).await
     }
 
     pub async fn put_api_key(
         &self,
         api_key: &Versioned<ApiKey>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
     ) -> Result<(), RpcError> {
         let full_key = format!("api_key:{}", api_key.data.key_id);
         let data: String = serde_json::to_string(&api_key.data).unwrap();
@@ -222,7 +225,7 @@ impl AppState {
     pub async fn delete_api_key(
         &self,
         api_key: &ApiKey,
-        trace_id: TraceId,
+        trace_id: &TraceId,
     ) -> Result<(), RpcError> {
         let full_key = format!("api_key:{}", api_key.key_id);
         let rss_client = self.get_rss_rpc_client();
@@ -235,7 +238,7 @@ impl AppState {
         Ok(())
     }
 
-    pub async fn list_api_keys(&self, trace_id: TraceId) -> Result<Vec<ApiKey>, RpcError> {
+    pub async fn list_api_keys(&self, trace_id: &TraceId) -> Result<Vec<ApiKey>, RpcError> {
         let prefix = "api_key:".to_string();
         let rss_client = self.get_rss_rpc_client();
         let kvs = rss_rpc_retry!(
@@ -255,7 +258,7 @@ impl AppState {
     pub async fn get_bucket(
         &self,
         bucket_name: String,
-        trace_id: TraceId,
+        trace_id: &TraceId,
     ) -> Result<Versioned<Bucket>, RpcError> {
         let full_key = format!("bucket:{bucket_name}");
         if let Some(json) = self.cache.get(&full_key).await {
@@ -300,7 +303,7 @@ impl AppState {
                 api_key_id,
                 is_multi_az,
                 Some(self.config.rpc_timeout()),
-                trace_id
+                &trace_id
             )
         )
         .await?;
@@ -325,7 +328,7 @@ impl AppState {
                 bucket_name,
                 api_key_id,
                 Some(self.config.rpc_timeout()),
-                trace_id
+                &trace_id
             )
         )
         .await?;
@@ -345,7 +348,7 @@ impl AppState {
         let rss_client = self.get_rss_rpc_client();
         let kvs = rss_rpc_retry!(
             rss_client,
-            list(&prefix, Some(self.config.rpc_timeout()), trace_id)
+            list(&prefix, Some(self.config.rpc_timeout()), &trace_id)
         )
         .await?;
         Ok(kvs

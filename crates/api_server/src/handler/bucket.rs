@@ -18,7 +18,7 @@ use std::{sync::Arc, time::Instant};
 pub async fn resolve_bucket(
     app: Arc<AppState>,
     bucket_name: String,
-    trace_id: TraceId,
+    trace_id: &TraceId,
 ) -> Result<Bucket, S3Error> {
     let start = Instant::now();
     match app.get_bucket(bucket_name, trace_id).await {

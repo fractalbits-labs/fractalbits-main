@@ -450,7 +450,7 @@ async fn put_object_streaming_internal(
             &ctx.key,
             object_layout_bytes.clone(),
             Some(ctx.app.config.rpc_timeout()),
-            ctx.trace_id
+            &ctx.trace_id
         )
     )
     .await
@@ -667,7 +667,7 @@ async fn put_object_with_no_trailer(
             &ctx.key,
             object_layout_bytes.clone(),
             Some(ctx.app.config.rpc_timeout()),
-            ctx.trace_id
+            &ctx.trace_id
         )
     )
     .await

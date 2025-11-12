@@ -24,7 +24,7 @@ pub async fn head_bucket_handler(ctx: BucketRequestContext) -> Result<HttpRespon
         }
     }
 
-    resolve_bucket(ctx.app, ctx.bucket_name, ctx.trace_id)
+    resolve_bucket(ctx.app, ctx.bucket_name, &ctx.trace_id)
         .await
         .map_err(|e| {
             error!("head_bucket failed due to bucket resolving: {e}");

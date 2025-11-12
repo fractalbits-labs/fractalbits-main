@@ -37,7 +37,7 @@ async fn test_basic_blob_io_with_fixed_bytes() {
                 content.clone(),
                 body_checksum,
                 None,
-                TraceId::new(),
+                &TraceId::new(),
                 0,
             )
             .await
@@ -50,7 +50,7 @@ async fn test_basic_blob_io_with_fixed_bytes() {
                 &mut readback_content,
                 content.len(),
                 None,
-                TraceId::new(),
+                &TraceId::new(),
                 0,
             )
             .await
@@ -87,7 +87,7 @@ async fn test_basic_blob_io_with_random_bytes() {
                 content.clone(),
                 body_checksum,
                 None,
-                TraceId::new(),
+                &TraceId::new(),
                 0,
             )
             .await
@@ -100,7 +100,7 @@ async fn test_basic_blob_io_with_random_bytes() {
                 &mut readback_content,
                 content.len(),
                 None,
-                TraceId::new(),
+                &TraceId::new(),
                 0,
             )
             .await

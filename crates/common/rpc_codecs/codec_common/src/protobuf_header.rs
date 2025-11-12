@@ -175,8 +175,8 @@ where
         TraceId::from(self.trace_id)
     }
 
-    fn set_trace_id(&mut self, trace_id: TraceId) {
-        self.trace_id = trace_id.into();
+    fn set_trace_id(&mut self, trace_id: &TraceId) {
+        self.trace_id = trace_id.0;
     }
 
     fn set_checksum(&mut self) {

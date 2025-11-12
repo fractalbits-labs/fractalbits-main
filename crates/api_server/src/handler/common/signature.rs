@@ -20,7 +20,7 @@ pub async fn check_signature(
     app: Arc<AppState>,
     request: &HttpRequest,
     auth: Option<&Authentication>,
-    trace_id: TraceId,
+    trace_id: &TraceId,
 ) -> Result<Versioned<ApiKey>, S3Error> {
     let allow_missing_or_bad_signature = app.config.allow_missing_or_bad_signature;
     debug!(%allow_missing_or_bad_signature, ?auth, "starting signature verification");

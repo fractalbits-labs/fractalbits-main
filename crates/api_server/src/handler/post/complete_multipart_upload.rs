@@ -288,7 +288,7 @@ pub async fn complete_multipart_upload_handler(
             &ctx.key,
             new_object_bytes.clone(),
             Some(ctx.app.config.rpc_timeout()),
-            ctx.trace_id
+            &ctx.trace_id
         )
     )
     .await?;

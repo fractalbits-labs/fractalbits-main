@@ -6,7 +6,7 @@ use data_types::TraceId;
 use nss_codec::*;
 use prost::Message as PbMessage;
 use rpc_client_common::{InflightRpcGuard, RpcError, encode_protobuf};
-use rpc_codec_common::MessageFrame;
+use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 use tracing::error;
 
 impl RpcClient {
@@ -16,7 +16,7 @@ impl RpcClient {
         key: &str,
         value: Bytes,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<PutInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "put_inode");
@@ -34,12 +34,13 @@ impl RpcClient {
         header.command = Command::PutInode;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id, crate::NssOperation::PutInode)
+            .send_request(request_id, frame, timeout, crate::NssOperation::PutInode)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -57,7 +58,7 @@ impl RpcClient {
         root_blob_name: &str,
         key: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<GetInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "get_inode");
@@ -74,12 +75,13 @@ impl RpcClient {
         header.command = Command::GetInode;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id, crate::NssOperation::GetInode)
+            .send_request(request_id, frame, timeout, crate::NssOperation::GetInode)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -102,7 +104,7 @@ impl RpcClient {
         start_after: &str,
         skip_mpu_parts: bool,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<ListInodesResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "list_inodes");
@@ -125,12 +127,13 @@ impl RpcClient {
         header.command = Command::ListInodes;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id, crate::NssOperation::ListInodes)
+            .send_request(request_id, frame, timeout, crate::NssOperation::ListInodes)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -148,7 +151,7 @@ impl RpcClient {
         root_blob_name: &str,
         key: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<DeleteInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "delete_inode");
@@ -165,12 +168,13 @@ impl RpcClient {
         header.command = Command::DeleteInode;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id, crate::NssOperation::DeleteInode)
+            .send_request(request_id, frame, timeout, crate::NssOperation::DeleteInode)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -188,7 +192,7 @@ impl RpcClient {
         bucket: &str,
         az_mirroring: bool,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<CreateRootInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "create_root_inode");
@@ -203,12 +207,13 @@ impl RpcClient {
         header.command = Command::CreateRootInode;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id, crate::NssOperation::CreateRootInode)
+            .send_request(request_id, frame, timeout, crate::NssOperation::CreateRootInode)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -225,7 +230,7 @@ impl RpcClient {
         &self,
         root_blob_name: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<DeleteRootInodeResponse, RpcError> {
         let _guard = InflightRpcGuard::new("nss", "delete_root_inode");
@@ -239,12 +244,13 @@ impl RpcClient {
         header.command = Command::DeleteRootInode;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id, crate::NssOperation::DeleteRootInode)
+            .send_request(request_id, frame, timeout, crate::NssOperation::DeleteRootInode)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -263,7 +269,7 @@ impl RpcClient {
         src_path: &str,
         dst_path: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("nss", "rename_folder");
@@ -279,12 +285,13 @@ impl RpcClient {
         header.command = Command::Rename;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id, crate::NssOperation::RenameFolder)
+            .send_request(request_id, frame, timeout, crate::NssOperation::RenameFolder)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -310,7 +317,7 @@ impl RpcClient {
         src_path: &str,
         dst_path: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let mut nss_src_path = src_path.to_string();
@@ -331,12 +338,13 @@ impl RpcClient {
         header.command = Command::Rename;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id, crate::NssOperation::RenameObject)
+            .send_request(request_id, frame, timeout, crate::NssOperation::RenameObject)
             .await
             .map_err(|e| {
                 if !e.retryable() {

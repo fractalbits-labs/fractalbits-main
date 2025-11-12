@@ -30,7 +30,7 @@ pub async fn abort_multipart_upload_handler(
             &bucket.root_blob_name,
             &ctx.key,
             Some(rpc_timeout),
-            ctx.trace_id
+            &ctx.trace_id
         )
     )
     .await?;
@@ -62,7 +62,7 @@ pub async fn abort_multipart_upload_handler(
             &ctx.key,
             new_object_bytes.clone(),
             Some(ctx.app.config.rpc_timeout()),
-            ctx.trace_id
+            &ctx.trace_id
         )
     )
     .await?;

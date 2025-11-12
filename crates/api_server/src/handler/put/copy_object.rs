@@ -268,7 +268,7 @@ async fn get_copy_source_object(
     }
 
     let source_bucket =
-        bucket::resolve_bucket(app.clone(), source_bucket_name.clone(), trace_id).await?;
+        bucket::resolve_bucket(app.clone(), source_bucket_name.clone(), &trace_id).await?;
     let source_obj =
         get_raw_object(&app, &source_bucket.root_blob_name, &source_key, trace_id).await?;
     let (source_obj_content, _) =

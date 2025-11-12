@@ -1,4 +1,3 @@
-use data_types::TraceId;
 use rpc_client_common::AutoReconnectRpcClient;
 
 pub struct RpcClient {
@@ -20,11 +19,8 @@ impl RpcClient {
         request_id: u32,
         frame: rpc_codec_common::MessageFrame<rss_codec::MessageHeader, bytes::Bytes>,
         timeout: Option<std::time::Duration>,
-        trace_id: TraceId,
     ) -> Result<rpc_codec_common::MessageFrame<rss_codec::MessageHeader>, rpc_client_common::RpcError>
     {
-        self.inner
-            .send_request(request_id, frame, timeout, trace_id)
-            .await
+        self.inner.send_request(request_id, frame, timeout).await
     }
 }

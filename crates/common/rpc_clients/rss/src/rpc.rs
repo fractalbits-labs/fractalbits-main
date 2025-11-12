@@ -6,7 +6,7 @@ use data_types::{DataVgInfo, TraceId};
 use metrics::histogram;
 use prost::Message as PbMessage;
 use rpc_client_common::{InflightRpcGuard, RpcError, encode_protobuf};
-use rpc_codec_common::MessageFrame;
+use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 use rss_codec::*;
 use tracing::{error, warn};
 
@@ -17,7 +17,7 @@ impl RpcClient {
         key: &str,
         value: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "put");
@@ -34,12 +34,13 @@ impl RpcClient {
         header.command = Command::Put;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -75,7 +76,7 @@ impl RpcClient {
         &self,
         key: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(i64, String), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get");
@@ -90,12 +91,13 @@ impl RpcClient {
         header.command = Command::Get;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -131,7 +133,7 @@ impl RpcClient {
         &self,
         key: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "delete");
@@ -146,12 +148,13 @@ impl RpcClient {
         header.command = Command::Delete;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await
             .map_err(|e| {
                 error!(rpc=%"delete", %request_id, %key, error=?e, "rss rpc failed");
@@ -179,7 +182,7 @@ impl RpcClient {
         &self,
         instance_id: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<String, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get_nss_role");
@@ -194,12 +197,13 @@ impl RpcClient {
         header.command = Command::GetNssRole;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -229,7 +233,7 @@ impl RpcClient {
         &self,
         prefix: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<Vec<String>, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "list");
@@ -244,12 +248,13 @@ impl RpcClient {
         header.command = Command::List;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -281,7 +286,7 @@ impl RpcClient {
         &self,
         instance_id: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "send_heartbeat");
@@ -296,12 +301,13 @@ impl RpcClient {
         header.command = Command::Heartbeat;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -330,7 +336,7 @@ impl RpcClient {
     pub async fn get_az_status(
         &self,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<AzStatusMap, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get_az_status");
@@ -343,10 +349,11 @@ impl RpcClient {
         header.size = MessageHeader::SIZE as u32;
         header.retry_count = retry_count as u8;
         header.set_body_checksum(&[]);
+        header.set_trace_id(trace_id);
 
         let frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
-            .send_request(header.id, frame, timeout, trace_id)
+            .send_request(header.id, frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -377,7 +384,7 @@ impl RpcClient {
         az_id: &str,
         status: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "set_az_status");
@@ -393,12 +400,13 @@ impl RpcClient {
         header.command = Command::SetAzStatus;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -430,7 +438,7 @@ impl RpcClient {
         api_key_id: &str,
         is_multi_az: bool,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "create_bucket");
@@ -448,12 +456,13 @@ impl RpcClient {
         header.command = Command::CreateBucket;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -484,7 +493,7 @@ impl RpcClient {
         bucket_name: &str,
         api_key_id: &str,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("rss", "delete_bucket");
@@ -500,12 +509,13 @@ impl RpcClient {
         header.command = Command::DeleteBucket;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -534,7 +544,7 @@ impl RpcClient {
     pub async fn get_data_vg_info(
         &self,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
     ) -> Result<DataVgInfo, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get_data_vg_info");
         let start = Instant::now();
@@ -545,12 +555,13 @@ impl RpcClient {
         header.id = request_id;
         header.command = Command::GetDataVgInfo;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
+        header.set_trace_id(trace_id);
 
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -593,7 +604,7 @@ impl RpcClient {
     pub async fn get_metadata_vg_info_json(
         &self,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<String, RpcError> {
         let _guard = InflightRpcGuard::new("rss", "get_metadata_vg_info_json");
@@ -605,12 +616,13 @@ impl RpcClient {
         header.command = Command::GetMetadataVgInfo;
         header.size = (MessageHeader::SIZE + body.encoded_len()) as u32;
         header.retry_count = retry_count as u8;
-        header.trace_id = trace_id.into();
+        header.set_trace_id(trace_id);
+
         let body_bytes = encode_protobuf(body, trace_id)?;
         header.set_body_checksum(&body_bytes);
         let frame = MessageFrame::new(header, body_bytes);
         let resp_frame = self
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await
             .map_err(|e| {
                 if !e.retryable() {

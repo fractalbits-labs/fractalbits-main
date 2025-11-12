@@ -26,7 +26,7 @@ pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<HttpResp
             &bucket.root_blob_name,
             &ctx.key,
             Some(rpc_timeout),
-            ctx.trace_id
+            &ctx.trace_id
         )
     )
     .await?;
@@ -110,7 +110,7 @@ pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<HttpResp
                                 &bucket.root_blob_name,
                                 &mpu_key,
                                 Some(rpc_timeout),
-                                ctx.trace_id
+                                &ctx.trace_id
                             )
                         )
                         .await?;

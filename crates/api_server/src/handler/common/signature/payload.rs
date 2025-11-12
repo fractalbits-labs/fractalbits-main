@@ -13,7 +13,7 @@ pub async fn check_signature_impl(
     app: Arc<AppState>,
     auth: &Authentication,
     request: &HttpRequest,
-    trace_id: TraceId,
+    trace_id: &TraceId,
 ) -> Result<Versioned<ApiKey>, SignatureError> {
     // Support HTTP Authorization header based signature only for now
     check_header_based_signature(app, auth, request, trace_id).await
@@ -23,7 +23,7 @@ async fn check_header_based_signature(
     app: Arc<AppState>,
     authentication: &Authentication,
     request: &HttpRequest,
-    trace_id: TraceId,
+    trace_id: &TraceId,
 ) -> Result<Versioned<ApiKey>, SignatureError> {
     let query_params = Query::<BTreeMap<String, String>>::from_query(request.query_string())
         .unwrap_or_else(|_| Query(Default::default()))
@@ -95,7 +95,7 @@ async fn verify_v4(
     app: Arc<AppState>,
     auth: &Authentication,
     string_to_sign: &str,
-    trace_id: TraceId,
+    trace_id: &TraceId,
 ) -> Result<Versioned<ApiKey>, SignatureError> {
     let key = app.get_api_key(auth.key_id.clone(), trace_id).await?;
 

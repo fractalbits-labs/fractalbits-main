@@ -132,16 +132,13 @@ where
         request_id: u32,
         frame: MessageFrame<Header, Bytes>,
         timeout: Option<Duration>,
-        trace_id: TraceId,
     ) -> Result<MessageFrame<Header>, RpcError> {
         self.ensure_connected().await?;
         let client = {
             let read = self.inner.read().await;
             Arc::clone(read.as_ref().unwrap())
         };
-        client
-            .send_request(request_id, frame, timeout, trace_id)
-            .await
+        client.send_request(request_id, frame, timeout).await
     }
 
     pub async fn send_request_vectored(
@@ -149,7 +146,6 @@ where
         request_id: u32,
         frame: MessageFrame<Header, Vec<bytes::Bytes>>,
         timeout: Option<Duration>,
-        trace_id: TraceId,
     ) -> Result<MessageFrame<Header>, RpcError> {
         self.ensure_connected().await?;
         let client = {
@@ -157,7 +153,7 @@ where
             Arc::clone(read.as_ref().unwrap())
         };
         client
-            .send_request_vectored(request_id, frame, timeout, trace_id)
+            .send_request_vectored(request_id, frame, timeout)
             .await
     }
 }
@@ -263,7 +259,7 @@ macro_rules! rss_rpc_retry {
     };
 }
 
-pub fn encode_protobuf<M: PbMessage>(msg: M, _trace_id: TraceId) -> Result<Bytes, RpcError> {
+pub fn encode_protobuf<M: PbMessage>(msg: M, _trace_id: &TraceId) -> Result<Bytes, RpcError> {
     let mut msg_bytes = BytesMut::with_capacity(1024);
     msg.encode(&mut msg_bytes)
         .map_err(|e| RpcError::EncodeError(e.to_string()))?;

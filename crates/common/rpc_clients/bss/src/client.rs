@@ -1,4 +1,3 @@
-use data_types::TraceId;
 use rpc_client_common::AutoReconnectRpcClient;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -42,7 +41,6 @@ impl RpcClient {
         request_id: u32,
         frame: rpc_codec_common::MessageFrame<bss_codec::MessageHeader, bytes::Bytes>,
         timeout: Option<std::time::Duration>,
-        trace_id: TraceId,
         operation: Option<crate::stats::OperationType>,
     ) -> Result<rpc_codec_common::MessageFrame<bss_codec::MessageHeader>, rpc_client_common::RpcError>
     {
@@ -53,7 +51,7 @@ impl RpcClient {
 
         let result = self
             .get_connection()
-            .send_request(request_id, frame, timeout, trace_id)
+            .send_request(request_id, frame, timeout)
             .await;
 
         if let Some(op) = operation {
@@ -69,7 +67,6 @@ impl RpcClient {
         request_id: u32,
         frame: rpc_codec_common::MessageFrame<bss_codec::MessageHeader, Vec<bytes::Bytes>>,
         timeout: Option<std::time::Duration>,
-        trace_id: TraceId,
         operation: Option<crate::stats::OperationType>,
     ) -> Result<rpc_codec_common::MessageFrame<bss_codec::MessageHeader>, rpc_client_common::RpcError>
     {
@@ -80,7 +77,7 @@ impl RpcClient {
 
         let result = self
             .get_connection()
-            .send_request_vectored(request_id, frame, timeout, trace_id)
+            .send_request_vectored(request_id, frame, timeout)
             .await;
 
         if let Some(op) = operation {

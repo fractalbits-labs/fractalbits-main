@@ -309,7 +309,7 @@ pub async fn list_objects(
             &start_after,
             true,
             Some(app.config.rpc_timeout()),
-            trace_id
+            &trace_id
         )
     )
     .await?;

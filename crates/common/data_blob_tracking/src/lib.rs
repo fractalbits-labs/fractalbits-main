@@ -57,6 +57,7 @@ impl DataBlobTracker {
         metadata: &[u8],
     ) -> Result<(), DataBlobTrackingError> {
         let key = format!("single/{blob_key}");
+        let trace_id = TraceId::new();
         nss_rpc_retry!(
             &self.nss_client,
             put_inode(
@@ -64,7 +65,7 @@ impl DataBlobTracker {
                 &key,
                 Bytes::copy_from_slice(metadata),
                 None,
-                TraceId::new()
+                &trace_id
             )
         )
         .await?;
@@ -78,9 +79,10 @@ impl DataBlobTracker {
         blob_key: &str,
     ) -> Result<Option<Vec<u8>>, DataBlobTrackingError> {
         let key = format!("single/{blob_key}");
+        let trace_id = TraceId::new();
         match nss_rpc_retry!(
             &self.nss_client,
-            get_inode(tracking_root_blob_name, &key, None, TraceId::new())
+            get_inode(tracking_root_blob_name, &key, None, &trace_id)
         )
         .await
         {
@@ -105,9 +107,10 @@ impl DataBlobTracker {
         blob_key: &str,
     ) -> Result<(), DataBlobTrackingError> {
         let key = format!("single/{blob_key}");
+        let trace_id = TraceId::new();
         match nss_rpc_retry!(
             &self.nss_client,
-            delete_inode(tracking_root_blob_name, &key, None, TraceId::new())
+            delete_inode(tracking_root_blob_name, &key, None, &trace_id)
         )
         .await
         {
@@ -126,9 +129,10 @@ impl DataBlobTracker {
         // Use the blob key with single prefix, trimming null terminators
         let trimmed_key = blob_key.trim_end_matches('\0');
         let key = format!("single/{trimmed_key}");
+        let trace_id = TraceId::new();
         match nss_rpc_retry!(
             &self.nss_client,
-            delete_inode(tracking_root_blob_name, &key, None, TraceId::new())
+            delete_inode(tracking_root_blob_name, &key, None, &trace_id)
         )
         .await
         {
@@ -146,6 +150,7 @@ impl DataBlobTracker {
         timestamp: &[u8],
     ) -> Result<(), DataBlobTrackingError> {
         let key = format!("deleted/{blob_key}");
+        let trace_id = TraceId::new();
         nss_rpc_retry!(
             &self.nss_client,
             put_inode(
@@ -153,7 +158,7 @@ impl DataBlobTracker {
                 &key,
                 Bytes::copy_from_slice(timestamp),
                 None,
-                TraceId::new()
+                &trace_id
             )
         )
         .await?;
@@ -167,9 +172,10 @@ impl DataBlobTracker {
         blob_key: &str,
     ) -> Result<Option<Vec<u8>>, DataBlobTrackingError> {
         let key = format!("deleted/{blob_key}");
+        let trace_id = TraceId::new();
         match nss_rpc_retry!(
             &self.nss_client,
-            get_inode(tracking_root_blob_name, &key, None, TraceId::new())
+            get_inode(tracking_root_blob_name, &key, None, &trace_id)
         )
         .await
         {
@@ -196,9 +202,10 @@ impl DataBlobTracker {
         // Use the blob key with deleted prefix, trimming null terminators
         let trimmed_key = blob_key.trim_end_matches('\0');
         let key = format!("deleted/{trimmed_key}");
+        let trace_id = TraceId::new();
         match nss_rpc_retry!(
             &self.nss_client,
-            get_inode(tracking_root_blob_name, &key, None, TraceId::new())
+            get_inode(tracking_root_blob_name, &key, None, &trace_id)
         )
         .await
         {
@@ -220,9 +227,10 @@ impl DataBlobTracker {
         blob_key: &str,
     ) -> Result<(), DataBlobTrackingError> {
         let key = format!("deleted/{blob_key}");
+        let trace_id = TraceId::new();
         match nss_rpc_retry!(
             &self.nss_client,
-            delete_inode(tracking_root_blob_name, &key, None, TraceId::new())
+            delete_inode(tracking_root_blob_name, &key, None, &trace_id)
         )
         .await
         {
@@ -240,6 +248,7 @@ impl DataBlobTracker {
         start_after: &str,
         max_keys: u32,
     ) -> Result<Vec<(String, String)>, DataBlobTrackingError> {
+        let trace_id = TraceId::new();
         // Add single/ prefix to the search parameters
         let search_prefix = if prefix.is_empty() {
             "single/".to_string()
@@ -262,7 +271,7 @@ impl DataBlobTracker {
                 &search_start_after,
                 false,
                 None,
-                TraceId::new()
+                &trace_id
             )
         )
         .await?;
@@ -299,6 +308,7 @@ impl DataBlobTracker {
         start_after: &str,
         max_keys: u32,
     ) -> Result<Vec<(String, Vec<u8>)>, DataBlobTrackingError> {
+        let trace_id = TraceId::new();
         // Add deleted/ prefix to the search parameters
         let search_prefix = if prefix.is_empty() {
             "deleted/".to_string()
@@ -321,7 +331,7 @@ impl DataBlobTracker {
                 &search_start_after,
                 false,
                 None,
-                TraceId::new()
+                &trace_id
             )
         )
         .await?;
@@ -354,9 +364,9 @@ impl DataBlobTracker {
     pub async fn list_buckets(
         &self,
     ) -> Result<Vec<(String, Option<String>)>, DataBlobTrackingError> {
+        let trace_id = TraceId::new();
         let prefix = "bucket:";
-        let bucket_values =
-            rss_rpc_retry!(&self.rss_client, list(prefix, None, TraceId::new())).await?;
+        let bucket_values = rss_rpc_retry!(&self.rss_client, list(prefix, None, &trace_id)).await?;
 
         let mut buckets = Vec::new();
         for bucket_value in &bucket_values {
@@ -393,7 +403,8 @@ impl DataBlobTracker {
         &self,
         timeout: Option<Duration>,
     ) -> Result<AzStatusMap, DataBlobTrackingError> {
-        rss_rpc_retry!(&self.rss_client, get_az_status(timeout, TraceId::new()))
+        let trace_id = TraceId::new();
+        rss_rpc_retry!(&self.rss_client, get_az_status(timeout, &trace_id))
             .await
             .map_err(|e| e.into())
     }
@@ -405,9 +416,10 @@ impl DataBlobTracker {
         status: &str,
         timeout: Option<Duration>,
     ) -> Result<(), DataBlobTrackingError> {
+        let trace_id = TraceId::new();
         rss_rpc_retry!(
             &self.rss_client,
-            set_az_status(az_id, status, timeout, TraceId::new())
+            set_az_status(az_id, status, timeout, &trace_id)
         )
         .await
         .map_err(|e| e.into())

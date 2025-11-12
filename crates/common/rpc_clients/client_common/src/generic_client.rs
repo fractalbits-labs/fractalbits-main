@@ -1,6 +1,5 @@
 use crate::RpcError;
 use bytes::{Bytes, BytesMut};
-use data_types::TraceId;
 use metrics::{counter, gauge};
 use parking_lot::Mutex;
 use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
@@ -341,11 +340,9 @@ where
     pub async fn send_request(
         &self,
         request_id: u32,
-        mut frame: MessageFrame<Header, Bytes>,
+        frame: MessageFrame<Header, Bytes>,
         timeout: Option<std::time::Duration>,
-        trace_id: TraceId,
     ) -> Result<MessageFrame<Header>, RpcError> {
-        frame.header.set_trace_id(trace_id);
         let vectored_frame = MessageFrame::new(frame.header, vec![frame.body]);
         self.send_request_vectored_internal(request_id, vectored_frame, timeout)
             .await
@@ -354,11 +351,9 @@ where
     pub async fn send_request_vectored(
         &self,
         request_id: u32,
-        mut frame: MessageFrame<Header, Vec<Bytes>>,
+        frame: MessageFrame<Header, Vec<Bytes>>,
         timeout: Option<std::time::Duration>,
-        trace_id: TraceId,
     ) -> Result<MessageFrame<Header>, RpcError> {
-        frame.header.set_trace_id(trace_id);
         self.send_request_vectored_internal(request_id, frame, timeout)
             .await
     }

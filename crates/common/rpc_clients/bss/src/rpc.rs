@@ -35,7 +35,7 @@ impl RpcClient {
         body: Bytes,
         body_checksum: u64,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "put_data_blob");
@@ -49,11 +49,12 @@ impl RpcClient {
         header.content_len = body.len() as u32;
         header.size = (MessageHeader::SIZE as u32) + header.content_len;
         header.retry_count = retry_count as u8;
+        header.trace_id = trace_id.0;
         header.checksum_body = body_checksum;
 
         let msg_frame = MessageFrame::new(header, body);
         let resp_frame = self
-            .send_request(request_id, msg_frame, timeout, trace_id, Some(crate::OperationType::PutData))
+            .send_request(request_id, msg_frame, timeout, Some(crate::OperationType::PutData))
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -73,7 +74,7 @@ impl RpcClient {
         chunks: Vec<Bytes>,
         body_checksum: u64,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "put_data_blob_vectored");
@@ -88,11 +89,12 @@ impl RpcClient {
         header.content_len = total_size as u32;
         header.size = (MessageHeader::SIZE as u32) + header.content_len;
         header.retry_count = retry_count as u8;
+        header.trace_id = trace_id.0;
         header.checksum_body = body_checksum;
 
         let msg_frame = MessageFrame::new(header, chunks);
         let resp_frame = self
-            .send_request_vectored(request_id, msg_frame, timeout, trace_id, Some(crate::OperationType::PutData))
+            .send_request_vectored(request_id, msg_frame, timeout, Some(crate::OperationType::PutData))
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -112,7 +114,7 @@ impl RpcClient {
         body: &mut Bytes,
         content_len: usize,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "get_data_blob");
@@ -124,12 +126,13 @@ impl RpcClient {
         header.block_number = block_number;
         header.command = Command::GetDataBlob;
         header.retry_count = retry_count as u8;
+        header.trace_id = trace_id.0;
         header.content_len = content_len as u32;
         header.size = MessageHeader::SIZE as u32;
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
-            .send_request(header.id, msg_frame, timeout, trace_id, Some(crate::OperationType::GetData))
+            .send_request(header.id, msg_frame, timeout, Some(crate::OperationType::GetData))
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -148,7 +151,7 @@ impl RpcClient {
         blob_guid: DataBlobGuid,
         block_number: u32,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "delete_data_blob");
@@ -161,10 +164,11 @@ impl RpcClient {
         header.command = Command::DeleteDataBlob;
         header.size = MessageHeader::SIZE as u32;
         header.retry_count = retry_count as u8;
+        header.trace_id = trace_id.0;
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
-            .send_request(header.id, msg_frame, timeout, trace_id, Some(crate::OperationType::DeleteData))
+            .send_request(header.id, msg_frame, timeout, Some(crate::OperationType::DeleteData))
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -186,7 +190,7 @@ impl RpcClient {
         is_new: bool,
         body: Bytes,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "put_metadata_blob");
@@ -202,11 +206,12 @@ impl RpcClient {
         header.content_len = body.len() as u32;
         header.size = (MessageHeader::SIZE as u32) + header.content_len;
         header.retry_count = retry_count as u8;
+        header.trace_id = trace_id.0;
         header.set_body_checksum(&body);
 
         let msg_frame = MessageFrame::new(header, body);
         let resp_frame = self
-            .send_request(request_id, msg_frame, timeout, trace_id, None)
+            .send_request(request_id, msg_frame, timeout, None)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -226,7 +231,7 @@ impl RpcClient {
         version: u64,
         body: &mut Bytes,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<u64, RpcError> {
         let _guard = InflightRpcGuard::new("bss", "get_metadata_blob");
@@ -240,10 +245,11 @@ impl RpcClient {
         header.command = Command::GetMetadataBlob;
         header.size = MessageHeader::SIZE as u32;
         header.retry_count = retry_count as u8;
+        header.trace_id = trace_id.0;
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
-            .send_request(header.id, msg_frame, timeout, trace_id, None)
+            .send_request(header.id, msg_frame, timeout, None)
             .await
             .map_err(|e| {
                 if !e.retryable() {
@@ -261,7 +267,7 @@ impl RpcClient {
         blob_guid: MetaBlobGuid,
         block_number: u32,
         timeout: Option<Duration>,
-        trace_id: TraceId,
+        trace_id: &TraceId,
         retry_count: u32,
     ) -> Result<(), RpcError> {
         let _guard = InflightRpcGuard::new("bss", "delete_metadata_blob");
@@ -274,10 +280,11 @@ impl RpcClient {
         header.command = Command::DeleteMetadataBlob;
         header.size = MessageHeader::SIZE as u32;
         header.retry_count = retry_count as u8;
+        header.trace_id = trace_id.0;
 
         let msg_frame = MessageFrame::new(header, Bytes::new());
         let resp_frame = self
-            .send_request(header.id, msg_frame, timeout, trace_id, None)
+            .send_request(header.id, msg_frame, timeout,  None)
             .await
             .map_err(|e| {
                 if !e.retryable() {

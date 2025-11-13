@@ -1,3 +1,6 @@
+use axum::body::Body;
+use axum::http::{self, Method};
+
 use super::{
     bucket::BucketEndpoint,
     common::{
@@ -11,7 +14,6 @@ use super::{
     post::PostEndpoint,
     put::PutEndpoint,
 };
-use actix_web::http::Method;
 
 pub enum Endpoint {
     Get(GetEndpoint),
@@ -24,7 +26,7 @@ pub enum Endpoint {
 
 impl Endpoint {
     pub fn from_extractors(
-        request: &actix_web::HttpRequest,
+        request: &http::Request<Body>,
         bucket_name: &str,
         key: &str,
         api_cmd: Option<ApiCommand>,

@@ -211,7 +211,7 @@ impl BlobClient {
         tracking_root_blob_name: Option<&str>,
         blob_guid: DataBlobGuid,
         block_number: u32,
-        chunks: Vec<actix_web::web::Bytes>,
+        chunks: Vec<bytes::Bytes>,
         trace_id: &TraceId,
     ) -> Result<(), BlobStorageError> {
         self.storage

@@ -1,6 +1,7 @@
-use actix_web::{
-    HttpResponse, Result,
-    web::{Data, Json, Path},
+use axum::extract::Json;
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -21,6 +22,12 @@ pub struct ApiKeyResponse {
     pub name: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ErrorResponse {
+    pub code: String,
+    pub message: String,
+}
+
 impl From<ApiKey> for ApiKeyResponse {
     fn from(api_key: ApiKey) -> Self {
         ApiKeyResponse {
@@ -32,60 +39,91 @@ impl From<ApiKey> for ApiKeyResponse {
 }
 
 pub async fn create_api_key(
-    app: Data<Arc<AppState>>,
-    payload: Json<CreateApiKeyRequest>,
-) -> Result<HttpResponse> {
+    State(app): State<Arc<AppState>>,
+    Json(payload): Json<CreateApiKeyRequest>,
+) -> Result<Json<ApiKeyResponse>, (StatusCode, Json<ErrorResponse>)> {
     info!("Creating API key with name: {}", payload.name);
     let trace_id = TraceId::new();
     let api_key = Versioned::new(0, ApiKey::new(&payload.name));
     let _key_id = api_key.data.key_id.clone();
     let _serialized_api_key = serde_json::to_string(&api_key.data).map_err(|e| {
         error!("Failed to serialize API key: {:?}", e);
-        actix_web::error::ErrorInternalServerError("Failed to serialize API key")
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                code: "InternalError".to_string(),
+                message: "Failed to serialize API key".to_string(),
+            }),
+        )
     })?;
 
     app.put_api_key(&api_key, &trace_id).await.map_err(|e| {
         error!("Failed to put API key to RSS: {:?}", e);
-        actix_web::error::ErrorInternalServerError(format!("Failed to put API key to RSS: {e:?}"))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                code: "InternalError".to_string(),
+                message: format!("Failed to put API key to RSS: {e:?}"),
+            }),
+        )
     })?;
 
-    Ok(HttpResponse::Ok().json(api_key.data))
+    Ok(Json(api_key.data.into()))
 }
 
-pub async fn delete_api_key(app: Data<Arc<AppState>>, path: Path<String>) -> Result<HttpResponse> {
-    let key_id = path.into_inner().trim_start_matches("api_key:").to_string();
+pub async fn delete_api_key(
+    State(app): State<Arc<AppState>>,
+    Path(key_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    let key_id = key_id.trim_start_matches("api_key:").to_string();
     info!("Deleting API key with key_id: {}", key_id);
     let trace_id = TraceId::new();
     let api_key = app.get_api_key(key_id, &trace_id).await.map_err(|e| {
         error!("Failed to get API key from RSS: {e:?}");
-        actix_web::error::ErrorInternalServerError(format!("Failed to get API key from RSS: {e:?}"))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                code: "InternalError".to_string(),
+                message: format!("Failed to get API key from RSS: {e:?}"),
+            }),
+        )
     })?;
     app.delete_api_key(&api_key.data, &trace_id)
         .await
         .map_err(|e| {
             error!("Failed to delete API key from RSS: {e:?}");
-            actix_web::error::ErrorInternalServerError(format!(
-                "Failed to delete API key from RSS: {e:?}"
-            ))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    code: "InternalError".to_string(),
+                    message: format!("Failed to delete API key from RSS: {e:?}"),
+                }),
+            )
         })?;
 
-    Ok(HttpResponse::NoContent().finish())
+    Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn list_api_keys(app: Data<Arc<AppState>>) -> Result<HttpResponse> {
+pub async fn list_api_keys(
+    State(app): State<Arc<AppState>>,
+) -> Result<Json<Vec<ApiKeyResponse>>, (StatusCode, Json<ErrorResponse>)> {
     info!("Listing API keys");
     let trace_id = TraceId::new();
     let api_keys = app.list_api_keys(&trace_id).await.map_err(|e| {
         error!("Failed to list API keys from RSS: {:?}", e);
-        actix_web::error::ErrorInternalServerError(format!(
-            "Failed to list API keys from RSS: {e:?}"
-        ))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                code: "InternalError".to_string(),
+                message: format!("Failed to list API keys from RSS: {e:?}"),
+            }),
+        )
     })?;
 
-    let mut api_key_responses: Vec<ApiKeyResponse> = Vec::new();
+    let mut api_key_responses = Vec::new();
     for api_key in api_keys {
         api_key_responses.push(api_key.into());
     }
 
-    Ok(HttpResponse::Ok().json(api_key_responses))
+    Ok(Json(api_key_responses))
 }

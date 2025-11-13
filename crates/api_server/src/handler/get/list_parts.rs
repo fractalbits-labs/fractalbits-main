@@ -11,13 +11,13 @@ use crate::handler::common::{
     time,
 };
 use crate::object_layout::{MpuState, ObjectState};
-use actix_web::web::Query;
+use axum::{RequestPartsExt, extract::Query, response::Response};
 use base64::prelude::*;
 use data_types::{Bucket, TraceId};
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 struct QueryOpts {
     max_parts: Option<u32>,
@@ -40,8 +40,7 @@ struct ListPartsResult {
     next_part_number_marker: Option<u32>,
     max_parts: u32,
     is_truncated: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    part: Option<Vec<Part>>,
+    part: Vec<Part>,
     #[serde(skip_serializing_if = "Option::is_none")]
     initiator: Option<Initiator>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -90,14 +89,9 @@ struct Owner {
     id: String,
 }
 
-pub async fn list_parts_handler(
-    ctx: ObjectRequestContext,
-) -> Result<actix_web::HttpResponse, S3Error> {
+pub async fn list_parts_handler(ctx: ObjectRequestContext) -> Result<Response, S3Error> {
     let bucket = ctx.resolve_bucket().await?;
-    let query_opts = Query::<QueryOpts>::from_query(ctx.request.query_string())
-        .unwrap_or_else(|_| Query(Default::default()))
-        .into_inner();
-
+    let Query(query_opts): Query<QueryOpts> = ctx.request.into_parts().0.extract().await?;
     let max_parts = query_opts.max_parts.unwrap_or(1000);
     let object = get_raw_object(&ctx.app, &bucket.root_blob_name, &ctx.key, &ctx.trace_id).await?;
     if object.version_id.simple().to_string() != query_opts.upload_id {
@@ -128,11 +122,11 @@ pub async fn list_parts_handler(
         max_parts,
         next_part_number_marker,
         is_truncated: next_part_number_marker.is_some(),
+
         upload_id: query_opts.upload_id,
-        part: if parts.is_empty() { None } else { Some(parts) },
+        part: parts,
         ..Default::default()
     };
-
     Xml(resp).try_into()
 }
 
@@ -148,7 +142,7 @@ async fn fetch_mpu_parts(
     let mpus = list_raw_objects(
         &app,
         &bucket.root_blob_name,
-        10000, // TODO: use max_parts and retry if there are not enough valid
+        10000, // TODO: use max_parts and retry if there are not enough valid results
         &mpu_prefix,
         "",
         "",
@@ -157,11 +151,6 @@ async fn fetch_mpu_parts(
     )
     .await?;
     let mut parts = Vec::with_capacity(mpus.len());
-    tracing::info!(
-        "list_raw_objects returned {} objects for prefix {}",
-        mpus.len(),
-        mpu_prefix
-    );
     for (mut mpu_key, mpu) in mpus {
         if let (Ok(etag), Ok(size)) = (mpu.etag(), mpu.size()) {
             assert_eq!(Some('\0'), mpu_key.pop());
@@ -197,7 +186,7 @@ async fn fetch_mpu_parts(
     }
 
     // Cut the beginning if we have a marker
-    if let Some(marker) = query_opts.part_number_marker {
+    if let Some(marker) = &query_opts.part_number_marker {
         let next = marker + 1;
         let part_idx = parts
             .binary_search_by(|part| part.part_number.cmp(&next))

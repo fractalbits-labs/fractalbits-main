@@ -1,10 +1,10 @@
 // convert from aws's s3 rust sdk tests
 
-use actix_web::http::header::HeaderValue;
 use aws_sdk_s3::{
     operation::get_object::GetObjectOutput, primitives::ByteStream, types::ChecksumAlgorithm,
     types::ChecksumMode,
 };
+use axum::http::HeaderValue;
 use rstest::rstest;
 use test_common::{Context, assert_bytes_eq, context};
 

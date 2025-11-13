@@ -10,15 +10,17 @@ use crate::handler::{
         time, xheader,
     },
 };
-use actix_web::{
-    http::header::{HeaderMap, HeaderValue},
-    web::Query,
+use axum::{
+    RequestPartsExt,
+    extract::Query,
+    http::{HeaderMap, HeaderValue, header},
+    response::Response,
 };
 use base64::{Engine, prelude::BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct QueryOpts {
     version_id: Option<String>,
@@ -179,15 +181,11 @@ struct Part {
     size: usize,
 }
 
-pub async fn get_object_attributes_handler(
-    ctx: ObjectRequestContext,
-) -> Result<actix_web::HttpResponse, S3Error> {
+pub async fn get_object_attributes_handler(ctx: ObjectRequestContext) -> Result<Response, S3Error> {
     let bucket = ctx.resolve_bucket().await?;
-    let _query_opts = Query::<QueryOpts>::from_query(ctx.request.query_string())
-        .unwrap_or_else(|_| Query(Default::default()));
-
-    // Parse object attributes from headers
-    let header_opts = HeaderOpts::from_headers(ctx.request.headers())?;
+    let mut parts = ctx.request.into_parts().0;
+    let Query(_query_opts): Query<QueryOpts> = parts.extract().await?;
+    let header_opts = HeaderOpts::from_headers(&parts.headers)?;
     let obj = get_raw_object(&ctx.app, &bucket.root_blob_name, &ctx.key, &ctx.trace_id).await?;
     let last_modified = time::format_http_date(obj.timestamp);
 
@@ -202,10 +200,10 @@ pub async fn get_object_attributes_handler(
         resp = resp.object_size(obj.size()? as usize);
     }
     // TODO: ObjectParts | StorageClass
-    let mut resp: actix_web::HttpResponse = Xml(resp).try_into()?;
-    resp.head_mut().headers_mut().insert(
-        actix_web::http::header::LAST_MODIFIED,
-        actix_web::http::header::HeaderValue::from_str(&last_modified)?,
+    let mut resp: Response = Xml(resp).try_into()?;
+    resp.headers_mut().insert(
+        header::LAST_MODIFIED,
+        HeaderValue::from_str(&last_modified)?,
     );
     Ok(resp)
 }

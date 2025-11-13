@@ -1,4 +1,4 @@
-use super::list_objects_v2::{Object, Prefix, list_objects};
+use super::{Object, Prefix, list_objects};
 use crate::handler::{
     ObjectRequestContext,
     common::{
@@ -6,11 +6,11 @@ use crate::handler::{
         s3_error::S3Error,
     },
 };
-use actix_web::{HttpResponse, web::Query};
+use axum::{RequestPartsExt, extract::Query, response::Response};
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 struct QueryOpts {
     delimiter: Option<String>,
@@ -102,13 +102,12 @@ impl ListBucketResult {
     }
 }
 
-pub async fn list_objects_handler(ctx: ObjectRequestContext) -> Result<HttpResponse, S3Error> {
-    let opts = Query::<QueryOpts>::from_query(ctx.request.query_string())
-        .unwrap_or_else(|_| Query(Default::default()))
-        .into_inner();
+pub async fn list_objects_handler(ctx: ObjectRequestContext) -> Result<Response, S3Error> {
+    let bucket = ctx.resolve_bucket().await?;
+    let Query(opts): Query<QueryOpts> = ctx.request.into_parts().0.extract().await?;
     tracing::debug!("list_objects {opts:?}");
 
-    if let Some(encoding_type) = &opts.encoding_type
+    if let Some(encoding_type) = opts.encoding_type
         && encoding_type != "url"
     {
         tracing::warn!(
@@ -117,9 +116,6 @@ pub async fn list_objects_handler(ctx: ObjectRequestContext) -> Result<HttpRespo
         );
         return Err(S3Error::InvalidArgument1);
     }
-
-    // Get bucket info
-    let bucket = ctx.resolve_bucket().await?;
 
     let max_keys = opts.max_keys.unwrap_or(1000);
     let prefix = format!("/{}", opts.prefix.clone().unwrap_or_default());
@@ -133,30 +129,16 @@ pub async fn list_objects_handler(ctx: ObjectRequestContext) -> Result<HttpRespo
         None => "".into(),
     };
 
-    tracing::debug!(
-        "Calling list_objects with max_keys={}, prefix='{}', delimiter='{}', start_after='{}'",
-        max_keys,
-        prefix,
-        delimiter,
-        start_after
-    );
-
     let (objs, common_prefixes, next_continuation_token) = list_objects(
         ctx.app,
         &bucket,
         max_keys,
-        prefix,
-        delimiter,
+        prefix.clone(),
+        delimiter.clone(),
         start_after,
         ctx.trace_id,
     )
     .await?;
-
-    tracing::debug!(
-        "list_objects returned {} objects, {} common_prefixes",
-        objs.len(),
-        common_prefixes.len()
-    );
 
     Xml(ListBucketResult::default()
         .truncated(next_continuation_token.is_some())

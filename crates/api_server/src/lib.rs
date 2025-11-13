@@ -94,6 +94,13 @@ impl AppState {
         }
     }
 
+    #[cfg(test)]
+    pub fn new_for_test(config: Arc<Config>) -> Self {
+        let cache_coordinator = Arc::new(CacheCoordinator::new());
+        let az_status_coordinator = Arc::new(CacheCoordinator::new());
+        Self::new_per_core_sync(config, cache_coordinator, az_status_coordinator, 0)
+    }
+
     pub fn get_nss_rpc_client(&self) -> &RpcClientNss {
         &self.rpc_client_nss
     }

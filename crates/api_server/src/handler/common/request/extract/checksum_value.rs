@@ -1,22 +1,30 @@
-use actix_web::{FromRequest, HttpRequest, dev::Payload, http::header::HeaderMap};
+use axum::{
+    extract::FromRequestParts,
+    http::{HeaderMap, request::Parts},
+};
 use base64::{Engine, prelude::BASE64_STANDARD};
-use futures::future::{Ready, ready};
+use std::sync::Arc;
 
-use crate::handler::common::{
-    checksum::ChecksumValue, s3_error::S3Error, signature::SignatureError, xheader,
+use crate::{
+    AppState,
+    handler::common::{
+        checksum::ChecksumValue, s3_error::S3Error, signature::SignatureError, xheader,
+    },
 };
 
 pub struct ChecksumValueFromHeaders(pub Option<ChecksumValue>);
 
-impl FromRequest for ChecksumValueFromHeaders {
-    type Error = S3Error;
-    type Future = Ready<Result<Self, Self::Error>>;
+impl FromRequestParts<Arc<AppState>> for ChecksumValueFromHeaders {
+    type Rejection = S3Error;
 
-    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
-        let result = extract_checksum_value_from_headers(req.headers());
+    async fn from_request_parts(
+        parts: &mut Parts,
+        _state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let result = extract_checksum_value_from_headers(&parts.headers);
         match result {
-            Ok(checksum) => ready(Ok(ChecksumValueFromHeaders(checksum))),
-            Err(e) => ready(Err(e.into())),
+            Ok(checksum) => Ok(ChecksumValueFromHeaders(checksum)),
+            Err(e) => Err(e.into()),
         }
     }
 }
@@ -109,78 +117,109 @@ fn extract_checksum_value_from_headers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::{App, HttpResponse, test, web};
+    use crate::Config;
+    use axum::{
+        Router,
+        body::Body,
+        http::{Request, StatusCode},
+        response::Response,
+        routing::get,
+    };
     use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
+    use std::sync::Arc;
+    use tower::ServiceExt;
 
-    async fn handler(checksum: ChecksumValueFromHeaders) -> HttpResponse {
-        match checksum.0 {
+    async fn handler(checksum: ChecksumValueFromHeaders) -> Response<Body> {
+        let body = match checksum.0 {
             Some(ChecksumValue::Crc32(crc32)) => {
-                HttpResponse::Ok().body(format!("crc32:{}", BASE64_STANDARD.encode(crc32)))
+                format!("crc32:{}", BASE64_STANDARD.encode(crc32))
             }
             Some(ChecksumValue::Crc32c(crc32c)) => {
-                HttpResponse::Ok().body(format!("crc32c:{}", BASE64_STANDARD.encode(crc32c)))
+                format!("crc32c:{}", BASE64_STANDARD.encode(crc32c))
             }
             Some(ChecksumValue::Sha1(sha1)) => {
-                HttpResponse::Ok().body(format!("sha1:{}", BASE64_STANDARD.encode(sha1)))
+                format!("sha1:{}", BASE64_STANDARD.encode(sha1))
             }
             Some(ChecksumValue::Sha256(sha256)) => {
-                HttpResponse::Ok().body(format!("sha256:{}", BASE64_STANDARD.encode(sha256)))
+                format!("sha256:{}", BASE64_STANDARD.encode(sha256))
             }
             Some(ChecksumValue::Crc64Nvme(crc64nvme)) => {
-                HttpResponse::Ok().body(format!("crc64nvme:{}", BASE64_STANDARD.encode(crc64nvme)))
+                format!("crc64nvme:{}", BASE64_STANDARD.encode(crc64nvme))
             }
-            None => HttpResponse::Ok().body("no_checksum"),
-        }
+            None => "no_checksum".to_string(),
+        };
+        Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::from(body))
+            .unwrap()
     }
 
-    #[actix_web::test]
+    #[tokio::test]
     async fn test_extract_checksum_value_none() {
-        let app = test::init_service(App::new().route("/{key:.*}", web::get().to(handler))).await;
+        let config = Arc::new(Config::default());
+        let app_state = Arc::new(AppState::new_for_test(config));
+        let app = Router::new()
+            .route("/obj1", get(handler))
+            .with_state(app_state);
 
-        let req = test::TestRequest::get().uri("/obj1").to_request();
+        let request = Request::builder().uri("/obj1").body(Body::empty()).unwrap();
 
-        let resp = test::call_service(&app, req).await;
-        let body = test::read_body(resp).await;
-        let result = String::from_utf8(body.to_vec()).unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let result = String::from_utf8(body_bytes.to_vec()).unwrap();
         assert_eq!(result, "no_checksum");
     }
 
-    #[actix_web::test]
+    #[tokio::test]
     async fn test_extract_checksum_value_crc32() {
-        let app = test::init_service(App::new().route("/{key:.*}", web::get().to(handler))).await;
+        let config = Arc::new(Config::default());
+        let app_state = Arc::new(AppState::new_for_test(config));
+        let app = Router::new()
+            .route("/obj1", get(handler))
+            .with_state(app_state);
 
         let crc32_bytes = [0x12, 0x34, 0x56, 0x78];
         let crc32_b64 = BASE64_STANDARD.encode(crc32_bytes);
 
-        let req = test::TestRequest::get()
+        let request = Request::builder()
             .uri("/obj1")
-            .insert_header(("x-amz-checksum-crc32", crc32_b64.as_str()))
-            .to_request();
+            .header("x-amz-checksum-crc32", crc32_b64.as_str())
+            .body(Body::empty())
+            .unwrap();
 
-        let resp = test::call_service(&app, req).await;
-        let body = test::read_body(resp).await;
-        let result = String::from_utf8(body.to_vec()).unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let result = String::from_utf8(body_bytes.to_vec()).unwrap();
         assert_eq!(result, format!("crc32:{}", crc32_b64));
     }
 
-    #[actix_web::test]
+    #[tokio::test]
     async fn test_extract_checksum_value_multiple_headers_error() {
-        let app = test::init_service(App::new().route("/{key:.*}", web::get().to(handler))).await;
+        let config = Arc::new(Config::default());
+        let app_state = Arc::new(AppState::new_for_test(config));
+        let app = Router::new()
+            .route("/obj1", get(handler))
+            .with_state(app_state);
 
         let crc32_bytes = [0x12, 0x34, 0x56, 0x78];
         let crc32c_bytes = [0x87, 0x65, 0x43, 0x21];
 
-        let req = test::TestRequest::get()
+        let request = Request::builder()
             .uri("/obj1")
-            .insert_header(("x-amz-checksum-crc32", BASE64_STANDARD.encode(crc32_bytes)))
-            .insert_header((
+            .header("x-amz-checksum-crc32", BASE64_STANDARD.encode(crc32_bytes))
+            .header(
                 "x-amz-checksum-crc32c",
                 BASE64_STANDARD.encode(crc32c_bytes),
-            ))
-            .to_request();
+            )
+            .body(Body::empty())
+            .unwrap();
 
-        let resp = test::call_service(&app, req).await;
+        let response = app.oneshot(request).await.unwrap();
         // Should return an error response for multiple checksum headers
-        assert!(!resp.status().is_success());
+        assert!(!response.status().is_success());
     }
 }

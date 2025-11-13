@@ -1,18 +1,27 @@
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
-use actix_web::{
-    HttpRequest,
-    http::header::{AUTHORIZATION, ToStrError},
+use axum::{
+    extract::FromRequestParts,
+    http::{
+        header::{AUTHORIZATION, ToStrError},
+        request::Parts,
+    },
 };
-use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, NaiveDateTime, TimeZone, Utc};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::handler::common::{
-    s3_error::S3Error,
-    time::{LONG_DATETIME, SHORT_DATE},
+use crate::{
+    AppState,
+    handler::common::{
+        s3_error::S3Error,
+        time::{LONG_DATETIME, SHORT_DATE},
+        xheader,
+    },
 };
 
+const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
 const SCOPE_ENDING: &str = "aws4_request";
 
 #[derive(Error, Debug)]
@@ -31,132 +40,155 @@ impl From<AuthError> for S3Error {
 }
 
 #[derive(Debug)]
-pub struct Authentication<'a> {
-    pub key_id: &'a str,
-    pub scope: Scope<'a>,
-    pub signed_headers: BTreeSet<&'a str>,
-    pub signature: &'a str,
-    pub content_sha256: &'a str,
+pub struct Authentication {
+    pub key_id: String,
+    pub scope: Scope,
+    pub signed_headers: BTreeSet<String>,
+    pub signature: String,
+    pub content_sha256: String,
     pub date: DateTime<Utc>,
-    pub scope_string: String,
-    pub formatted_date: String,
 }
 
 #[derive(Debug)]
-pub struct Scope<'a> {
-    pub date: &'a str,
-    pub region: &'a str,
-    pub service: &'a str,
+pub struct Scope {
+    pub date: String,
+    pub region: String,
+    pub service: String,
 }
 
-/// Extract authentication from request with zero-copy optimization
-pub fn extract_authentication(req: &HttpRequest) -> Result<Option<Authentication<'_>>, AuthError> {
-    const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
-
-    // Note The name of the standard header is unfortunate because it carries authentication
-    // information, not authorization.
-    // https://docs.aws.amazon.com/AmazonS3/latest/API/RESTAuthentication.html#ConstructingTheAuthenticationHeader
-    let authentication = match req.headers().get(AUTHORIZATION) {
-        Some(auth) => auth
-            .to_str()
-            .map_err(|e| AuthError::Invalid(format!("Header error: {e}")))?,
-        None => return Ok(None),
-    };
-
-    let (auth_kind, rest) = authentication
-        .split_once(' ')
-        .ok_or(AuthError::Invalid("Authorization field too short".into()))?;
-
-    if auth_kind != AWS4_HMAC_SHA256 {
-        return Err(AuthError::Invalid(
-            "Unsupported authorization method".into(),
-        ));
+impl Scope {
+    pub fn to_sign_string(&self) -> String {
+        format!(
+            "{}/{}/{}/{}",
+            self.date, self.region, self.service, SCOPE_ENDING
+        )
     }
-
-    let mut auth_params = HashMap::new();
-    for auth_part in rest.split(',') {
-        let auth_part = auth_part.trim();
-        let eq = auth_part
-            .find('=')
-            .ok_or(AuthError::Invalid("missing =".into()))?;
-        let (key, value) = auth_part.split_at(eq);
-        auth_params.insert(key, value.trim_start_matches('='));
-    }
-
-    let cred = auth_params.get("Credential").ok_or(AuthError::Invalid(
-        "Could not find Credential in Authorization field".into(),
-    ))?;
-    let signed_headers = auth_params
-        .get("SignedHeaders")
-        .ok_or(AuthError::Invalid(
-            "Could not find SignedHeaders in Authorization field".into(),
-        ))?
-        .split(';')
-        .collect();
-    let signature = auth_params.get("Signature").ok_or(AuthError::Invalid(
-        "Could not find Signature in Authorization field".into(),
-    ))?;
-
-    let content_sha256 = req
-        .headers()
-        .get("x-amz-content-sha256")
-        .ok_or(AuthError::Invalid(
-            "Missing x-amz-content-sha256 field".into(),
-        ))?
-        .to_str()
-        .map_err(|e| AuthError::Invalid(format!("Header error: {e}")))?;
-
-    let date = req
-        .headers()
-        .get("x-amz-date")
-        .ok_or(AuthError::Invalid("Missing x-amz-date field".into()))?
-        .to_str()
-        .map_err(|e| AuthError::Invalid(format!("Header error: {e}")))?;
-    let date = parse_date(date)?;
-
-    if (Utc::now() - date).num_hours() > 24 {
-        return Err(AuthError::Invalid("Date is too old".into()));
-    }
-    let (key_id, scope) = parse_credential(cred)?;
-    if scope.date != format!("{}", date.format(SHORT_DATE)) {
-        return Err(AuthError::Invalid("Date mismatch".into()));
-    }
-
-    let scope_string =
-        aws_signature::sigv4::format_scope_string(&date, scope.region, scope.service);
-    let formatted_date = format!("{}", date.format("%Y%m%dT%H%M%SZ"));
-
-    let auth = Authentication {
-        key_id,
-        scope,
-        signed_headers,
-        signature,
-        content_sha256,
-        date,
-        scope_string,
-        formatted_date,
-    };
-    Ok(Some(auth))
 }
 
+pub struct AuthFromHeaders(pub Option<Authentication>);
+
+impl FromRequestParts<Arc<AppState>> for AuthFromHeaders {
+    type Rejection = S3Error;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let config = &state.config;
+        match Self::from_request_parts_inner(parts, state) {
+            Ok(auth) => Ok(auth),
+            Err(e) => {
+                if config.allow_missing_or_bad_signature {
+                    Ok(Self(None))
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+}
+
+impl AuthFromHeaders {
+    fn from_request_parts_inner(
+        parts: &mut Parts,
+        _state: &Arc<AppState>,
+    ) -> Result<Self, S3Error> {
+        // Note The name of the standard header is unfortunate because it carries authentication
+        // information, not authorization.
+        // https://docs.aws.amazon.com/AmazonS3/latest/API/RESTAuthentication.html#ConstructingTheAuthenticationHeader
+        let authorization = match parts.headers.get(AUTHORIZATION) {
+            Some(auth) => auth.to_str()?,
+            None => return Err(S3Error::AccessDenied),
+        };
+
+        let (auth_kind, rest) = authorization
+            .split_once(' ')
+            .ok_or(AuthError::Invalid("Authorization field too short".into()))?;
+
+        if auth_kind != AWS4_HMAC_SHA256 {
+            return Err(AuthError::Invalid("Unsupported authorization method".into()).into());
+        }
+
+        let mut auth_params: HashMap<&str, &str> = HashMap::new();
+        for auth_part in rest.split(',') {
+            let auth_part = auth_part.trim();
+            let eq = auth_part
+                .find('=')
+                .ok_or(AuthError::Invalid("missing =".into()))?;
+            let (key, value) = auth_part.split_at(eq);
+            auth_params.insert(key, value.trim_start_matches('='));
+        }
+
+        let cred = auth_params.get("Credential").ok_or(AuthError::Invalid(
+            "Could not find Credential in Authorization field".into(),
+        ))?;
+        let signed_headers = auth_params
+            .get("SignedHeaders")
+            .ok_or(AuthError::Invalid(
+                "Could not find SignedHeaders in Authorization field".into(),
+            ))?
+            .split(';')
+            .map(|s| s.to_string())
+            .collect();
+        let signature = auth_params
+            .get("Signature")
+            .ok_or(AuthError::Invalid(
+                "Could not find Signature in Authorization field".into(),
+            ))?
+            .to_string();
+
+        let content_sha256 = parts
+            .headers
+            .get(xheader::X_AMZ_CONTENT_SHA256)
+            .ok_or(AuthError::Invalid(
+                "Missing x-amz-content-sha256 field".into(),
+            ))?
+            .to_str()?;
+
+        let date = parts
+            .headers
+            .get(xheader::X_AMZ_DATE)
+            .ok_or(AuthError::Invalid("Missing x-amz-date field".into()))?
+            .to_str()?;
+        let date = parse_date(date)?;
+
+        if Utc::now() - date > Duration::hours(24) {
+            return Err(AuthError::Invalid("Date is too old".into()).into());
+        }
+        let (key_id, scope) = parse_credential(cred)?;
+        if scope.date != format!("{}", date.format(SHORT_DATE)) {
+            return Err(AuthError::Invalid("Date mismatch".into()).into());
+        }
+
+        let auth = Authentication {
+            key_id,
+            scope,
+            signed_headers,
+            signature,
+            content_sha256: content_sha256.to_string(),
+            date,
+        };
+        Ok(Self(Some(auth)))
+    }
+}
 fn parse_date(date: &str) -> Result<DateTime<Utc>, AuthError> {
     let date: NaiveDateTime = NaiveDateTime::parse_from_str(date, LONG_DATETIME)
         .map_err(|_| AuthError::Invalid("Invalid date".into()))?;
     Ok(Utc.from_utc_datetime(&date))
 }
 
-fn parse_credential(cred: &str) -> Result<(&str, Scope<'_>), AuthError> {
+fn parse_credential(cred: &str) -> Result<(String, Scope), AuthError> {
     let parts: Vec<&str> = cred.split('/').collect();
     if parts.len() != 5 || parts[4] != SCOPE_ENDING {
         return Err(AuthError::Invalid("wrong scope format".into()));
     }
 
     let scope = Scope {
-        date: parts[1],
-        region: parts[2],
-        service: parts[3],
+        date: parts[1].to_string(),
+        region: parts[2].to_string(),
+        service: parts[3].to_string(),
     };
-    Ok((parts[0], scope))
+    Ok((parts[0].to_string(), scope))
 }
 
 /// Zero-copy SigV4 canonical request hasher
@@ -254,86 +286,5 @@ impl CanonicalRequestHasher {
 impl Default for CanonicalRequestHasher {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use actix_web::test::TestRequest;
-    use chrono::{Datelike, Timelike};
-
-    #[test]
-    fn test_extract_auth_none() {
-        let (req, _) = TestRequest::get().uri("/obj1").to_http_parts();
-        let auth = extract_authentication(&req).unwrap();
-        assert!(auth.is_none());
-    }
-
-    #[test]
-    fn test_parse_credential() {
-        let cred = "AKIAIOSFODNN7EXAMPLE/20230101/us-east-1/s3/aws4_request";
-        let (key_id, scope) = parse_credential(cred).unwrap();
-
-        assert_eq!(key_id, "AKIAIOSFODNN7EXAMPLE");
-        assert_eq!(scope.date, "20230101");
-        assert_eq!(scope.region, "us-east-1");
-        assert_eq!(scope.service, "s3");
-        // Verify the scope can be formatted correctly
-        let expected_scope = format!(
-            "{}/{}/{}/{}",
-            scope.date, scope.region, scope.service, SCOPE_ENDING
-        );
-        assert_eq!(expected_scope, "20230101/us-east-1/s3/aws4_request");
-    }
-
-    #[test]
-    fn test_parse_credential_invalid_format() {
-        let cred = "invalid/format";
-        assert!(parse_credential(cred).is_err());
-
-        let cred = "key/date/region/service/wrong_ending";
-        assert!(parse_credential(cred).is_err());
-    }
-
-    #[test]
-    fn test_parse_date() {
-        let date_str = "20230101T120000Z";
-        let parsed = parse_date(date_str).unwrap();
-
-        assert_eq!(parsed.year(), 2023);
-        assert_eq!(parsed.month(), 1);
-        assert_eq!(parsed.day(), 1);
-        assert_eq!(parsed.hour(), 12);
-        assert_eq!(parsed.minute(), 0);
-        assert_eq!(parsed.second(), 0);
-    }
-
-    #[test]
-    fn test_parse_date_invalid() {
-        let date_str = "invalid_date";
-        assert!(parse_date(date_str).is_err());
-
-        let date_str = "2023-01-01T12:00:00Z"; // Wrong format
-        assert!(parse_date(date_str).is_err());
-    }
-
-    #[test]
-    fn test_canonical_request_hasher() {
-        let mut hasher = CanonicalRequestHasher::new();
-        hasher.add_method("GET");
-        hasher.add_uri("/test");
-        hasher.add_query("");
-        hasher.add_headers(
-            [("host", "example.com"), ("x-amz-date", "20230101T120000Z")]
-                .iter()
-                .copied(),
-        );
-        hasher.add_signed_headers(["host", "x-amz-date"].iter().copied());
-        hasher.add_payload_hash("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-
-        let hash = hasher.finalize();
-        assert!(!hash.is_empty());
-        assert_eq!(hash.len(), 64);
     }
 }

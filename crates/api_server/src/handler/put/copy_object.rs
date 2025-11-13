@@ -10,16 +10,20 @@ use crate::{
             request::extract::BucketAndKeyName,
             response::xml::{Xml, XmlnsS3},
             s3_error::S3Error,
+            signature::body::ReqBody,
             time, xheader,
         },
-        get::get_object_content_as_bytes,
+        get::get_object_content,
         put::put_object_handler,
     },
     object_layout::*,
 };
-use actix_web::http::header::{self, HeaderMap, HeaderValue};
+use axum::{
+    body::Body,
+    http::{HeaderMap, HeaderValue, header},
+    response::Response,
+};
 use base64::{Engine, prelude::BASE64_STANDARD};
-use bytes::Bytes;
 use data_types::{ApiKey, TraceId, Versioned};
 use serde::Serialize;
 
@@ -191,58 +195,28 @@ impl CopyObjectResult {
     }
 }
 
-pub async fn copy_object_handler(
-    ctx: ObjectRequestContext,
-) -> Result<actix_web::HttpResponse, S3Error> {
+pub async fn copy_object_handler(ctx: ObjectRequestContext) -> Result<Response, S3Error> {
     let _bucket = ctx.resolve_bucket().await?;
     let api_key = ctx.api_key.ok_or(S3Error::InternalError)?;
     let header_opts = HeaderOpts::from_headers(ctx.request.headers())?;
-    // We need to get the source object first. Since Versioned doesn't implement Clone,
-    // we'll create a simple ApiKey for the source operation and reuse the original for put
-    let source_api_key = Versioned::new(
-        0,
-        ApiKey {
-            key_id: api_key.data.key_id.clone(),
-            secret_key: api_key.data.secret_key.clone(),
-            name: api_key.data.name.clone(),
-            allow_create_bucket: api_key.data.allow_create_bucket,
-            authorized_buckets: api_key.data.authorized_buckets.clone(),
-            is_deleted: api_key.data.is_deleted,
-        },
-    );
-    let (source_obj, source_body) = get_copy_source_object(
+    let (source_obj, body) = get_copy_source_object(
         ctx.app.clone(),
-        &source_api_key,
+        &api_key,
         &header_opts.x_amz_copy_source,
-        ctx.trace_id,
+        &ctx.trace_id,
     )
     .await?;
 
-    tracing::info!(
-        "Copy object request: bucket={}, key={}, source={}",
-        ctx.bucket_name,
-        ctx.key,
-        header_opts.x_amz_copy_source
-    );
-
-    // Convert the source body to bytes
-    let source_body_bytes = actix_web::body::to_bytes(source_body)
-        .await
-        .map_err(|_| S3Error::InternalError)?;
-    let actix_body_bytes = source_body_bytes;
-
-    // Use the existing put_object handler to store the copied object
     let new_ctx = ObjectRequestContext::new(
         ctx.app,
-        ctx.request,
+        axum::http::Request::new(ReqBody::from(body)),
         Some(api_key),
         ctx.bucket_name,
         ctx.key,
-        ctx.checksum_value, // Pass through the original checksum value
-        actix_web::dev::Payload::from(actix_body_bytes),
+        ctx.checksum_value,
         ctx.trace_id,
     );
-    let _put_response = put_object_handler(new_ctx).await?;
+    put_object_handler(new_ctx).await?;
 
     Xml(CopyObjectResult::default()
         .etag(source_obj.etag()?)
@@ -255,8 +229,8 @@ async fn get_copy_source_object(
     app: Arc<AppState>,
     api_key: &Versioned<ApiKey>,
     copy_source: &str,
-    trace_id: TraceId,
-) -> Result<(ObjectLayout, Bytes), S3Error> {
+    trace_id: &TraceId,
+) -> Result<(ObjectLayout, Body), S3Error> {
     let copy_source = percent_encoding::percent_decode_str(copy_source).decode_utf8()?;
 
     let (source_bucket_name, source_key) =
@@ -266,16 +240,16 @@ async fn get_copy_source_object(
         return Err(S3Error::AccessDenied);
     }
 
-    let source_bucket = bucket::resolve_bucket(&app, &source_bucket_name, &trace_id).await?;
+    let source_bucket = bucket::resolve_bucket(&app, &source_bucket_name, trace_id).await?;
     let source_obj =
-        get_raw_object(&app, &source_bucket.root_blob_name, &source_key, &trace_id).await?;
-    let (source_obj_content, _) = get_object_content_as_bytes(
+        get_raw_object(&app, &source_bucket.root_blob_name, &source_key, trace_id).await?;
+    let (source_obj_content, _) = get_object_content(
         app,
         &source_bucket,
         &source_obj,
         source_key,
         None,
-        &trace_id,
+        *trace_id,
     )
     .await?;
     Ok((source_obj, source_obj_content))

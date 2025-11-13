@@ -1,6 +1,5 @@
 use crate::handler::ObjectRequestContext;
 use crate::handler::common::{
-    buffer_payload,
     response::xml::{Xml, XmlnsS3},
     s3_error::S3Error,
 };
@@ -65,29 +64,22 @@ struct Error {
 
 pub async fn delete_objects_handler(
     ctx: ObjectRequestContext,
-) -> Result<actix_web::HttpResponse, S3Error> {
+) -> Result<axum::response::Response, S3Error> {
     let _bucket = ctx.resolve_bucket().await?;
-
-    // Extract body from payload using the helper function
-    let chunks = buffer_payload(ctx.payload).await?;
-    let body = crate::handler::common::merge_chunks(chunks);
-
-    // Parse the XML body to get the list of objects to delete
+    let body = ctx.request.into_body().collect().await?;
     let to_be_deleted: Delete = quick_xml::de::from_reader(body.reader())?;
-
     let mut delete_result = DeleteResult::default();
-
-    // Process each object to be deleted
     for obj in to_be_deleted.object {
         let key = format!("/{}\0", obj.key);
         let delete_ctx = ObjectRequestContext::new(
             ctx.app.clone(),
-            ctx.request.clone(),
+            axum::http::Request::new(crate::handler::common::signature::body::ReqBody::from(
+                axum::body::Body::empty(),
+            )),
             None,
             ctx.bucket_name.clone(),
             key,
-            None, // No checksum value needed for delete
-            actix_web::dev::Payload::None,
+            None,
             ctx.trace_id,
         );
         match delete_object_handler(delete_ctx).await {
@@ -99,28 +91,16 @@ pub async fn delete_objects_handler(
                 delete_result.deleted.push(deleted);
             }
             Err(e) => {
-                // Check if it's a "not found" error which is allowed in S3
-                if matches!(e, S3Error::NoSuchKey) {
-                    // S3 allows deleting non-existing objects
-                    let deleted = Deleted {
-                        key: obj.key,
-                        ..Default::default()
-                    };
-                    delete_result.deleted.push(deleted);
-                } else {
-                    // For other errors, record them in the error field
-                    delete_result.error = Some(Error {
-                        code: e.as_ref().to_owned(),
-                        key: obj.key,
-                        message: e.to_string(),
-                        version_id: "".to_string(),
-                    });
-                    break;
-                }
+                delete_result.error = Some(Error {
+                    code: e.as_ref().to_owned(),
+                    key: obj.key,
+                    message: e.to_string(),
+                    version_id: "".into(),
+                });
+                break;
             }
         }
     }
 
-    // Generate XML response using Xml wrapper
     Xml(delete_result).try_into()
 }

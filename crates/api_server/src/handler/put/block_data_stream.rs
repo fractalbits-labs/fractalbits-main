@@ -1,5 +1,5 @@
-use actix_web::error::PayloadError;
-use bytes::Bytes;
+use axum::Error;
+use bytes::{BufMut, Bytes, BytesMut};
 use futures::{Stream, ready};
 use pin_project_lite::pin_project;
 use std::pin::Pin;
@@ -7,9 +7,10 @@ use std::task::{Context, Poll};
 
 pin_project! {
     /// A stream that wraps another stream of `Bytes` and yields them in fixed-size blocks.
-    pub struct BlockDataStream<S>
+    pub struct BlockDataStream<S, E>
     where
-        S: Stream<Item = Result<Bytes, PayloadError>>,
+        S: Stream<Item = Result<Bytes, E>>,
+        E: Into<Error>,
     {
         #[pin]
         stream: S,
@@ -20,9 +21,10 @@ pin_project! {
     }
 }
 
-impl<S> BlockDataStream<S>
+impl<S, E> BlockDataStream<S, E>
 where
-    S: Stream<Item = Result<Bytes, PayloadError>>,
+    S: Stream<Item = Result<Bytes, E>>,
+    E: Into<Error>,
 {
     pub fn new(stream: S, block_size: u32) -> Self {
         assert!(block_size > 0, "Block size must be greater than 0");
@@ -38,11 +40,12 @@ where
     }
 }
 
-impl<S> Stream for BlockDataStream<S>
+impl<S, E> Stream for BlockDataStream<S, E>
 where
-    S: Stream<Item = Result<Bytes, PayloadError>>,
+    S: Stream<Item = Result<Bytes, E>>,
+    E: Into<Error>,
 {
-    type Item = Result<Vec<Bytes>, PayloadError>;
+    type Item = Result<Bytes, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.as_mut().project();
@@ -60,16 +63,24 @@ where
                 }
 
                 if *this.accumulated_size == *this.block_size {
-                    let block = std::mem::take(this.chunks);
+                    let chunks = std::mem::take(this.chunks);
                     *this.accumulated_size = 0;
-                    return Poll::Ready(Some(Ok(block)));
+                    let mut merged = BytesMut::with_capacity(chunks.iter().map(|c| c.len()).sum());
+                    for chunk in chunks {
+                        merged.put(chunk);
+                    }
+                    return Poll::Ready(Some(Ok(merged.freeze())));
                 }
             }
 
             if *this.accumulated_size == *this.block_size {
-                let block = std::mem::take(this.chunks);
+                let chunks = std::mem::take(this.chunks);
                 *this.accumulated_size = 0;
-                return Poll::Ready(Some(Ok(block)));
+                let mut merged = BytesMut::with_capacity(chunks.iter().map(|c| c.len()).sum());
+                for chunk in chunks {
+                    merged.put(chunk);
+                }
+                return Poll::Ready(Some(Ok(merged.freeze())));
             }
 
             match ready!(this.stream.as_mut().poll_next(cx)) {
@@ -90,16 +101,21 @@ where
                 }
 
                 Some(Err(e)) => {
-                    return Poll::Ready(Some(Err(e)));
+                    return Poll::Ready(Some(Err(e.into())));
                 }
 
                 None => {
                     if *this.accumulated_size == 0 {
                         return Poll::Ready(None);
                     } else {
-                        let last_block = std::mem::take(this.chunks);
+                        let chunks = std::mem::take(this.chunks);
                         *this.accumulated_size = 0;
-                        return Poll::Ready(Some(Ok(last_block)));
+                        let mut merged =
+                            BytesMut::with_capacity(chunks.iter().map(|c| c.len()).sum());
+                        for chunk in chunks {
+                            merged.put(chunk);
+                        }
+                        return Poll::Ready(Some(Ok(merged.freeze())));
                     }
                 }
             }

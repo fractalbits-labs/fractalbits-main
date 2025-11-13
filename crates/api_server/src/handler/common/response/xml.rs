@@ -1,5 +1,4 @@
-#![allow(unused)]
-use actix_web::HttpResponse;
+use axum::{body::Body, response::Response};
 use serde::Serialize;
 
 use crate::handler::common::s3_error::S3Error;
@@ -21,25 +20,26 @@ pub struct Xml<T>(pub T);
 // Note we are not implementing `IntoResponse` trait since we want to attach more contexts with
 // error cases, to follow the s3 error responses format:
 // https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html
-impl<T> TryInto<HttpResponse> for Xml<T>
+impl<T> TryInto<Response> for Xml<T>
 where
     T: Serialize,
 {
     type Error = S3Error;
 
-    fn try_into(self) -> Result<HttpResponse, Self::Error> {
+    fn try_into(self) -> Result<Response, Self::Error> {
         let mut xml_body = r#"<?xml version="1.0" encoding="UTF-8"?>"#.to_string();
         quick_xml::se::to_writer(&mut xml_body, &self.0)?;
-        Ok(HttpResponse::Ok()
-            .content_type("application/xml")
-            .body(xml_body))
+        Ok(Response::builder()
+            .header("Content-Type", "application/xml")
+            .body(Body::from(xml_body))?)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::test;
+    use axum::http::header;
+    use http_body_util::BodyExt;
 
     #[derive(Debug, Serialize, PartialEq, Eq, Default)]
     #[serde(rename_all = "PascalCase")]
@@ -69,19 +69,13 @@ mod tests {
                 session_token: "test_token".into(),
             },
         };
-        let resp: HttpResponse = Xml(output).try_into().unwrap();
+        let resp: Response = Xml(output).try_into().unwrap();
         assert_eq!(
             "application/xml",
-            resp.headers()
-                .get("content-type")
-                .unwrap()
-                .to_str()
-                .unwrap()
+            resp.headers().get(header::CONTENT_TYPE).unwrap()
         );
 
-        let body = resp.into_body();
-        use actix_web::body::MessageBody;
-        let body_bytes = body.try_into_bytes().unwrap();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let expected = "\
 <?xml version=\"1.0\" encoding=\"UTF-8\"?>\
 <TestCreateSessionOutput xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
@@ -92,6 +86,6 @@ mod tests {
 <SessionToken>test_token</SessionToken>\
 </Credentials>\
 </TestCreateSessionOutput>";
-        assert_eq!(expected, String::from_utf8(body_bytes.to_vec()).unwrap());
+        assert_eq!(expected, String::from_utf8(bytes.to_vec()).unwrap());
     }
 }

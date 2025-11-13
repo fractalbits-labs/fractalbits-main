@@ -378,7 +378,7 @@ impl BlobStorageImpl {
         blob_id: Uuid,
         volume_id: u16,
         block_number: u32,
-        chunks: Vec<actix_web::web::Bytes>,
+        chunks: Vec<bytes::Bytes>,
         trace_id: &TraceId,
     ) -> Result<(), BlobStorageError> {
         match self {

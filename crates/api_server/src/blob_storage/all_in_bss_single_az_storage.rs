@@ -55,7 +55,7 @@ impl AllInBssSingleAzStorage {
         blob_id: uuid::Uuid,
         volume_id: u16,
         block_number: u32,
-        chunks: Vec<actix_web::web::Bytes>,
+        chunks: Vec<Bytes>,
         trace_id: &TraceId,
     ) -> Result<(), BlobStorageError> {
         let total_size: usize = chunks.iter().map(|c| c.len()).sum();

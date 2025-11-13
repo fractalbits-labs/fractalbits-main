@@ -2,14 +2,16 @@ use std::{convert::From, str::Utf8Error};
 
 use super::signature::SignatureError;
 use crate::blob_storage::BlobStorageError;
-use actix_web::{
-    HttpResponse, ResponseError,
+use axum::{
+    extract::rejection::QueryRejection,
     http::{
-        StatusCode,
-        header::{InvalidHeaderValue, ToStrError},
+        HeaderValue, StatusCode,
+        header::{self, InvalidHeaderValue, ToStrError},
         uri::InvalidUri,
     },
+    response::{IntoResponse, Response},
 };
+use axum_extra::extract::rejection::HostRejection;
 use data_types::TraceId;
 use http_range::HttpRangeParseError;
 use rpc_client_common::RpcError;
@@ -786,15 +788,10 @@ impl S3Error {
 }
 
 impl S3Error {
-    pub fn error_response_with_resource(
-        &self,
-        resource: &str,
-        request_id: TraceId,
-    ) -> actix_web::HttpResponse {
+    pub fn into_response_with_resource(self, resource: &str, request_id: TraceId) -> Response {
         let host_id = std::env::var("HOST_ID")
             .map(|id| format!("    <HostId>{}</HostId>\n", id))
             .unwrap_or_default();
-
         let body = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <Error>
@@ -810,14 +807,20 @@ impl S3Error {
             host_id.trim_end()
         );
 
-        actix_web::HttpResponse::build(self.http_status_code())
-            .content_type("application/xml")
-            .body(body)
+        (
+            self.http_status_code(),
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/xml"),
+            )],
+            body,
+        )
+            .into_response()
     }
 }
 
-impl ResponseError for S3Error {
-    fn error_response(&self) -> HttpResponse {
+impl IntoResponse for S3Error {
+    fn into_response(self) -> Response {
         let body = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <Error>
@@ -830,9 +833,29 @@ impl ResponseError for S3Error {
             TraceId::new(),
         );
 
-        HttpResponse::build(self.http_status_code())
-            .insert_header(("Content-Type", "application/xml"))
-            .body(body)
+        (
+            self.http_status_code(),
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/xml"),
+            )],
+            body,
+        )
+            .into_response()
+    }
+}
+
+impl From<HostRejection> for S3Error {
+    fn from(value: HostRejection) -> Self {
+        tracing::error!("HostRejection: {value}");
+        Self::InvalidHostHeader
+    }
+}
+
+impl From<QueryRejection> for S3Error {
+    fn from(value: QueryRejection) -> Self {
+        tracing::error!("QueryRejection: {value}");
+        Self::UnsupportedArgument
     }
 }
 
@@ -905,9 +928,16 @@ impl From<HttpRangeParseError> for S3Error {
     }
 }
 
-impl From<actix_web::Error> for S3Error {
-    fn from(value: actix_web::Error) -> Self {
-        tracing::error!("actix_web::Error: {}", value);
+impl From<axum::Error> for S3Error {
+    fn from(value: axum::Error) -> Self {
+        tracing::error!("axum::Error: {}", value);
+        Self::InternalError
+    }
+}
+
+impl From<axum::http::Error> for S3Error {
+    fn from(value: axum::http::Error) -> Self {
+        tracing::error!("axum::http::Error: {}", value);
         Self::InternalError
     }
 }

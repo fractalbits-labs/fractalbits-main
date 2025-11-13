@@ -1,6 +1,21 @@
 use std::sync::Arc;
 
-use crate::{AppState, blob_storage::BlobLocation};
+use axum::{
+    RequestPartsExt,
+    body::{Body, BodyDataStream},
+    extract::Query,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::Response,
+};
+use bytes::Bytes;
+use futures::{StreamExt, TryStreamExt, stream};
+use metrics_wrapper::histogram;
+use serde::Deserialize;
+
+use crate::{
+    AppState,
+    blob_storage::{BlobLocation, DataBlobGuid},
+};
 use crate::{
     BlobClient,
     object_layout::{MpuState, ObjectState},
@@ -15,17 +30,7 @@ use crate::{
     },
     object_layout::ObjectLayout,
 };
-use actix_web::{
-    HttpResponse,
-    http::{StatusCode, header, header::HeaderValue},
-    web::Query,
-};
-use bytes::Bytes;
-use data_types::DataBlobGuid;
 use data_types::{Bucket, TraceId};
-use futures::{StreamExt, TryStreamExt, stream};
-use metrics_wrapper::histogram;
-use serde::Deserialize;
 use tracing::{Instrument, Span};
 
 #[derive(Debug, Deserialize)]
@@ -61,7 +66,7 @@ pub struct HeaderOpts<'a> {
 }
 
 impl<'a> HeaderOpts<'a> {
-    pub fn from_headers(headers: &'a header::HeaderMap) -> Result<Self, S3Error> {
+    pub fn from_headers(headers: &'a HeaderMap) -> Result<Self, S3Error> {
         Ok(Self {
             if_match: headers.get(header::IF_MATCH),
             if_modified_since: headers.get(header::IF_MODIFIED_SINCE),
@@ -69,103 +74,82 @@ impl<'a> HeaderOpts<'a> {
             if_unmodified_since: headers.get(header::IF_UNMODIFIED_SINCE),
             range: headers.get(header::RANGE),
             x_amz_server_side_encryption_customer_algorithm: headers
-                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_CUSTOMER_ALGORITHM.as_str()),
+                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_CUSTOMER_ALGORITHM),
             x_amz_server_side_encryption_customer_key: headers
-                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_CUSTOMER_KEY.as_str()),
+                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_CUSTOMER_KEY),
             x_amz_server_side_encryption_customer_key_md5: headers
-                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_CUSTOMER_KEY_MD5.as_str()),
-            x_amz_request_payer: headers.get(xheader::X_AMZ_REQUEST_PAYER.as_str()),
-            x_amz_expected_bucket_owner: headers.get(xheader::X_AMZ_EXPECTED_BUCKET_OWNER.as_str()),
+                .get(xheader::X_AMZ_SERVER_SIDE_ENCRYPTION_CUSTOMER_KEY_MD5),
+            x_amz_request_payer: headers.get(xheader::X_AMZ_REQUEST_PAYER),
+            x_amz_expected_bucket_owner: headers.get(xheader::X_AMZ_EXPECTED_BUCKET_OWNER),
             x_amz_checksum_mode_enabled: headers
-                .get(xheader::X_AMZ_CHECKSUM_MODE.as_str())
+                .get(xheader::X_AMZ_CHECKSUM_MODE)
                 .map(|x| x == "ENABLED")
                 .unwrap_or(false),
         })
     }
 }
 
-pub async fn get_object_handler(ctx: ObjectRequestContext) -> Result<HttpResponse, S3Error> {
+pub async fn get_object_handler(ctx: ObjectRequestContext) -> Result<Response, S3Error> {
     let bucket = ctx.resolve_bucket().await?;
-    let query_opts = Query::<QueryOpts>::from_query(ctx.request.query_string())
-        .map_err(|_| S3Error::UnsupportedArgument)?;
-
-    // Extract header options from headers
-    let header_opts = HeaderOpts::from_headers(ctx.request.headers())?;
-    let checksum_mode_enabled = header_opts.x_amz_checksum_mode_enabled;
-
-    // Get the raw object
+    let mut parts = ctx.request.into_parts().0;
+    let Query(query_opts): Query<QueryOpts> = parts.extract().await?;
+    let header_opts = HeaderOpts::from_headers(&parts.headers)?;
     let object = get_raw_object(&ctx.app, &bucket.root_blob_name, &ctx.key, &ctx.trace_id).await?;
     let total_size = object.size()?;
     histogram!("object_size", "operation" => "get").record(total_size as f64);
-
-    // Parse range header
     let range = parse_range_header(header_opts.range, total_size)?;
-
+    let checksum_mode_enabled = header_opts.x_amz_checksum_mode_enabled;
     match (query_opts.part_number, range) {
         (_, None) => {
-            // Full object request with streaming
-            let (body_stream, body_size) = get_object_content(
+            let (body, body_size) = get_object_content(
                 ctx.app,
                 &bucket,
                 &object,
                 ctx.key,
                 query_opts.part_number,
-                &ctx.trace_id,
+                ctx.trace_id,
             )
             .await?;
 
-            // Build streaming response
-            let mut response = HttpResponse::Ok();
-            object_headers(&mut response, &object, checksum_mode_enabled)?;
-            override_headers(&mut response, &query_opts)?;
+            let mut resp = Response::new(body);
+            object_headers(&mut resp, &object, checksum_mode_enabled)?;
+            resp.headers_mut().insert(
+                header::CONTENT_LENGTH,
+                HeaderValue::from_str(&body_size.to_string())?,
+            );
 
-            // Convert the stream to actix-web compatible format
-            let actix_stream = body_stream.map(|result| {
-                result.map_err(|e| {
-                    tracing::error!("Stream error: {e:?}");
-                    std::io::Error::other(format!("Stream error: {e:?}"))
-                })
-            });
-
-            Ok(response
-                .no_chunking(body_size)
-                .body(actix_web::body::SizedStream::new(body_size, actix_stream)))
+            override_headers(&mut resp, &query_opts)?;
+            Ok(resp)
         }
+
         (None, Some(range)) => {
-            // Range request with streaming
-            let body_stream =
-                get_object_range_content(ctx.app, &bucket, &object, ctx.key, &range, &ctx.trace_id)
+            let body =
+                get_object_range_content(ctx.app, &bucket, &object, ctx.key, &range, ctx.trace_id)
                     .await?;
 
-            let range_length = range.end - range.start;
-            let content_range = format!("bytes {}-{}/{}", range.start, range.end - 1, total_size);
-
-            // Build response for partial content
-            let mut response = HttpResponse::build(StatusCode::PARTIAL_CONTENT);
-            object_headers(&mut response, &object, false)?;
-            response.insert_header((header::CONTENT_RANGE, content_range));
-            response.insert_header((header::CONTENT_LENGTH, range_length.to_string()));
-            override_headers(&mut response, &query_opts)?;
-
-            // Convert the stream to actix-web compatible format
-            let actix_stream = body_stream.map(|result| {
-                result.map_err(|e| {
-                    tracing::error!("Stream error: {e:?}");
-                    std::io::Error::other(format!("Stream error: {e:?}"))
-                })
-            });
-
-            // Use streaming response
-            Ok(response.streaming(actix_stream))
+            let mut resp = Response::new(body);
+            resp.headers_mut().insert(
+                header::CONTENT_LENGTH,
+                HeaderValue::from_str(&format!("{}", range.end - range.start))?,
+            );
+            resp.headers_mut().insert(
+                header::CONTENT_RANGE,
+                HeaderValue::from_str(&format!(
+                    "bytes {}-{}/{}",
+                    range.start,
+                    range.end - 1,
+                    total_size
+                ))?,
+            );
+            *resp.status_mut() = StatusCode::PARTIAL_CONTENT;
+            Ok(resp)
         }
+
         (Some(_), Some(_)) => Err(S3Error::InvalidArgument1),
     }
 }
 
-pub fn override_headers(
-    resp: &mut actix_web::HttpResponseBuilder,
-    query_opts: &QueryOpts,
-) -> Result<(), S3Error> {
+pub fn override_headers(resp: &mut Response, query_opts: &QueryOpts) -> Result<(), S3Error> {
     // override headers, see https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html
     let overrides = [
         (header::CACHE_CONTROL, &query_opts.response_cache_control),
@@ -187,7 +171,8 @@ pub fn override_headers(
 
     for (hdr, val_opt) in overrides {
         if let Some(val) = val_opt {
-            resp.insert_header((hdr, val.as_str()));
+            let val = val.try_into()?;
+            resp.headers_mut().insert(hdr, val);
         }
     }
 
@@ -200,14 +185,8 @@ pub async fn get_object_content(
     object: &ObjectLayout,
     key: String,
     part_number: Option<u32>,
-    trace_id: &TraceId,
-) -> Result<
-    (
-        std::pin::Pin<Box<dyn stream::Stream<Item = Result<Bytes, S3Error>> + Send>>,
-        u64,
-    ),
-    S3Error,
-> {
+    trace_id: TraceId,
+) -> Result<(Body, u64), S3Error> {
     let blob_client = app
         .get_blob_client()
         .await
@@ -215,21 +194,21 @@ pub async fn get_object_content(
     match object.state {
         ObjectState::Normal(ref _obj_data) => {
             let blob_guid = object.blob_guid()?;
+            let blob_location = object.get_blob_location()?;
             let num_blocks = object.num_blocks()?;
             let size = object.size()?;
             let block_size = object.block_size as usize;
-            let blob_location = object.get_blob_location()?;
-            let body_stream = get_full_blob_stream(
+            let body = get_full_blob_stream(
                 blob_client,
                 blob_guid,
+                blob_location,
                 num_blocks,
                 size,
                 block_size,
-                blob_location,
-                *trace_id,
+                trace_id,
             )
             .await?;
-            Ok((Box::pin(body_stream), size))
+            Ok((body, size))
         }
         ObjectState::Mpu(ref mpu_state) => match mpu_state {
             MpuState::Uploading => {
@@ -250,46 +229,47 @@ pub async fn get_object_content(
                     "",
                     "",
                     false,
-                    trace_id,
+                    &trace_id,
                 )
                 .await?;
-                // Do filtering if there is part_number option
-                let (mpus_vec, body_size) = match part_number {
-                    None => (mpus.into_iter().collect::<Vec<_>>(), core_meta_data.size),
+
+                let (mpus_iter, body_size) = match part_number {
+                    None => (mpus.into_iter(), core_meta_data.size),
                     Some(n) => {
                         let mpu_obj = mpus.swap_remove(n as usize - 1);
                         let mpu_size = mpu_obj.1.size()?;
-                        (vec![mpu_obj], mpu_size)
+                        (vec![mpu_obj].into_iter(), mpu_size)
                     }
                 };
 
                 // Create a stream that concatenates all multipart streams
                 // Following the axum pattern for multipart streaming
-                let trace_id = *trace_id;
-                let mpu_stream = stream::iter(mpus_vec)
+                let body_stream = stream::iter(mpus_iter)
                     .then(move |(_key, mpu_obj)| {
                         let blob_client = blob_client.clone();
                         async move {
-                            let blob_guid = mpu_obj.blob_guid()?;
-                            let num_blocks = mpu_obj.num_blocks()?;
-                            let mpu_size = mpu_obj.size()?;
+                            let blob_guid = mpu_obj.blob_guid().map_err(axum::Error::new)?;
+                            let blob_location =
+                                mpu_obj.get_blob_location().map_err(axum::Error::new)?;
+                            let num_blocks = mpu_obj.num_blocks().map_err(axum::Error::new)?;
+                            let size = mpu_obj.size().map_err(axum::Error::new)?;
                             let block_size = mpu_obj.block_size as usize;
-                            let blob_location = mpu_obj.get_blob_location()?;
                             get_full_blob_stream(
                                 blob_client,
                                 blob_guid,
-                                num_blocks,
-                                mpu_size,
-                                block_size,
                                 blob_location,
+                                num_blocks,
+                                size,
+                                block_size,
                                 trace_id,
                             )
                             .await
+                            .map_err(axum::Error::new)
                         }
                     })
+                    .map_ok(|body| body.into_data_stream())
                     .try_flatten();
-
-                Ok((Box::pin(mpu_stream), body_size))
+                Ok((Body::from_stream(body_stream), body_size))
             }
         },
     }
@@ -301,8 +281,8 @@ async fn get_object_range_content(
     object: &ObjectLayout,
     key: String,
     range: &std::ops::Range<usize>,
-    trace_id: &TraceId,
-) -> Result<std::pin::Pin<Box<dyn stream::Stream<Item = Result<Bytes, S3Error>> + Send>>, S3Error> {
+    trace_id: TraceId,
+) -> Result<Body, S3Error> {
     let blob_client = app
         .get_blob_client()
         .await
@@ -317,15 +297,16 @@ async fn get_object_range_content(
             let body_stream = get_range_blob_stream(
                 blob_client,
                 blob_guid,
+                blob_location,
                 block_size,
                 object_size,
                 num_blocks,
                 range.start,
                 range.end,
-                blob_location,
-                *trace_id,
-            );
-            Ok(Box::pin(body_stream))
+                trace_id,
+            )
+            .await;
+            Ok(Body::from_stream(body_stream))
         }
         ObjectState::Mpu(ref mpu_state) => match mpu_state {
             MpuState::Uploading => {
@@ -336,7 +317,7 @@ async fn get_object_range_content(
                 tracing::warn!("invalid mpu state: Aborted");
                 Err(S3Error::InvalidObjectState)
             }
-            MpuState::Completed { .. } => {
+            MpuState::Completed(_) => {
                 let mpu_prefix = mpu_get_part_prefix(key, 0);
                 let mpus = list_raw_objects(
                     &app,
@@ -346,11 +327,12 @@ async fn get_object_range_content(
                     "",
                     "",
                     false,
-                    trace_id,
+                    &trace_id,
                 )
                 .await?;
 
-                let mut mpu_blobs: Vec<(DataBlobGuid, u64, usize, usize, usize)> = Vec::new();
+                let mut mpu_blobs: Vec<(DataBlobGuid, BlobLocation, usize, usize, usize, u64)> =
+                    Vec::new();
                 let mut obj_offset = 0;
                 for (_mpu_key, mpu_obj) in mpus {
                     let mpu_size = mpu_obj.size()? as usize;
@@ -365,43 +347,51 @@ async fn get_object_range_content(
                         } else {
                             range.end - obj_offset
                         };
-                        let part_size = mpu_obj.size()?;
-                        let part_num_blocks = mpu_obj.num_blocks()?;
+                        let blob_guid = mpu_obj.blob_guid()?;
+                        let blob_location = mpu_obj.get_blob_location()?;
+                        let num_blocks = mpu_obj.num_blocks()?;
+                        let mpu_obj_size = mpu_obj.size()?;
                         mpu_blobs.push((
-                            mpu_obj.blob_guid()?,
-                            part_size,
-                            part_num_blocks,
+                            blob_guid,
+                            blob_location,
                             blob_start,
                             blob_end,
+                            num_blocks,
+                            mpu_obj_size,
                         ));
                     }
                     obj_offset += mpu_size;
                 }
 
-                let trace_id = *trace_id;
                 let body_stream = stream::iter(mpu_blobs.into_iter())
                     .then(
-                        move |(blob_guid, part_size, part_num_blocks, blob_start, blob_end)| {
+                        move |(
+                            blob_guid,
+                            blob_location,
+                            blob_start,
+                            blob_end,
+                            num_blocks,
+                            object_size,
+                        )| {
                             let blob_client = blob_client.clone();
                             async move {
-                                // Note: In MPU range case, we need to determine blob_location from the specific MPU object
-                                // For now, assume all MPU parts use S3 storage (large objects)
-                                Ok::<_, S3Error>(get_range_blob_stream(
+                                Ok(get_range_blob_stream(
                                     blob_client,
                                     blob_guid,
+                                    blob_location,
                                     block_size,
-                                    part_size,
-                                    part_num_blocks,
+                                    object_size,
+                                    num_blocks,
                                     blob_start,
                                     blob_end,
-                                    BlobLocation::S3,
                                     trace_id,
-                                ))
+                                )
+                                .await)
                             }
                         },
                     )
                     .try_flatten();
-                Ok(Box::pin(body_stream))
+                Ok(Body::from_stream(body_stream))
             }
         },
     }
@@ -410,14 +400,15 @@ async fn get_object_range_content(
 async fn get_full_blob_stream(
     blob_client: Arc<BlobClient>,
     blob_guid: DataBlobGuid,
+    blob_location: BlobLocation,
     num_blocks: usize,
     object_size: u64,
     block_size: usize,
-    blob_location: BlobLocation,
     trace_id: TraceId,
-) -> Result<impl stream::Stream<Item = Result<Bytes, S3Error>>, S3Error> {
+) -> Result<Body, S3Error> {
     if num_blocks == 0 {
-        return Ok(stream::empty().boxed());
+        tracing::warn!("get_full_blob_stream: num_blocks is 0, returning empty body");
+        return Ok(Body::empty());
     }
 
     let first_block_len = if num_blocks == 1 {
@@ -438,19 +429,16 @@ async fn get_full_blob_stream(
             &trace_id,
         )
         .await
-        .map_err(|e| {
-            tracing::error!(%blob_guid, block_number=0, error=?e, "failed to get blob");
-            S3Error::from(e)
-        })?;
+        .map_err(S3Error::from)?;
 
     if num_blocks == 1 {
-        // Single block optimization - return immediately without streaming overhead
-        return Ok(stream::once(async { Ok(first_block) }).boxed());
+        return Ok(Body::from(first_block));
     }
 
     // Multi-block case: stream first block + remaining blocks
     let remaining_stream = stream::iter(1..num_blocks).then(move |i| {
         let blob_client = blob_client.clone();
+        let trace_id = trace_id;
         async move {
             let is_last_block = i == num_blocks - 1;
             let content_len = if is_last_block {
@@ -480,33 +468,33 @@ async fn get_full_blob_stream(
     });
 
     let full_stream = stream::once(async { Ok(first_block) }).chain(remaining_stream);
-    Ok(full_stream.boxed())
+
+    Ok(Body::from_stream(full_stream.map_err(axum::Error::new)))
 }
 
 #[allow(clippy::too_many_arguments)]
-fn get_range_blob_stream(
+async fn get_range_blob_stream(
     blob_client: Arc<BlobClient>,
     blob_guid: DataBlobGuid,
+    blob_location: BlobLocation,
     block_size: usize,
     object_size: u64,
     num_blocks: usize,
     start: usize,
     end: usize,
-    blob_location: BlobLocation,
     trace_id: TraceId,
-) -> impl stream::Stream<Item = Result<Bytes, S3Error>> {
+) -> BodyDataStream {
     let start_block_i = start / block_size;
     let end_block_i = (end - 1) / block_size;
     let blob_offset: usize = block_size * start_block_i;
 
     let span = Span::current();
-    futures::stream::iter(start_block_i..=end_block_i)
+    let body_stream = stream::iter(start_block_i..=end_block_i)
         .then(move |i| {
             let blob_client = blob_client.clone();
+            let trace_id = trace_id;
             async move {
                 let mut block = Bytes::new();
-                // For range reads, we always read full blocks and trim in the scan below
-                // except for the last block which might be partial
                 let is_last_block = i == num_blocks - 1;
                 let content_len = if is_last_block {
                     (object_size as usize) - (block_size * i)
@@ -526,7 +514,7 @@ fn get_range_blob_stream(
                 {
                     Err(e) => {
                         tracing::error!(%blob_guid, block_number=i, error=?e, "failed to get blob");
-                        Err(S3Error::from(e))
+                        Err(axum::Error::new(e))
                     }
                     Ok(_) => Ok(block),
                 }
@@ -564,32 +552,9 @@ fn get_range_blob_stream(
             };
             futures::future::ready(r)
         })
-        .filter_map(futures::future::ready)
-}
+        .filter_map(futures::future::ready);
 
-pub async fn get_object_content_as_bytes(
-    app: Arc<AppState>,
-    bucket: &Bucket,
-    object: &ObjectLayout,
-    key: String,
-    part_number: Option<u32>,
-    trace_id: &TraceId,
-) -> Result<(Bytes, u64), S3Error> {
-    let (stream, size) =
-        get_object_content(app, bucket, object, key, part_number, trace_id).await?;
-
-    // Collect the stream into bytes
-    let stream_bytes = stream
-        .try_collect::<Vec<_>>()
-        .await
-        .map_err(|_| S3Error::InternalError)?;
-
-    let mut full_bytes = Bytes::new();
-    for bytes in stream_bytes {
-        full_bytes = [full_bytes, bytes].concat().into();
-    }
-
-    Ok((full_bytes, size))
+    Body::from_stream(body_stream).into_data_stream()
 }
 
 fn parse_range_header(

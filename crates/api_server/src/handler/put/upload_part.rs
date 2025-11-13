@@ -1,7 +1,8 @@
 use crate::handler::ObjectRequestContext;
 use crate::handler::common::{mpu_get_part_prefix, s3_error::S3Error};
 use crate::handler::put::put_object_handler;
-use actix_web::HttpResponse;
+use axum::response::Response;
+use axum::{http::HeaderValue, response};
 use serde::Serialize;
 
 #[allow(dead_code)]
@@ -27,45 +28,27 @@ pub async fn upload_part_handler(
     ctx: ObjectRequestContext,
     part_number: u64,
     upload_id: String,
-) -> Result<HttpResponse, S3Error> {
+) -> Result<Response, S3Error> {
     if !(1..=10_000).contains(&part_number) {
         return Err(S3Error::InvalidPart);
     }
+    // TODO: check upload_id
 
-    // Basic upload_id validation - check it's a valid UUID format
-    if uuid::Uuid::parse_str(&upload_id).is_err() {
-        return Err(S3Error::NoSuchUpload);
-    }
-
-    let part_key = mpu_get_part_prefix(ctx.key.clone(), part_number);
-    tracing::debug!(
-        "Upload part {} for upload {} to {}/{}",
-        part_number,
-        upload_id,
-        ctx.bucket_name,
-        part_key
-    );
-
-    tracing::debug!("Upload part request headers:");
-    for (name, value) in ctx.request.headers().iter() {
-        tracing::debug!("  {}: {:?}", name, value);
-    }
-
-    // Create a new context for the part object
-    let part_ctx = ObjectRequestContext::new(
+    let key = mpu_get_part_prefix(ctx.key, part_number);
+    let new_ctx = ObjectRequestContext::new(
         ctx.app,
         ctx.request,
         ctx.api_key,
         ctx.bucket_name,
-        part_key,
-        ctx.checksum_value, // Pass through the original checksum value
-        ctx.payload,
+        key,
+        ctx.checksum_value,
         ctx.trace_id,
     );
+    put_object_handler(new_ctx).await?;
 
-    // Call put_object_handler to store the part
-    let _response = put_object_handler(part_ctx).await?;
-
+    let mut resp = response::Response::default();
     let etag = format!("{upload_id}{part_number}");
-    Ok(HttpResponse::Ok().insert_header(("ETag", etag)).finish())
+    resp.headers_mut()
+        .insert("ETag", HeaderValue::from_str(&etag).unwrap());
+    Ok(resp)
 }

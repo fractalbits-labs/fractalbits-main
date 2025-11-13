@@ -1,5 +1,10 @@
-use actix_web::http::header::ToStrError;
-use rpc_client_rss::RpcErrorRss;
+use axum::{
+    body::Body,
+    extract::rejection::QueryRejection,
+    http::{Request, header::ToStrError},
+};
+use rpc_client_common::RpcError;
+use sync_wrapper::SyncWrapper;
 use thiserror::Error;
 
 /// Errors of this crate
@@ -17,11 +22,11 @@ pub enum SignatureError {
     #[error("Invalid digest: {0}")]
     InvalidDigest(String),
 
-    #[error("Query parsing error: {0}")]
-    QueryParsingError(String),
+    #[error(transparent)]
+    QueryRejection(#[from] QueryRejection),
 
     #[error(transparent)]
-    RpcErrorRss(#[from] RpcErrorRss),
+    RpcError(#[from] RpcError),
 
     #[error(transparent)]
     FromHexError(#[from] hex::FromHexError),
@@ -29,15 +34,14 @@ pub enum SignatureError {
     #[error(transparent)]
     ToStrError(#[from] ToStrError),
 
-    #[error("HTTP processing error: {0}")]
-    HttpProcessingError(String),
-
-    // Generic HTTP body error that can come from any body implementation
-    #[error("Body error: {0}")]
-    BodyError(String),
+    #[error(transparent)]
+    AxumError(#[from] axum::Error),
 
     #[error("Other: {0}")]
     Other(String),
+
+    #[error("Signature error: {0}")]
+    SignatureError(Box<SignatureError>, Box<SyncWrapper<Request<Body>>>),
 }
 
 impl From<aws_signature::SignatureError> for SignatureError {

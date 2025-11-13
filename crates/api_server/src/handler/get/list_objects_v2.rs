@@ -1,9 +1,6 @@
-use actix_web::web::Query;
-use nss_codec::list_inodes_response;
 use rpc_client_common::nss_rpc_retry;
 use std::sync::Arc;
 
-use crate::object_layout::ObjectLayout;
 use crate::{
     AppState,
     handler::{
@@ -15,11 +12,14 @@ use crate::{
         },
     },
 };
+use axum::{RequestPartsExt, extract::Query, response::Response};
 use data_types::{Bucket, TraceId};
 use rkyv::{self, rancor::Error};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Default)]
+use crate::object_layout::ObjectLayout;
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 struct QueryOpts {
     list_type: Option<String>,
@@ -192,16 +192,10 @@ pub struct Prefix {
     prefix: String,
 }
 
-pub async fn list_objects_v2_handler(
-    ctx: ObjectRequestContext,
-) -> Result<actix_web::HttpResponse, S3Error> {
-    let opts = Query::<QueryOpts>::from_query(ctx.request.query_string())
-        .unwrap_or_else(|_| Query(Default::default()))
-        .into_inner();
-    tracing::debug!(
-        "list_objects_v2 query_string='{}' parsed={opts:?}",
-        ctx.request.query_string()
-    );
+pub async fn list_objects_v2_handler(ctx: ObjectRequestContext) -> Result<Response, S3Error> {
+    let bucket = ctx.resolve_bucket().await?;
+    let Query(opts): Query<QueryOpts> = ctx.request.into_parts().0.extract().await?;
+    tracing::debug!("list_objects_v2 {opts:?}");
 
     // Sanity checks
     if opts.list_type != Some("2".into()) {
@@ -211,7 +205,7 @@ pub async fn list_objects_v2_handler(
         );
         return Err(S3Error::InvalidArgument1);
     }
-    if let Some(encoding_type) = &opts.encoding_type
+    if let Some(encoding_type) = opts.encoding_type
         && encoding_type != "url"
     {
         tracing::warn!(
@@ -220,9 +214,6 @@ pub async fn list_objects_v2_handler(
         );
         return Err(S3Error::InvalidArgument1);
     }
-
-    // Get bucket info
-    let bucket = ctx.resolve_bucket().await?;
 
     let max_keys = opts.max_keys.unwrap_or(1000);
     let prefix = format!("/{}", opts.prefix.clone().unwrap_or_default());
@@ -240,14 +231,6 @@ pub async fn list_objects_v2_handler(
         start_after = format!("/{start_after}");
     }
 
-    tracing::debug!(
-        "Calling list_objects with max_keys={}, prefix='{}', delimiter='{}', start_after='{}'",
-        max_keys,
-        prefix,
-        delimiter,
-        start_after
-    );
-
     let (objs, common_prefixes, next_continuation_token) = list_objects(
         ctx.app,
         &bucket,
@@ -258,12 +241,6 @@ pub async fn list_objects_v2_handler(
         ctx.trace_id,
     )
     .await?;
-
-    tracing::debug!(
-        "list_objects returned {} objects, {} common_prefixes",
-        objs.len(),
-        common_prefixes.len()
-    );
 
     Xml(ListBucketResult::default()
         .key_count(objs.len())
@@ -318,7 +295,7 @@ pub async fn list_objects(
 
     // Process results
     let (inodes, has_more) = match resp.result.unwrap() {
-        list_inodes_response::Result::Ok(res) => {
+        nss_codec::list_inodes_response::Result::Ok(res) => {
             tracing::debug!(
                 "NSS returned {} inodes, has_more={}",
                 res.inodes.len(),
@@ -326,7 +303,7 @@ pub async fn list_objects(
             );
             (res.inodes, res.has_more)
         }
-        list_inodes_response::Result::Err(e) => {
+        nss_codec::list_inodes_response::Result::Err(e) => {
             tracing::error!("NSS list_inodes error: {}", e);
             return Err(S3Error::InternalError);
         }

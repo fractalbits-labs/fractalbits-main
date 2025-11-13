@@ -104,6 +104,13 @@ impl AppState {
         }
     }
 
+    #[cfg(test)]
+    pub fn new_for_test(config: Arc<Config>) -> Self {
+        let cache_coordinator = Arc::new(CacheCoordinator::new());
+        let az_status_coordinator = Arc::new(CacheCoordinator::new());
+        Self::new_per_core_sync(config, cache_coordinator, az_status_coordinator, 0)
+    }
+
     /// Returns a read guard to the NSS client, or ServiceUnavailable error if not initialized
     pub async fn get_nss_rpc_client(&self) -> Result<RwLockReadGuard<'_, RpcClientNss>, S3Error> {
         let guard = self.rpc_client_nss.read().await;
@@ -121,17 +128,14 @@ impl AppState {
         tracing::info!("NSS client updated successfully");
     }
 
-    /// Get the current NSS address (for comparison during refresh)
     pub async fn get_nss_address(&self) -> Option<String> {
         self.nss_address.read().await.clone()
     }
 
     /// Try to refresh NSS address from RSS when connection fails.
-    /// Returns true if address was refreshed and caller should retry the operation.
     pub async fn try_refresh_nss_address(&self, trace_id: &TraceId) -> bool {
         let current_addr = self.get_nss_address().await;
 
-        // Fetch latest NSS address from RSS
         let rss_client = self.get_rss_rpc_client();
         match rss_rpc_retry!(
             rss_client,
@@ -162,12 +166,10 @@ impl AppState {
 
     /// Ensures NSS client is initialized by fetching address from RSS if needed
     pub async fn ensure_nss_client_initialized(&self, trace_id: &TraceId) -> bool {
-        // Fast path: check if already initialized
         if self.get_nss_rpc_client().await.is_ok() {
             return true;
         }
 
-        // Fetch NSS address from RSS
         tracing::info!("NSS client not initialized, fetching address from RSS");
         let rss_client = self.get_rss_rpc_client();
         match rss_rpc_retry!(

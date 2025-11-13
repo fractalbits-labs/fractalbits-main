@@ -1,13 +1,10 @@
-use actix_web::HttpResponse;
+use axum::{body::Body, http::header, response::Response};
 use bytes::Buf;
 use rpc_client_common::RpcError;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::handler::{
-    BucketRequestContext,
-    common::{buffer_payload, s3_error::S3Error},
-};
+use crate::handler::{BucketRequestContext, common::s3_error::S3Error};
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
@@ -36,7 +33,7 @@ struct BucketConfig {
     bucket_type: String,
 }
 
-pub async fn create_bucket_handler(ctx: BucketRequestContext) -> Result<HttpResponse, S3Error> {
+pub async fn create_bucket_handler(ctx: BucketRequestContext) -> Result<Response, S3Error> {
     info!("handling create_bucket request: {}", ctx.bucket_name);
 
     // Validate permissions and bucket name
@@ -60,8 +57,7 @@ pub async fn create_bucket_handler(ctx: BucketRequestContext) -> Result<HttpResp
     }
 
     // Parse and validate the request body
-    let chunks = buffer_payload(ctx.payload).await?;
-    let body = crate::handler::common::merge_chunks(chunks);
+    let body = ctx.request.into_body().collect().await?;
     if !body.is_empty() {
         let create_bucket_conf: CreateBucketConfiguration =
             quick_xml::de::from_reader(body.reader())?;
@@ -84,9 +80,9 @@ pub async fn create_bucket_handler(ctx: BucketRequestContext) -> Result<HttpResp
     match result {
         Ok(_) => {
             info!("Successfully created bucket: {}", ctx.bucket_name);
-            Ok(HttpResponse::Ok()
-                .insert_header(("location", format!("/{}", ctx.bucket_name)))
-                .finish())
+            Ok(Response::builder()
+                .header(header::LOCATION, format!("/{}", ctx.bucket_name))
+                .body(Body::empty())?)
         }
         Err(e) => {
             tracing::error!("Failed to create bucket {}: {}", ctx.bucket_name, e);

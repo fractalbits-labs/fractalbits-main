@@ -2,7 +2,6 @@ use crate::{
     handler::{
         ObjectRequestContext,
         common::{
-            buffer_payload,
             checksum::{ChecksumAlgorithm, ChecksumValue, Checksummer},
             extract_metadata_headers, gen_etag, get_raw_object, list_raw_objects,
             mpu_get_part_prefix, mpu_parse_part_number,
@@ -13,10 +12,9 @@ use crate::{
     },
     object_layout::{MpuState, ObjectCoreMetaData, ObjectState},
 };
-use actix_web::http::header::HeaderValue;
-use actix_web::web::Bytes;
+use axum::{http::HeaderValue, response::Response};
 use base64::{Engine, prelude::BASE64_STANDARD};
-use bytes::Buf;
+use bytes::{Buf, Bytes};
 use nss_codec::put_inode_response;
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
 use rpc_client_common::nss_rpc_retry;
@@ -168,16 +166,11 @@ impl MpuChecksummer {
 pub async fn complete_multipart_upload_handler(
     ctx: ObjectRequestContext,
     upload_id: String,
-) -> Result<actix_web::HttpResponse, S3Error> {
+) -> Result<Response, S3Error> {
     let bucket = ctx.resolve_bucket().await?;
-    let _headers = extract_metadata_headers(ctx.request.headers())?;
-    let _expected_checksum = ctx.checksum_value;
-
-    // Extract body from payload
-    let chunks = buffer_payload(ctx.payload).await?;
-    let body = crate::handler::common::merge_chunks(chunks);
-
-    // Parse the request body to get the parts list
+    let headers = extract_metadata_headers(ctx.request.headers())?;
+    let expected_checksum = ctx.checksum_value;
+    let body = ctx.request.into_body().collect().await.unwrap();
     let req_body: CompleteMultipartUpload = quick_xml::de::from_reader(body.reader())?;
     let mut valid_part_numbers: HashSet<u32> =
         req_body.part.iter().map(|part| part.part_number).collect();
@@ -205,49 +198,21 @@ pub async fn complete_multipart_upload_handler(
     )
     .await?;
 
-    // Extract headers from request for metadata
-    let headers = crate::handler::common::extract_metadata_headers(ctx.request.headers())?;
-
-    // Extract expected checksum from headers
-    let expected_checksum = ctx.checksum_value;
-
-    // Use MpuChecksummer like the original implementation
     let mut total_size = 0;
     let mut invalid_part_keys = HashSet::new();
     let mut checksummer = MpuChecksummer::init(expected_checksum.map(|x| x.algorithm()));
-
-    tracing::info!("Found {} mpu objects", mpu_objs.len());
     for (mut mpu_key, mpu_obj) in mpu_objs {
         assert_eq!(Some('\0'), mpu_key.pop());
         let part_number = mpu_parse_part_number(&mpu_key)?;
-        tracing::info!(
-            "Processing part {} with size {}",
-            part_number,
-            mpu_obj.size().unwrap_or(0)
-        );
         if !valid_part_numbers.remove(&part_number) {
             invalid_part_keys.insert(mpu_key.clone());
-            tracing::info!("Part {} is invalid", part_number);
         } else {
             checksummer.update(mpu_obj.checksum()?)?;
-            let part_size = mpu_obj.size()?;
-            total_size += part_size;
-            tracing::info!(
-                "Added part {} size {} to total, new total: {}",
-                part_number,
-                part_size,
-                total_size
-            );
+            total_size += mpu_obj.size()?;
         }
     }
-    tracing::info!("Final total_size: {}", total_size);
 
     let checksum = checksummer.finalize();
-    tracing::info!(
-        "Computed checksum: {:?}, Expected checksum: {:?}",
-        checksum,
-        expected_checksum
-    );
     if expected_checksum.is_some() && checksum != expected_checksum {
         return Err(S3Error::InvalidDigest);
     }
@@ -255,17 +220,16 @@ pub async fn complete_multipart_upload_handler(
     if !valid_part_numbers.is_empty() {
         return Err(S3Error::InvalidPart);
     }
-    // Delete invalid parts that weren't included in the completed multipart upload
-    for invalid_key in invalid_part_keys {
-        tracing::info!("Deleting invalid part: {}", invalid_key);
+    for mpu_key in invalid_part_keys.iter() {
         let delete_ctx = ObjectRequestContext::new(
             ctx.app.clone(),
-            ctx.request.clone(),
+            axum::http::Request::new(crate::handler::common::signature::body::ReqBody::from(
+                axum::body::Body::empty(),
+            )),
             None,
             ctx.bucket_name.clone(),
-            invalid_key,
-            None, // No checksum value needed for delete
-            actix_web::dev::Payload::None,
+            mpu_key.clone(),
+            None,
             ctx.trace_id,
         );
         delete_object_handler(delete_ctx).await?;
@@ -296,7 +260,7 @@ pub async fn complete_multipart_upload_handler(
     match resp.result.unwrap() {
         put_inode_response::Result::Ok(_) => {}
         put_inode_response::Result::Err(e) => {
-            tracing::error!("put_inode error: {}", e);
+            tracing::error!(e);
             return Err(S3Error::InternalError);
         }
     };
@@ -306,6 +270,5 @@ pub async fn complete_multipart_upload_handler(
         .key(ctx.key)
         .etag(object.etag()?)
         .checksum(object.checksum()?);
-
     Xml(resp).try_into()
 }

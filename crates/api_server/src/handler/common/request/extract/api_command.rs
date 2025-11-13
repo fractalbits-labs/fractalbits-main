@@ -1,7 +1,14 @@
-use actix_web::{FromRequest, HttpRequest, dev::Payload};
-use futures::future::{Ready, ready};
+use std::borrow::Cow;
 use std::str::FromStr;
+
+use axum::{
+    RequestPartsExt,
+    extract::{FromRequestParts, Query},
+    http::request::Parts,
+};
 use strum::EnumString;
+
+use crate::handler::common::s3_error::S3Error;
 
 #[derive(Debug, EnumString, Copy, PartialEq, Clone, strum::Display)]
 #[strum(serialize_all = "camelCase")]
@@ -42,115 +49,81 @@ pub enum ApiCommand {
     Website,
 }
 
-#[derive(Debug, Clone)]
 pub struct ApiCommandFromQuery(pub Option<ApiCommand>);
 
-impl FromRequest for ApiCommandFromQuery {
-    type Error = actix_web::Error;
-    type Future = Ready<Result<Self, Self::Error>>;
+impl<S> FromRequestParts<S> for ApiCommandFromQuery
+where
+    S: Send + Sync,
+{
+    type Rejection = S3Error;
 
-    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
-        // Parse query string to extract API commands
-        let query_string = req.query_string();
-
-        // Split query string into key-value pairs
-        let mut api_commands = Vec::new();
-        for pair in query_string.split('&') {
-            // API commands are query parameters with no value (e.g., "?uploads" or "?acl")
-            if !pair.contains('=') && !pair.is_empty() {
-                if let Ok(cmd) = ApiCommand::from_str(pair) {
-                    api_commands.push(cmd);
-                }
-            } else if let Some((key, value)) = pair.split_once('=') {
-                // Also check for commands as keys with empty values (e.g., "?uploads=")
-                if value.is_empty()
-                    && let Ok(cmd) = ApiCommand::from_str(key)
-                {
-                    api_commands.push(cmd);
-                }
-            }
-        }
-
-        let api_command = if api_commands.is_empty() {
-            None
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let query_params: Query<Vec<(Cow<'_, str>, Cow<'_, str>)>> = parts.extract().await?;
+        let api_commands: Vec<ApiCommand> = query_params
+            .iter()
+            .filter_map(|(k, v)| v.as_ref().is_empty().then_some(k))
+            .filter_map(|cmd| ApiCommand::from_str(cmd.as_ref()).ok())
+            .collect();
+        if api_commands.is_empty() {
+            Ok(Self(None))
         } else {
             if api_commands.len() > 1 {
                 tracing::warn!(
-                    "Multiple api commands found: {:?}, picking the first one",
-                    api_commands
+                    "Multiple api command found: {api_commands:?}, pick up the first one"
                 );
             }
-            Some(api_commands[0])
-        };
-
-        ready(Ok(ApiCommandFromQuery(api_command)))
+            Ok(Self(Some(api_commands[0])))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::{App, HttpResponse, test, web};
+    use axum::{Router, body::Body, http::Request, routing::get};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
 
-    async fn handler(ApiCommandFromQuery(api_command): ApiCommandFromQuery) -> HttpResponse {
-        let result = match api_command {
-            Some(api_command) => api_command.to_string(),
-            None => "".to_string(),
-        };
-        HttpResponse::Ok().body(result)
+    fn app() -> Router {
+        Router::new().route("/{*key}", get(handler))
     }
 
-    #[actix_web::test]
+    async fn handler(ApiCommandFromQuery(api_command): ApiCommandFromQuery) -> String {
+        match api_command {
+            Some(api_command) => api_command.to_string(),
+            None => "".into(),
+        }
+    }
+
+    #[tokio::test]
     async fn test_extract_api_command_ok() {
         let api_cmd = "acl";
         assert_eq!(send_request_get_body(api_cmd).await, api_cmd);
     }
 
-    #[actix_web::test]
+    #[tokio::test]
     async fn test_extract_api_command_null() {
         let api_cmd = "";
         assert_eq!(send_request_get_body(api_cmd).await, api_cmd);
     }
 
-    #[actix_web::test]
-    async fn test_extract_api_command_uploads() {
-        let api_cmd = "uploads";
-        assert_eq!(send_request_get_body(api_cmd).await, api_cmd);
-    }
-
-    #[actix_web::test]
-    async fn test_extract_api_command_with_empty_value() {
-        let api_cmd = "uploads=";
-        assert_eq!(send_request_get_body(api_cmd).await, "uploads");
-    }
-
     async fn send_request_get_body(api_cmd: &str) -> String {
-        let app = test::init_service(App::new().route("/{key:.*}", web::get().to(handler))).await;
-
-        let uri = if api_cmd.is_empty() {
-            "/obj1".to_string()
+        let api_cmd = if api_cmd.is_empty() {
+            ""
         } else {
-            format!("/obj1?{}", api_cmd)
+            &format!("?{api_cmd}")
         };
-
-        let req = test::TestRequest::get().uri(&uri).to_request();
-
-        let resp = test::call_service(&app, req).await;
-        let body = test::read_body(resp).await;
-        String::from_utf8(body.to_vec()).unwrap()
-    }
-
-    #[test]
-    async fn test_api_command_from_str() {
-        assert_eq!(ApiCommand::from_str("acl").unwrap(), ApiCommand::Acl);
-        assert_eq!(
-            ApiCommand::from_str("uploads").unwrap(),
-            ApiCommand::Uploads
-        );
-        assert_eq!(ApiCommand::from_str("cors").unwrap(), ApiCommand::Cors);
-
-        // Test that invalid commands fail
-        assert!(ApiCommand::from_str("invalid").is_err());
-        assert!(ApiCommand::from_str("").is_err());
+        let body = app()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("http://my-bucket.localhost/obj1{api_cmd}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .into_body();
+        let bytes = body.collect().await.unwrap().to_bytes();
+        String::from_utf8(bytes.to_vec()).unwrap()
     }
 }

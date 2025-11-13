@@ -1,4 +1,4 @@
-use actix_web::HttpResponse;
+use axum::{RequestPartsExt, extract::Query, response::Response};
 use serde::{Deserialize, Serialize};
 
 use crate::handler::{
@@ -64,8 +64,8 @@ struct Owner {
     id: String,
 }
 
-pub async fn list_buckets_handler(ctx: BucketRequestContext) -> Result<HttpResponse, S3Error> {
-    // TODO: Extract query parameters for ListBucketsOptions if needed
+pub async fn list_buckets_handler(ctx: BucketRequestContext) -> Result<Response, S3Error> {
+    let Query(_opts): Query<ListBucketsOptions> = ctx.request.into_parts().0.extract().await?;
     let buckets: Vec<Bucket> = ctx
         .app
         .list_buckets(ctx.trace_id)

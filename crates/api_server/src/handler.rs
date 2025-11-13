@@ -7,48 +7,51 @@ mod head;
 mod post;
 mod put;
 
+use metrics_wrapper::{counter, histogram};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use crate::{AppState, http_stats::HttpStatsGuard};
-use actix_web::{
-    HttpRequest, HttpResponse,
-    web::{self, Payload},
+use axum::{
+    body::Body,
+    extract::{ConnectInfo, FromRequestParts, State},
+    http,
+    response::Response,
 };
 use bucket::BucketEndpoint;
 use common::{
-    authorization::Authorization, checksum::ChecksumValue, request::extract::*, s3_error::S3Error,
-    signature::check_signature,
+    authorization::Authorization,
+    checksum::ChecksumValue,
+    request::extract::*,
+    s3_error::S3Error,
+    signature::{body::ReqBody, check_signature},
 };
 use data_types::{ApiKey, Bucket, TraceId, Versioned};
 use delete::DeleteEndpoint;
 use endpoint::Endpoint;
 use get::GetEndpoint;
 use head::HeadEndpoint;
-#[cfg(any(feature = "metrics_statsd", feature = "metrics_prometheus"))]
-use metrics_wrapper::{Gauge, gauge};
-use metrics_wrapper::{counter, histogram};
 use post::PostEndpoint;
 use put::PutEndpoint;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
 use tracing::{Instrument, debug, error, warn};
+
+pub type Request<T = ReqBody> = http::Request<T>;
 
 pub struct BucketRequestContext {
     pub app: Arc<AppState>,
-    pub request: HttpRequest,
+    pub request: Request,
     pub api_key: Versioned<ApiKey>,
     pub bucket_name: String,
-    pub payload: actix_web::dev::Payload,
     pub trace_id: TraceId,
 }
 
 impl BucketRequestContext {
     pub fn new(
         app: Arc<AppState>,
-        request: HttpRequest,
+        request: Request,
         api_key: Versioned<ApiKey>,
         bucket_name: String,
-        payload: actix_web::dev::Payload,
         trace_id: TraceId,
     ) -> Self {
         Self {
@@ -56,7 +59,6 @@ impl BucketRequestContext {
             request,
             api_key,
             bucket_name,
-            payload,
             trace_id,
         }
     }
@@ -68,12 +70,11 @@ impl BucketRequestContext {
 
 pub struct ObjectRequestContext {
     pub app: Arc<AppState>,
-    pub request: HttpRequest,
+    pub request: Request,
     pub api_key: Option<Versioned<ApiKey>>,
     pub bucket_name: String,
     pub key: String,
     pub checksum_value: Option<ChecksumValue>,
-    pub payload: actix_web::dev::Payload,
     pub trace_id: TraceId,
 }
 
@@ -81,12 +82,11 @@ impl ObjectRequestContext {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         app: Arc<AppState>,
-        request: HttpRequest,
+        request: Request,
         api_key: Option<Versioned<ApiKey>>,
         bucket_name: String,
         key: String,
         checksum_value: Option<ChecksumValue>,
-        payload: actix_web::dev::Payload,
         trace_id: TraceId,
     ) -> Self {
         Self {
@@ -96,7 +96,6 @@ impl ObjectRequestContext {
             bucket_name,
             key,
             checksum_value,
-            payload,
             trace_id,
         }
     }
@@ -108,66 +107,58 @@ impl ObjectRequestContext {
     }
 }
 
-/// Extracts data from request and returns early with warning log on failure
 macro_rules! extract_or_return {
-    ($extractor_type:ty, $req:expr, $trace_id:expr) => {{
-        use actix_web::FromRequest;
-        match <$extractor_type>::from_request($req, &mut actix_web::dev::Payload::None).await {
-            Ok(extracted) => extracted,
+    ($parts:expr, $app:expr, $extractor:ty, $trace_id:expr) => {
+        match <$extractor>::from_request_parts($parts, $app).await {
+            Ok(value) => value,
             Err(rejection) => {
                 tracing::warn!(
                     trace_id = %$trace_id,
-                    "failed to extract {} at {}:{} {:?} {:?}",
-                    stringify!($extractor_type),
+                    "failed to extract parts at {}:{} {:?} {:?}",
                     file!(),
                     line!(),
                     rejection,
-                    $req.uri()
+                    $parts
                 );
-                return Ok(S3Error::InternalError.error_response_with_resource("", $trace_id));
+                return S3Error::InternalError.into_response_with_resource("", $trace_id);
             }
         }
-    }};
+    };
 }
 
-pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpResponse, S3Error> {
+pub async fn any_handler(
+    State(app): State<Arc<AppState>>,
+    ConnectInfo(client_addr): ConnectInfo<SocketAddr>,
+    request: http::Request<Body>,
+) -> Response {
     let start = Instant::now();
+    let trace_id = TraceId::new_with_worker_id(app.worker_id as u8);
 
-    let app_data = req
-        .app_data::<web::Data<Arc<AppState>>>()
-        .ok_or(S3Error::InternalError)?;
-    let app = app_data.get_ref().clone();
-
-    let trace_id = TraceId::new_with_worker_id(app_data.worker_id as u8);
-
-    // Extract all the required data using the macro
-    let ApiCommandFromQuery(api_cmd) = extract_or_return!(ApiCommandFromQuery, &req, trace_id);
-    let api_sig = extract_or_return!(ApiSignatureExtractor, &req, trace_id);
+    let (mut parts, body) = request.into_parts();
+    let ApiCommandFromQuery(api_cmd) =
+        extract_or_return!(&mut parts, &app, ApiCommandFromQuery, trace_id);
+    let AuthFromHeaders(auth) = extract_or_return!(&mut parts, &app, AuthFromHeaders, trace_id);
+    let BucketAndKeyName { bucket, key } =
+        extract_or_return!(&mut parts, &app, BucketAndKeyName, trace_id);
+    let api_sig = extract_or_return!(&mut parts, &app, ApiSignature, trace_id);
     let ChecksumValueFromHeaders(checksum_value) =
-        extract_or_return!(ChecksumValueFromHeaders, &req, trace_id);
-    let BucketAndKeyName { bucket, key } = extract_or_return!(BucketAndKeyName, &req, trace_id);
-    let resource = format!("/{bucket}{key}");
-    let auth = match extract_authentication(&req) {
-        Ok(auth) => auth,
-        Err(e) => {
-            tracing::warn!(%trace_id, "failed to extract authentication {e:?} {:?}", req.uri());
-            return Ok(S3Error::InternalError.error_response_with_resource(&resource, trace_id));
-        }
-    };
-
-    let client_addr = req
-        .connection_info()
-        .realip_remote_addr()
-        .unwrap_or("0.0.0.0:0")
-        .to_string();
+        extract_or_return!(&mut parts, &app, ChecksumValueFromHeaders, trace_id);
+    let request = http::Request::from_parts(parts, body);
 
     debug!(%trace_id, %bucket, %key, %client_addr);
-    let endpoint = match Endpoint::from_extractors(&req, &bucket, &key, api_cmd, api_sig.0.clone())
-    {
+
+    let resource = format!("/{bucket}{key}");
+    let endpoint = match Endpoint::from_extractors(
+        &request,
+        &bucket,
+        &key,
+        api_cmd,
+        api_sig.clone(),
+    ) {
         Err(e) => {
             let api_cmd = api_cmd.map_or("".into(), |cmd| cmd.to_string());
             warn!(%trace_id, %api_cmd, %api_sig, %bucket, %key, %client_addr, error = ?e, "failed to create endpoint");
-            return Ok(e.error_response_with_resource(&resource, trace_id));
+            return e.into_response_with_resource(&resource, trace_id);
         }
         Ok(endpoint) => endpoint,
     };
@@ -186,8 +177,7 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
             key.clone(),
             auth,
             checksum_value,
-            &req,
-            payload.into_inner(),
+            request,
             endpoint,
             &trace_id,
         )
@@ -203,7 +193,7 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
         Err(_) => {
             error!(%trace_id, endpoint = %endpoint_name, %bucket, %key, %client_addr, "request timed out");
             counter!("request_timeout", "endpoint" => endpoint_name).increment(1);
-            return Ok(S3Error::InternalError.error_response_with_resource(&resource, trace_id));
+            return S3Error::InternalError.into_response_with_resource(&resource, trace_id);
         }
     };
 
@@ -211,39 +201,36 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
         Ok(response) => {
             histogram!("request_duration_nanos", "status" => format!("{endpoint_name}_Ok"))
                 .record(duration.as_nanos() as f64);
-            Ok(response)
+            response
         }
         Err(e) => {
             histogram!("request_duration_nanos", "status" => format!("{endpoint_name}_Err"))
                 .record(duration.as_nanos() as f64);
             error!(%trace_id, endpoint = %endpoint_name, %bucket, %key, %client_addr, error = ?e, "failed to handle request");
-            Ok(e.error_response_with_resource(&resource, trace_id))
+            e.into_response_with_resource(&resource, trace_id)
         }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn any_handler_inner<'a>(
+async fn any_handler_inner(
     app: Arc<AppState>,
     bucket: String,
     key: String,
-    auth: Option<Authentication<'a>>,
+    auth: Option<Authentication>,
     checksum_value: Option<ChecksumValue>,
-    request: &HttpRequest,
-    payload: actix_web::dev::Payload,
+    request: http::Request<Body>,
     endpoint: Endpoint,
     trace_id: &TraceId,
-) -> Result<HttpResponse, S3Error> {
+) -> Result<Response, S3Error> {
     let start = Instant::now();
     let endpoint_name = endpoint.as_str();
 
-    let api_key = check_signature(app.clone(), request, auth.as_ref(), trace_id).await?;
+    let (request, api_key) = check_signature(app.clone(), request, auth.as_ref(), trace_id).await?;
     histogram!("verify_request_duration_nanos", "endpoint" => endpoint_name)
         .record(start.elapsed().as_nanos() as f64);
 
-    // Check authorization
-    let authorization_type = endpoint.authorization_type();
-    let allowed = match authorization_type {
+    let allowed = match endpoint.authorization_type() {
         Authorization::Read => api_key.data.allow_read(&bucket),
         Authorization::Write => api_key.data.allow_write(&bucket),
         Authorization::Owner => api_key.data.allow_owner(&bucket),
@@ -251,7 +238,10 @@ async fn any_handler_inner<'a>(
     };
     debug!(
         "Authorization check: endpoint={:?}, bucket={}, required={:?}, allowed={}",
-        endpoint_name, bucket, authorization_type, allowed
+        endpoint_name,
+        bucket,
+        endpoint.authorization_type(),
+        allowed
     );
     if !allowed {
         return Err(S3Error::AccessDenied);
@@ -259,25 +249,17 @@ async fn any_handler_inner<'a>(
 
     match endpoint {
         Endpoint::Bucket(bucket_endpoint) => {
-            let bucket_ctx = BucketRequestContext::new(
-                app,
-                request.clone(),
-                api_key,
-                bucket,
-                payload,
-                *trace_id,
-            );
+            let bucket_ctx = BucketRequestContext::new(app, request, api_key, bucket, *trace_id);
             bucket_handler(bucket_ctx, bucket_endpoint).await
         }
         ref _object_endpoints => {
             let object_ctx = ObjectRequestContext::new(
                 app,
-                request.clone(),
+                request,
                 Some(api_key),
                 bucket,
                 key,
                 checksum_value,
-                payload,
                 *trace_id,
             );
             match endpoint {
@@ -297,7 +279,7 @@ async fn any_handler_inner<'a>(
 async fn bucket_handler(
     ctx: BucketRequestContext,
     endpoint: BucketEndpoint,
-) -> Result<HttpResponse, S3Error> {
+) -> Result<Response, S3Error> {
     match endpoint {
         BucketEndpoint::CreateBucket => bucket::create_bucket_handler(ctx).await,
         BucketEndpoint::DeleteBucket => bucket::delete_bucket_handler(ctx).await,
@@ -309,7 +291,7 @@ async fn bucket_handler(
 async fn head_handler(
     ctx: ObjectRequestContext,
     endpoint: HeadEndpoint,
-) -> Result<HttpResponse, S3Error> {
+) -> Result<Response, S3Error> {
     match endpoint {
         HeadEndpoint::HeadObject => head::head_object_handler(ctx).await,
     }
@@ -318,7 +300,7 @@ async fn head_handler(
 async fn get_handler(
     ctx: ObjectRequestContext,
     endpoint: GetEndpoint,
-) -> Result<HttpResponse, S3Error> {
+) -> Result<Response, S3Error> {
     match endpoint {
         GetEndpoint::GetObject => get::get_object_handler(ctx).await,
         GetEndpoint::GetObjectAttributes => get::get_object_attributes_handler(ctx).await,
@@ -332,7 +314,7 @@ async fn get_handler(
 async fn put_handler(
     ctx: ObjectRequestContext,
     endpoint: PutEndpoint,
-) -> Result<HttpResponse, S3Error> {
+) -> Result<Response, S3Error> {
     match endpoint {
         PutEndpoint::PutObject => put::put_object_handler(ctx).await,
         PutEndpoint::UploadPart(part_number, upload_id) => {
@@ -347,7 +329,7 @@ async fn put_handler(
 async fn post_handler(
     ctx: ObjectRequestContext,
     endpoint: PostEndpoint,
-) -> Result<HttpResponse, S3Error> {
+) -> Result<Response, S3Error> {
     match endpoint {
         PostEndpoint::CompleteMultipartUpload(upload_id) => {
             post::complete_multipart_upload_handler(ctx, upload_id).await
@@ -360,7 +342,7 @@ async fn post_handler(
 async fn delete_handler(
     ctx: ObjectRequestContext,
     endpoint: DeleteEndpoint,
-) -> Result<HttpResponse, S3Error> {
+) -> Result<Response, S3Error> {
     match endpoint {
         DeleteEndpoint::AbortMultipartUpload(upload_id) => {
             delete::abort_multipart_upload_handler(ctx, upload_id).await

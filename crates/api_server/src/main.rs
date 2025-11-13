@@ -1,6 +1,10 @@
-use actix_files::Files;
-use actix_web::{App, HttpServer, middleware::Logger, rt::System, web};
-use api_server::{AppState, CacheCoordinator, Config, api_key_routes, cache_mgmt, handler};
+use api_server::{
+    AppState, CacheCoordinator, Config, api_key_routes, cache_mgmt, handler::any_handler,
+};
+use axum::{
+    Router,
+    routing::{delete, get, post},
+};
 use clap::Parser;
 use data_types::Versioned;
 use rustls::{
@@ -17,6 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::{fs::File, io::BufReader};
 use tokio::signal::unix::{SignalKind, signal};
+use tower_http::services::ServeDir;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -31,7 +36,7 @@ struct Opt {
 
 fn main() -> std::io::Result<()> {
     // AWS SDK suppression filter
-    let third_party_filter = "tower_http=warn,hyper_util=warn,aws_smithy=warn,aws_sdk=warn,actix_web=warn,actix_server=warn,h2=warn";
+    let third_party_filter = "tower_http=warn,hyper_util=warn,aws_smithy=warn,aws_sdk=warn";
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -153,18 +158,10 @@ fn main() -> std::io::Result<()> {
 
     let http_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
     let mgmt_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), mgmt_port);
-    let https_addr = if https_config.enabled {
-        Some(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            https_config.port,
-        ))
-    } else {
-        None
-    };
 
     info!(
         port,
-        mgmt_port, worker_count, "Starting server with {worker_count} threads"
+        mgmt_port, worker_count, "Starting axum server with {worker_count} threads"
     );
 
     let stats_writer_handle = if config.enable_stats_writer {
@@ -199,23 +196,18 @@ fn main() -> std::io::Result<()> {
     };
 
     let mut handles = Vec::with_capacity(worker_count);
-    let mut server_handles = Vec::new();
-    let (handle_tx, handle_rx) = std::sync::mpsc::channel();
 
     for (worker_idx, core_id) in worker_cores.into_iter().enumerate() {
         let http_listener = make_reuseport_listener(http_addr)?;
         let mgmt_listener = make_reuseport_listener(mgmt_addr)?;
-        let https_listener = https_addr.map(make_reuseport_listener).transpose()?;
 
         let config = config.clone();
         let cache_coordinator = cache_coordinator.clone();
         let az_status_coordinator = az_status_coordinator.clone();
         let web_root = gui_web_root.clone();
-        let https_config = https_config.clone();
-        let handle_tx = handle_tx.clone();
 
         let handle = thread::Builder::new()
-            .name(format!("actix-core-{worker_idx}"))
+            .name(format!("axum-core-{worker_idx}"))
             .spawn(move || {
                 if let Some(core_id) = core_id {
                     core_affinity::set_for_current(core_id);
@@ -226,7 +218,12 @@ fn main() -> std::io::Result<()> {
                     );
                 }
 
-                System::new().block_on(async move {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to create tokio runtime");
+
+                runtime.block_on(async move {
                     let app_state = Arc::new(AppState::new_per_core_sync(
                         config.clone(),
                         cache_coordinator,
@@ -234,68 +231,62 @@ fn main() -> std::io::Result<()> {
                         worker_idx as u16,
                     ));
 
-                    let mut server = HttpServer::new(move || {
-                        if let Some(core_id) = core_id {
-                            core_affinity::set_for_current(core_id);
-                        }
+                    let api_key_routes = Router::new()
+                        .route("/", post(api_key_routes::create_api_key))
+                        .route("/", get(api_key_routes::list_api_keys))
+                        .route("/{key_id}", delete(api_key_routes::delete_api_key));
 
-                        let app_state = app_state.clone();
-                        let mut app = App::new()
-                            .app_data(web::Data::new(app_state))
-                            .app_data(web::PayloadConfig::default().limit(5_368_709_120))
-                            .wrap(Logger::default())
-                            .service(
-                                web::scope("/mgmt")
-                                    .route("/health", web::get().to(cache_mgmt::mgmt_health))
-                                    .route(
-                                        "/cache/invalidate/bucket/{name}",
-                                        web::post().to(cache_mgmt::invalidate_bucket),
-                                    )
-                                    .route(
-                                        "/cache/invalidate/api_key/{id}",
-                                        web::post().to(cache_mgmt::invalidate_api_key),
-                                    )
-                                    .route(
-                                        "/cache/update/az_status/{id}",
-                                        web::post().to(cache_mgmt::update_az_status),
-                                    )
-                                    .route("/cache/clear", web::post().to(cache_mgmt::clear_cache))
-                                    .route(
-                                        "/nss/update_address",
-                                        web::post().to(cache_mgmt::update_nss_address),
-                                    ),
-                            )
-                            .service(
-                                web::scope("/api_keys")
-                                    .route("/", web::post().to(api_key_routes::create_api_key))
-                                    .route("/", web::get().to(api_key_routes::list_api_keys))
-                                    .route(
-                                        "/{key_id}",
-                                        web::delete().to(api_key_routes::delete_api_key),
-                                    ),
-                            );
+                    let mgmt_routes = Router::new()
+                        .route("/health", get(cache_mgmt::mgmt_health))
+                        .route(
+                            "/cache/invalidate/bucket/{name}",
+                            post(cache_mgmt::invalidate_bucket),
+                        )
+                        .route(
+                            "/cache/invalidate/api_key/{id}",
+                            post(cache_mgmt::invalidate_api_key),
+                        )
+                        .route(
+                            "/cache/update/az_status/{id}",
+                            post(cache_mgmt::update_az_status),
+                        )
+                        .route("/cache/clear", post(cache_mgmt::clear_cache))
+                        .route(
+                            "/nss/update_address",
+                            post(cache_mgmt::update_nss_address),
+                        );
 
-                        if let Some(ref web_root) = web_root {
-                            let static_dir = web_root.clone();
-                            app =
-                                app.service(Files::new("/ui", static_dir).index_file("index.html"));
-                        }
+                    let main_router = if let Some(ref web_root) = web_root {
+                        info!(web_root = %web_root.display(), "serving ui");
+                        Router::new()
+                            .nest_service("/ui", ServeDir::new(web_root))
+                            .nest("/api_keys", api_key_routes)
+                            .fallback(any_handler)
+                    } else {
+                        Router::new()
+                            .nest("/api_keys", api_key_routes)
+                            .fallback(any_handler)
+                    };
 
-                        app.default_service(web::route().to(handler::any_handler))
-                    });
+                    let main_router_with_state = main_router
+                        .with_state(app_state.clone());
 
-                    server = server
-                        .workers(1)
-                        .max_connections(65536)
-                        .max_connection_rate(65536)
-                        .client_request_timeout(config.client_request_timeout())
-                        .disable_signals();
+                    let mgmt_app = Router::new()
+                        .nest("/mgmt", mgmt_routes)
+                        .with_state(app_state)
+                        .into_make_service_with_connect_info::<SocketAddr>();
 
-                    server = server.listen(http_listener).unwrap();
-                    server = server.listen(mgmt_listener).unwrap();
+                    let http_listener = tokio::net::TcpListener::from_std(http_listener)
+                        .expect("Failed to convert http listener");
+                    let mgmt_listener = tokio::net::TcpListener::from_std(mgmt_listener)
+                        .expect("Failed to convert mgmt listener");
 
-                    if let Some(https_listener) = https_listener {
-                        let key_path = PathBuf::from(&https_config.key_file);
+                    if https_config.enabled {
+                        let https_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.https.port);
+                        let https_listener = make_reuseport_listener(https_addr)
+                            .expect("Failed to create HTTPS listener");
+
+                        let key_path = PathBuf::from(&config.https.key_file);
                         let private_key = match load_private_key(&key_path) {
                             Ok(private_key) => private_key,
                             Err(e) => {
@@ -307,7 +298,7 @@ fn main() -> std::io::Result<()> {
                             }
                         };
 
-                        let cert_path = PathBuf::from(&https_config.cert_file);
+                        let cert_path = PathBuf::from(&config.https.cert_file);
                         let cert_chain = match load_certificates(&cert_path) {
                             Ok(cert_chain) => cert_chain,
                             Err(e) => {
@@ -328,33 +319,61 @@ fn main() -> std::io::Result<()> {
                         .with_single_cert(cert_chain, private_key)
                         .unwrap();
 
-                        if https_config.force_http1_only {
+                        if config.https.force_http1_only {
                             tls_config.alpn_protocols = vec![b"http/1.1".to_vec()];
                         } else {
                             tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
                         }
 
-                        server = server
-                            .listen_rustls_0_23(https_listener, tls_config)
-                            .unwrap();
+                        let tls_config_arc = Arc::new(tls_config);
+
+                        let main_app_http = main_router_with_state.clone()
+                            .into_make_service_with_connect_info::<SocketAddr>();
+                        let main_app_https = main_router_with_state;
+
+                        tokio::select! {
+                            result = axum::serve(http_listener, main_app_http)
+                                .with_graceful_shutdown(wait_for_shutdown()) => {
+                                if let Err(e) = result {
+                                    error!(worker_idx, "HTTP server stopped: {e}");
+                                }
+                            }
+                            result = axum_server::from_tcp_rustls(https_listener, axum_server::tls_rustls::RustlsConfig::from_config(tls_config_arc))
+                                .serve(main_app_https.into_make_service_with_connect_info::<SocketAddr>()) => {
+                                if let Err(e) = result {
+                                    error!(worker_idx, "HTTPS server stopped: {e}");
+                                }
+                            }
+                            result = axum::serve(mgmt_listener, mgmt_app)
+                                .with_graceful_shutdown(wait_for_shutdown()) => {
+                                if let Err(e) = result {
+                                    error!(worker_idx, "Management server stopped: {e}");
+                                }
+                            }
+                        }
+                    } else {
+                        let main_app = main_router_with_state.into_make_service_with_connect_info::<SocketAddr>();
+                        tokio::select! {
+                            result = axum::serve(http_listener, main_app)
+                                .with_graceful_shutdown(wait_for_shutdown()) => {
+                                if let Err(e) = result {
+                                    error!(worker_idx, "HTTP server stopped: {e}");
+                                }
+                            }
+                            result = axum::serve(mgmt_listener, mgmt_app)
+                                .with_graceful_shutdown(wait_for_shutdown()) => {
+                                if let Err(e) = result {
+                                    error!(worker_idx, "Management server stopped: {e}");
+                                }
+                            }
+                        }
                     }
-
-                    let server = server.run();
-                    let server_handle = server.handle();
-                    let _ = handle_tx.send(server_handle);
-
-                    server.await
                 })
             })?;
 
         handles.push(handle);
     }
 
-    drop(handle_tx);
-
-    for server_handle in handle_rx {
-        server_handles.push(server_handle);
-    }
     let signal_handle = thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -377,11 +396,7 @@ fn main() -> std::io::Result<()> {
             }
 
             SHUTDOWN.store(true, Ordering::Release);
-
-            for server_handle in server_handles {
-                server_handle.stop(true).await;
-            }
-            info!("All servers stopped");
+            info!("Shutdown signal processed");
         });
     });
 
@@ -445,4 +460,14 @@ fn load_certificates(
         return Err(format!("No certificates found in {}", cert_path.display()).into());
     }
     Ok(cert_chain)
+}
+
+async fn wait_for_shutdown() {
+    loop {
+        if SHUTDOWN.load(Ordering::Acquire) {
+            info!("Shutdown signal detected, stopping server");
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }

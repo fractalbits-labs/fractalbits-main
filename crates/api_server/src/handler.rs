@@ -172,6 +172,7 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
     let span = tracing::info_span!(
         "request",
         trace_id = %trace_id,
+        worker_id = %app_data.worker_id,
     );
 
     let result = tokio::time::timeout(

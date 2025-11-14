@@ -485,7 +485,6 @@ impl DataVgProxy {
         (address, result)
     }
 
-    /// Multi-BSS get_blob
     /// Multi-BSS get_blob with quorum-based reads
     pub async fn get_blob(
         &self,

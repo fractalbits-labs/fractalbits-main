@@ -15,6 +15,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tracing::{Instrument, Span};
 
 /// Streaming checksum receiver type
 pub type StreamingChecksumReceiver = JoinHandle<Result<Option<ChecksumValue>, S3Error>>;
@@ -64,6 +65,7 @@ pin_project! {
         signature_context: Option<ChunkSignatureContext>,
         previous_signature: Option<String>,
         current_chunk_buffer: BytesMut,
+        span: Span,
     }
 }
 
@@ -120,108 +122,119 @@ impl S3StreamingPayload {
         let (checksum_tx, mut checksum_rx) = mpsc::unbounded_channel::<ChecksumMessage>();
 
         // Spawn checksum calculation task
-        let checksum_handle = tokio::spawn(async move {
-            let final_expected = expected_checksum;
-            let mut trailer_checksums: Option<S3Trailers> = None;
+        let checksum_handle = tokio::spawn(
+            async move {
+                let final_expected = expected_checksum;
+                let mut trailer_checksums: Option<S3Trailers> = None;
 
-            // Process messages for checksum calculation
-            let mut total_bytes = 0;
-            let mut stream_error: Option<String> = None;
-            while let Some(msg) = checksum_rx.recv().await {
-                match msg {
-                    ChecksumMessage::Data(data) => {
-                        total_bytes += data.len();
-                        tracing::trace!(
-                            "Updating checksummer with {} bytes: {:?}",
-                            data.len(),
-                            std::str::from_utf8(&data).unwrap_or("<non-utf8>")
-                        );
-                        if let Some(ref mut cs) = checksummer {
-                            cs.update(&data);
+                // Process messages for checksum calculation
+                let mut total_bytes = 0;
+                let mut stream_error: Option<String> = None;
+                while let Some(msg) = checksum_rx.recv().await {
+                    match msg {
+                        ChecksumMessage::Data(data) => {
+                            total_bytes += data.len();
+                            tracing::trace!(
+                                "Updating checksummer with {} bytes: {:?}",
+                                data.len(),
+                                std::str::from_utf8(&data).unwrap_or("<non-utf8>")
+                            );
+                            if let Some(ref mut cs) = checksummer {
+                                cs.update(&data);
+                            }
+                        }
+                        ChecksumMessage::Trailers(trailers) => {
+                            tracing::trace!("Received trailer checksums: {:?}", trailers);
+                            trailer_checksums = Some(trailers);
+                        }
+                        ChecksumMessage::Error(err) => {
+                            tracing::error!("Stream error during checksum calculation: {}", err);
+                            stream_error = Some(err);
+                            break;
                         }
                     }
-                    ChecksumMessage::Trailers(trailers) => {
-                        tracing::trace!("Received trailer checksums: {:?}", trailers);
-                        trailer_checksums = Some(trailers);
-                    }
-                    ChecksumMessage::Error(err) => {
-                        tracing::error!("Stream error during checksum calculation: {}", err);
-                        stream_error = Some(err);
-                        break;
-                    }
                 }
-            }
-            tracing::debug!("Total bytes processed for checksum: {}", total_bytes);
+                tracing::debug!("Total bytes processed for checksum: {}", total_bytes);
 
-            // If stream error occurred, return error immediately
-            if let Some(err) = stream_error {
-                tracing::error!("Checksum calculation aborted due to stream error: {}", err);
-                return Err(S3Error::InternalError);
-            }
+                // If stream error occurred, return error immediately
+                if let Some(err) = stream_error {
+                    tracing::error!("Checksum calculation aborted due to stream error: {}", err);
+                    return Err(S3Error::InternalError);
+                }
 
-            // If we received 0 bytes and expected a checksum, this likely means the stream
-            // errored/timed out before any data arrived. Skip verification to avoid
-            // confusing error messages.
-            if total_bytes == 0 && expected_checksum.is_some() {
-                tracing::warn!("Skipping checksum verification for 0-byte failed stream");
-                return Ok(None);
-            }
+                // If we received 0 bytes and expected a checksum, this likely means the stream
+                // errored/timed out before any data arrived. Skip verification to avoid
+                // confusing error messages.
+                if total_bytes == 0 && expected_checksum.is_some() {
+                    tracing::warn!("Skipping checksum verification for 0-byte failed stream");
+                    return Ok(None);
+                }
 
-            // Finalize checksum
-            let calculated_checksum = checksummer.map(|cs| cs.finalize());
+                // Finalize checksum
+                let calculated_checksum = checksummer.map(|cs| cs.finalize());
 
-            // Debug: log calculated checksum
-            if let Some(checksum) = &calculated_checksum {
-                let encoded = match checksum {
-                    ChecksumValue::Crc32(bytes) => base64::prelude::BASE64_STANDARD.encode(bytes),
-                    ChecksumValue::Crc32c(bytes) => base64::prelude::BASE64_STANDARD.encode(bytes),
-                    ChecksumValue::Crc64Nvme(bytes) => {
-                        base64::prelude::BASE64_STANDARD.encode(bytes)
-                    }
-                    ChecksumValue::Sha1(bytes) => base64::prelude::BASE64_STANDARD.encode(bytes),
-                    ChecksumValue::Sha256(bytes) => base64::prelude::BASE64_STANDARD.encode(bytes),
-                };
-                tracing::debug!(
-                    "Calculated {:?}: (base64: {})",
-                    checksum.algorithm(),
-                    encoded
-                );
-            }
-
-            // Verify trailer checksums if present
-            if let Some(trailers) = trailer_checksums
-                && let Some(calculated) = &calculated_checksum
-                && let Some(expected_trailer) = &trailers.checksum_value
-            {
-                let calculated_bytes = match calculated {
-                    ChecksumValue::Crc32(bytes) => bytes.as_slice(),
-                    ChecksumValue::Crc32c(bytes) => bytes.as_slice(),
-                    ChecksumValue::Crc64Nvme(bytes) => bytes.as_slice(),
-                    ChecksumValue::Sha1(bytes) => bytes.as_slice(),
-                    ChecksumValue::Sha256(bytes) => bytes.as_slice(),
-                };
-                let calculated_b64 = base64::prelude::BASE64_STANDARD.encode(calculated_bytes);
-
-                if expected_trailer != &calculated_b64 {
-                    tracing::error!(
-                        "{:?} checksum mismatch: trailer={}, calculated={}",
-                        calculated.algorithm(),
-                        expected_trailer,
-                        calculated_b64
+                // Debug: log calculated checksum
+                if let Some(checksum) = &calculated_checksum {
+                    let encoded = match checksum {
+                        ChecksumValue::Crc32(bytes) => {
+                            base64::prelude::BASE64_STANDARD.encode(bytes)
+                        }
+                        ChecksumValue::Crc32c(bytes) => {
+                            base64::prelude::BASE64_STANDARD.encode(bytes)
+                        }
+                        ChecksumValue::Crc64Nvme(bytes) => {
+                            base64::prelude::BASE64_STANDARD.encode(bytes)
+                        }
+                        ChecksumValue::Sha1(bytes) => {
+                            base64::prelude::BASE64_STANDARD.encode(bytes)
+                        }
+                        ChecksumValue::Sha256(bytes) => {
+                            base64::prelude::BASE64_STANDARD.encode(bytes)
+                        }
+                    };
+                    tracing::debug!(
+                        "Calculated {:?}: (base64: {})",
+                        checksum.algorithm(),
+                        encoded
                     );
-                    return Err(S3Error::InvalidDigest);
                 }
 
-                tracing::debug!("Trailer checksum verified successfully");
+                // Verify trailer checksums if present
+                if let Some(trailers) = trailer_checksums
+                    && let Some(calculated) = &calculated_checksum
+                    && let Some(expected_trailer) = &trailers.checksum_value
+                {
+                    let calculated_bytes = match calculated {
+                        ChecksumValue::Crc32(bytes) => bytes.as_slice(),
+                        ChecksumValue::Crc32c(bytes) => bytes.as_slice(),
+                        ChecksumValue::Crc64Nvme(bytes) => bytes.as_slice(),
+                        ChecksumValue::Sha1(bytes) => bytes.as_slice(),
+                        ChecksumValue::Sha256(bytes) => bytes.as_slice(),
+                    };
+                    let calculated_b64 = base64::prelude::BASE64_STANDARD.encode(calculated_bytes);
+
+                    if expected_trailer != &calculated_b64 {
+                        tracing::error!(
+                            "{:?} checksum mismatch: trailer={}, calculated={}",
+                            calculated.algorithm(),
+                            expected_trailer,
+                            calculated_b64
+                        );
+                        return Err(S3Error::InvalidDigest);
+                    }
+
+                    tracing::debug!("Trailer checksum verified successfully");
+                }
+
+                verify_checksum(calculated_checksum, final_expected).map_err(|e| {
+                    tracing::error!("Checksum verification failed: {:?}", e);
+                    S3Error::InvalidDigest
+                })?;
+
+                Ok(calculated_checksum)
             }
-
-            verify_checksum(calculated_checksum, final_expected).map_err(|e| {
-                tracing::error!("Checksum verification failed: {:?}", e);
-                S3Error::InvalidDigest
-            })?;
-
-            Ok(calculated_checksum)
-        });
+            .instrument(Span::current()),
+        );
 
         // Choose initial state based on whether this is a streaming request
         let initial_state = if is_streaming {
@@ -249,6 +262,7 @@ impl S3StreamingPayload {
             signature_context,
             previous_signature,
             current_chunk_buffer: BytesMut::new(),
+            span: Span::current(),
         };
 
         Ok((streaming_payload, checksum_handle))
@@ -290,6 +304,10 @@ impl Stream for S3StreamingPayload {
     type Item = Result<Bytes, PayloadError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Clone the span before projection so we can enter it
+        let span = self.as_ref().get_ref().span.clone();
+        let _guard = span.enter();
+
         let mut this = self.as_mut().project();
 
         // Helper closure to send error and close checksum channel

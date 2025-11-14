@@ -17,7 +17,7 @@ use std::thread;
 use std::{fs::File, io::BufReader};
 use tokio::signal::unix::{SignalKind, signal};
 use tracing::{error, info};
-use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
@@ -41,16 +41,7 @@ fn main() -> std::io::Result<()> {
                 })
                 .unwrap_or_else(|_| format!("info,{third_party_filter}").into()),
         )
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_file(true)
-                .with_line_number(true)
-                .without_time()
-                .with_filter(tracing_subscriber::filter::LevelFilter::ERROR),
-        )
-        .with(tracing_subscriber::fmt::layer().without_time().with_filter(
-            tracing_subscriber::filter::filter_fn(|meta| *meta.level() != tracing::Level::ERROR),
-        ))
+        .with(tracing_subscriber::fmt::layer().without_time())
         .init();
 
     let main_build_info = option_env!("MAIN_BUILD_INFO").unwrap_or("unknown");

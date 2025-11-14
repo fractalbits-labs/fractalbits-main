@@ -13,6 +13,7 @@ use nss_codec::put_inode_response;
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
+use tracing::{Instrument, Span};
 
 use super::block_data_stream::BlockDataStream;
 use super::s3_streaming::S3StreamingPayload;
@@ -379,6 +380,7 @@ async fn put_object_streaming_internal(
                     }
                 }
             }
+            .instrument(Span::current())
         })
         .buffer_unordered(5) // Process up to 5 blocks concurrently
         .try_fold(0u64, |acc, len| async move { Ok(acc + len) })
@@ -617,7 +619,8 @@ async fn put_object_with_no_trailer(
                         tracing::error!("Failed to store blob block {}: {e}", block_num);
                         S3Error::InternalError
                     })
-            };
+            }
+            .instrument(Span::current());
             futures.push(future);
         }
 

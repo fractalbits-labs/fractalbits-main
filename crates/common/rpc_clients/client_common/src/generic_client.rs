@@ -361,7 +361,7 @@ where
     async fn send_request_vectored_internal(
         &self,
         request_id: u32,
-        mut frame: ZcMessageFrame<Header>,
+        frame: ZcMessageFrame<Header>,
         timeout: Option<Duration>,
     ) -> Result<MessageFrame<Header>, RpcError> {
         if self.is_closed.load(Ordering::SeqCst) {
@@ -371,11 +371,8 @@ where
         }
 
         let rpc_type = Codec::RPC_TYPE;
-        frame.header.set_id(request_id);
-        frame.header.set_retry_count(0);
-
         let (tx, rx) = oneshot::channel();
-        self.requests.lock().insert(request_id, tx);
+        self.requests.lock().insert(frame.header.get_id(), tx);
         gauge!("rpc_request_pending_in_resp_map", "type" => rpc_type).increment(1.0);
 
         self.sender

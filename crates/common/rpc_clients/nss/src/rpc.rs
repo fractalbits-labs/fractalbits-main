@@ -6,7 +6,7 @@ use data_types::TraceId;
 use nss_codec::*;
 use prost::Message as PbMessage;
 use rpc_client_common::{InflightRpcGuard, RpcError, encode_protobuf};
-use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
+use rpc_codec_common::MessageFrame;
 use tracing::error;
 
 impl RpcClient {

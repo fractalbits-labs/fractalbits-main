@@ -6,7 +6,7 @@ use data_types::{DataVgInfo, TraceId};
 use metrics::histogram;
 use prost::Message as PbMessage;
 use rpc_client_common::{InflightRpcGuard, RpcError, encode_protobuf};
-use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
+use rpc_codec_common::MessageFrame;
 use rss_codec::*;
 use tracing::{error, warn};
 

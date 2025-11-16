@@ -203,8 +203,8 @@ where
 
     // Convert string references to owned strings for use in metrics
     let operation_name = operation_name.to_string();
-    let storage_type = storage_type.to_string();
-    let bucket = bucket.to_string();
+    let _storage_type = storage_type.to_string();
+    let _bucket = bucket.to_string();
 
     loop {
         attempt += 1;
@@ -222,32 +222,32 @@ where
                     counter!(
                         "s3_operation_retry_success",
                         "operation" => operation_name.clone(),
-                        "storage" => storage_type.clone(),
-                        "bucket" => bucket.clone()
+                        "storage" => _storage_type.clone(),
+                        "bucket" => _bucket.clone()
                     )
                     .increment(1);
 
                     histogram!(
                         "s3_operation_retry_attempts",
                         "operation" => operation_name.clone(),
-                        "storage" => storage_type.clone(),
-                        "bucket" => bucket.clone()
+                        "storage" => _storage_type.clone(),
+                        "bucket" => _bucket.clone()
                     )
                     .record(attempt as f64);
 
                     histogram!(
                         "s3_operation_retry_total_duration_ms",
                         "operation" => operation_name.clone(),
-                        "storage" => storage_type.clone(),
-                        "bucket" => bucket.clone()
+                        "storage" => _storage_type.clone(),
+                        "bucket" => _bucket.clone()
                     )
                     .record(start_time.elapsed().as_millis() as f64);
 
                     histogram!(
                         "s3_operation_retry_backoff_ms",
                         "operation" => operation_name.clone(),
-                        "storage" => storage_type.clone(),
-                        "bucket" => bucket.clone()
+                        "storage" => _storage_type.clone(),
+                        "bucket" => _bucket.clone()
                     )
                     .record(total_backoff_ms as f64);
 
@@ -269,8 +269,8 @@ where
                 counter!(
                     "s3_operation_attempt_failed",
                     "operation" => operation_name.clone(),
-                    "storage" => storage_type.clone(),
-                    "bucket" => bucket.clone(),
+                    "storage" => _storage_type.clone(),
+                    "bucket" => _bucket.clone(),
                     "attempt" => attempt.to_string()
                 )
                 .increment(1);
@@ -278,8 +278,8 @@ where
                 histogram!(
                     "s3_operation_attempt_duration_ms",
                     "operation" => operation_name.clone(),
-                    "storage" => storage_type.clone(),
-                    "bucket" => bucket.clone(),
+                    "storage" => _storage_type.clone(),
+                    "bucket" => _bucket.clone(),
                     "attempt" => attempt.to_string()
                 )
                 .record(attempt_duration.as_millis() as f64);
@@ -295,8 +295,8 @@ where
                     counter!(
                         "s3_operation_failed_non_retryable",
                         "operation" => operation_name.clone(),
-                        "storage" => storage_type.clone(),
-                        "bucket" => bucket.clone()
+                        "storage" => _storage_type.clone(),
+                        "bucket" => _bucket.clone()
                     )
                     .increment(1);
 
@@ -312,16 +312,16 @@ where
                     counter!(
                         "s3_operation_failed_max_attempts",
                         "operation" => operation_name.clone(),
-                        "storage" => storage_type.clone(),
-                        "bucket" => bucket.clone()
+                        "storage" => _storage_type.clone(),
+                        "bucket" => _bucket.clone()
                     )
                     .increment(1);
 
                     histogram!(
                         "s3_operation_failed_total_duration_ms",
                         "operation" => operation_name.clone(),
-                        "storage" => storage_type.clone(),
-                        "bucket" => bucket.clone()
+                        "storage" => _storage_type.clone(),
+                        "bucket" => _bucket.clone()
                     )
                     .record(start_time.elapsed().as_millis() as f64);
 
@@ -339,8 +339,8 @@ where
                     counter!(
                         "s3_operation_throttled",
                         "operation" => operation_name.clone(),
-                        "storage" => storage_type.clone(),
-                        "bucket" => bucket.clone()
+                        "storage" => _storage_type.clone(),
+                        "bucket" => _bucket.clone()
                     )
                     .increment(1);
                 }

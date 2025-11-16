@@ -185,8 +185,8 @@ impl DataVgProxy {
         }
         .await;
 
-        let result_label = if result.is_ok() { "success" } else { "failure" };
-        histogram!("datavg_delete_blob_node_nanos", "bss_node" => address.clone(), "result" => result_label)
+        let _result_label = if result.is_ok() { "success" } else { "failure" };
+        histogram!("datavg_delete_blob_node_nanos", "bss_node" => address.clone(), "result" => _result_label)
             .record(start_node.elapsed().as_nanos() as f64);
 
         (address, result)
@@ -446,8 +446,8 @@ impl DataVgProxy {
             )
             .await;
 
-        let result_label = if result.is_ok() { "success" } else { "failure" };
-        histogram!("datavg_put_blob_node_nanos", "bss_node" => address.clone(), "result" => result_label)
+        let _result_label = if result.is_ok() { "success" } else { "failure" };
+        histogram!("datavg_put_blob_node_nanos", "bss_node" => address.clone(), "result" => _result_label)
             .record(start_node.elapsed().as_nanos() as f64);
 
         (address, result)
@@ -478,8 +478,8 @@ impl DataVgProxy {
             )
             .await;
 
-        let result_label = if result.is_ok() { "success" } else { "failure" };
-        histogram!("datavg_put_blob_node_nanos", "bss_node" => address.clone(), "result" => result_label)
+        let _result_label = if result.is_ok() { "success" } else { "failure" };
+        histogram!("datavg_put_blob_node_nanos", "bss_node" => address.clone(), "result" => _result_label)
             .record(start_node.elapsed().as_nanos() as f64);
 
         (address, result)

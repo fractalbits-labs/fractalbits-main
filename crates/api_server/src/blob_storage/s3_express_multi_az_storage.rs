@@ -259,8 +259,8 @@ impl S3ExpressMultiAzStorage {
                     tokio::join!(local_future, remote_future);
 
                 // Record bucket-specific metrics
-                let local_success = local_result.is_ok();
-                let remote_success = remote_result.is_ok();
+                let _local_success = local_result.is_ok();
+                let _remote_success = remote_result.is_ok();
 
                 // Record duration for each bucket operation
                 histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "put_blob", "bucket_type" => "local_az")
@@ -269,9 +269,9 @@ impl S3ExpressMultiAzStorage {
                     .record(remote_duration.as_nanos() as f64);
 
                 // Record success/failure counters
-                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "local_az", "result" => if local_success { "success" } else { "failure" })
+                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "local_az", "result" => if _local_success { "success" } else { "failure" })
                     .increment(1);
-                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "remote_az", "result" => if remote_success { "success" } else { "failure" })
+                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "remote_az", "result" => if _remote_success { "success" } else { "failure" })
                     .increment(1);
 
                 // Record bucket-specific blob sizes
@@ -282,7 +282,7 @@ impl S3ExpressMultiAzStorage {
 
                 local_result?;
 
-                if !remote_success {
+                if !_remote_success {
                     warn!("Remote AZ failed, switching to degraded mode");
                     self.set_az_status(&self.remote_az, "Degraded").await?;
                     let metadata = self.remote_az.as_bytes();
@@ -369,17 +369,17 @@ impl S3ExpressMultiAzStorage {
                 let remote_duration = remote_start.elapsed();
 
                 // Record metrics for both operations
-                let local_success = local_result.is_ok();
-                let remote_success = remote_result.is_ok();
+                let _local_success = local_result.is_ok();
+                let _remote_success = remote_result.is_ok();
 
                 histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "put_blob", "bucket_type" => "local_az")
                     .record(local_duration.as_nanos() as f64);
                 histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "put_blob", "bucket_type" => "remote_az")
                     .record(remote_duration.as_nanos() as f64);
 
-                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "local_az", "result" => if local_success { "success" } else { "failure" })
+                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "local_az", "result" => if _local_success { "success" } else { "failure" })
                     .increment(1);
-                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "remote_az", "result" => if remote_success { "success" } else { "failure" })
+                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "remote_az", "result" => if _remote_success { "success" } else { "failure" })
                     .increment(1);
 
                 histogram!("blob_size", "operation" => "put", "storage" => "s3_express_multi_az", "bucket_type" => "local_az")
@@ -462,17 +462,17 @@ impl S3ExpressMultiAzStorage {
                 let ((local_result, local_duration), (remote_result, remote_duration)) =
                     tokio::join!(local_future, remote_future);
 
-                let local_success = local_result.is_ok();
-                let remote_success = remote_result.is_ok();
+                let _local_success = local_result.is_ok();
+                let _remote_success = remote_result.is_ok();
 
                 histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "put_blob_vectored", "bucket_type" => "local_az")
                     .record(local_duration.as_nanos() as f64);
                 histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "put_blob_vectored", "bucket_type" => "remote_az")
                     .record(remote_duration.as_nanos() as f64);
 
-                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "local_az", "result" => if local_success { "success" } else { "failure" })
+                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "local_az", "result" => if _local_success { "success" } else { "failure" })
                     .increment(1);
-                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "remote_az", "result" => if remote_success { "success" } else { "failure" })
+                counter!("s3_express_operations_total", "operation" => "put", "bucket_type" => "remote_az", "result" => if _remote_success { "success" } else { "failure" })
                     .increment(1);
 
                 histogram!("blob_size", "operation" => "put", "storage" => "s3_express_multi_az", "bucket_type" => "local_az")
@@ -482,7 +482,7 @@ impl S3ExpressMultiAzStorage {
 
                 local_result?;
 
-                if !remote_success {
+                if !_remote_success {
                     warn!("Remote AZ failed, switching to degraded mode");
                     self.set_az_status(&self.remote_az, "Degraded").await?;
                     let metadata = self.remote_az.as_bytes();
@@ -669,8 +669,8 @@ impl S3ExpressMultiAzStorage {
             tokio::join!(local_future, remote_future);
 
         // Record bucket-specific metrics
-        let local_success = local_result.is_ok();
-        let remote_success = remote_result.is_ok();
+        let _local_success = local_result.is_ok();
+        let _remote_success = remote_result.is_ok();
 
         // Record duration for each bucket operation
         histogram!("rpc_duration_nanos", "type" => "s3_express_multi_az", "name" => "delete_blob", "bucket_type" => "local_az")
@@ -679,9 +679,9 @@ impl S3ExpressMultiAzStorage {
             .record(remote_duration.as_nanos() as f64);
 
         // Record success/failure counters
-        counter!("s3_express_operations_total", "operation" => "delete", "bucket_type" => "local_az", "result" => if local_success { "success" } else { "failure" })
+        counter!("s3_express_operations_total", "operation" => "delete", "bucket_type" => "local_az", "result" => if _local_success { "success" } else { "failure" })
             .increment(1);
-        counter!("s3_express_operations_total", "operation" => "delete", "bucket_type" => "remote_az", "result" => if remote_success { "success" } else { "failure" })
+        counter!("s3_express_operations_total", "operation" => "delete", "bucket_type" => "remote_az", "result" => if _remote_success { "success" } else { "failure" })
             .increment(1);
 
         // Log errors but don't fail - deletion is recorded for tracking

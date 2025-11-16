@@ -1,5 +1,4 @@
 use bytemuck::{Pod, Zeroable};
-use bytes::{BufMut, BytesMut};
 use data_types::TraceId;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -66,15 +65,6 @@ where
 {
     const _SIZE_OK: () = assert!(size_of::<Self>() == 48);
 
-    pub fn encode(&self, dst: &mut BytesMut) {
-        let bytes: &[u8] = bytemuck::bytes_of(self);
-        dst.put(bytes);
-    }
-
-    pub fn decode(src: &[u8]) -> Self {
-        bytemuck::pod_read_unaligned::<Self>(&src[..size_of::<Self>()])
-    }
-
     /// Calculate and set the checksum field for this header.
     /// The checksum covers all header fields after the checksum field itself.
     pub fn set_checksum(&mut self) {
@@ -105,17 +95,6 @@ where
         self.checksum_body == calculated
     }
 
-    /// Calculate and set the body checksum field from multiple chunks.
-    /// Uses streaming hash to avoid concatenation.
-    pub fn set_body_checksum_vectored(&mut self, chunks: &[impl AsRef<[u8]>]) {
-        use xxhash_rust::xxh3::Xxh3;
-        let mut hasher = Xxh3::new();
-        for chunk in chunks {
-            hasher.update(chunk.as_ref());
-        }
-        self.checksum_body = hasher.digest();
-    }
-
     pub fn set_trace_id(&mut self, trace_id: &TraceId) {
         self.trace_id = trace_id.0;
     }
@@ -125,8 +104,8 @@ impl<Command> MessageHeaderTrait for ProtobufMessageHeader<Command>
 where
     Command: Pod + Zeroable + Default + Clone + Copy + Send + Sync + 'static,
 {
-    fn encode(&self, dst: &mut BytesMut) {
-        self.encode(dst)
+    fn encode(&self) -> &[u8] {
+        bytemuck::bytes_of(self)
     }
 
     fn decode(src: &[u8]) -> Self {

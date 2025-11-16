@@ -1,5 +1,5 @@
 use crate::RpcError;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use metrics::{counter, gauge};
 use parking_lot::Mutex;
 use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use strum::AsRefStr;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     oneshot,
@@ -139,14 +140,15 @@ where
         socket_fd: RawFd,
         rpc_type: &'static str,
     ) -> Result<(), RpcError> {
-        use tokio::io::AsyncWriteExt;
-
         const MAX_BATCH_SIZE: usize = 32;
         let mut batch = Vec::with_capacity(MAX_BATCH_SIZE);
-        let mut encoded_frames: Vec<Vec<Bytes>> = Vec::with_capacity(MAX_BATCH_SIZE);
+        let mut batch_headers: Vec<Header> = Vec::with_capacity(MAX_BATCH_SIZE);
+        let mut body_chunks: Vec<Vec<Bytes>> = Vec::with_capacity(MAX_BATCH_SIZE);
 
         loop {
             batch.clear();
+            batch_headers.clear();
+            body_chunks.clear();
             let count = receiver.recv_many(&mut batch, MAX_BATCH_SIZE).await;
             if count == 0 {
                 break;
@@ -155,55 +157,52 @@ where
             gauge!("rpc_request_pending_in_send_queue", "type" => rpc_type).decrement(count as f64);
             counter!("rpc_send_batch_size", "type" => rpc_type).increment(count as u64);
 
-            encoded_frames.clear();
             for mut frame in batch.drain(..) {
                 let request_id = frame.header.get_id();
                 let trace_id = frame.header.get_trace_id();
                 debug!(%rpc_type, %socket_fd, %request_id, %trace_id, "sending request");
 
                 frame.header.set_checksum();
-
-                let mut header_buf = BytesMut::with_capacity(size_of::<Header>());
-                frame.header.encode(&mut header_buf);
-
-                let mut all_chunks = vec![header_buf.freeze()];
-                all_chunks.extend(frame.body);
-                encoded_frames.push(all_chunks);
+                batch_headers.push(frame.header);
+                body_chunks.push(frame.body);
             }
 
-            let total_len: usize = encoded_frames
+            let slices_capacity = batch_headers
                 .iter()
-                .map(|chunks| chunks.iter().map(|chunk| chunk.len()).sum::<usize>())
+                .zip(body_chunks.iter())
+                .map(|(_header, chunks)| 1 + chunks.len())
                 .sum();
-            let mut total_written = 0;
 
-            while total_written < total_len {
-                let mut iov = Vec::with_capacity(encoded_frames.len() * 2);
-                let mut current_offset = 0;
+            let mut byte_slices: Vec<&[u8]> = Vec::with_capacity(slices_capacity);
+            for (header, chunks) in batch_headers.iter().zip(body_chunks.iter()) {
+                byte_slices.push(header.encode());
+                for chunk in chunks {
+                    byte_slices.push(chunk);
+                }
+            }
 
-                for chunks in &encoded_frames {
-                    let frame_len: usize = chunks.iter().map(|chunk| chunk.len()).sum();
-                    let frame_start = current_offset;
-                    let frame_end = frame_start + frame_len;
-
-                    if total_written < frame_end {
-                        let skip_in_frame = total_written.saturating_sub(frame_start);
-                        let mut accumulated = 0;
-
-                        for chunk in chunks {
-                            let chunk_start = accumulated;
-                            let chunk_end = chunk_start + chunk.len();
-
-                            if skip_in_frame < chunk_end {
-                                let skip_in_chunk = skip_in_frame.saturating_sub(chunk_start);
-                                iov.push(IoSlice::new(&chunk[skip_in_chunk..]));
-                            }
-
-                            accumulated = chunk_end;
+            let mut slice_idx = 0;
+            let mut offset_in_slice = 0;
+            while slice_idx < byte_slices.len() {
+                let iov: Vec<IoSlice> = byte_slices[slice_idx..]
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, slice)| {
+                        let data = if i == 0 {
+                            &slice[offset_in_slice..]
+                        } else {
+                            slice
+                        };
+                        if data.is_empty() {
+                            None
+                        } else {
+                            Some(IoSlice::new(data))
                         }
-                    }
+                    })
+                    .collect();
 
-                    current_offset = frame_end;
+                if iov.is_empty() {
+                    break;
                 }
 
                 let written = writer
@@ -218,11 +217,22 @@ where
                     )));
                 }
 
-                total_written += written;
+                let mut remaining = written;
+                while remaining > 0 && slice_idx < byte_slices.len() {
+                    let available = byte_slices[slice_idx].len() - offset_in_slice;
+                    if remaining >= available {
+                        remaining -= available;
+                        slice_idx += 1;
+                        offset_in_slice = 0;
+                    } else {
+                        offset_in_slice += remaining;
+                        break;
+                    }
+                }
             }
 
             counter!("rpc_request_sent", "type" => rpc_type, "name" => "all")
-                .increment(encoded_frames.len() as u64);
+                .increment(batch_headers.len() as u64);
         }
 
         warn!(%rpc_type, %socket_fd, "sender closed, send message task quit");

@@ -1,4 +1,4 @@
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use data_types::TraceId;
 use std::mem::size_of;
 use xxhash_rust::xxh3::xxh3_64;
@@ -7,7 +7,7 @@ pub mod protobuf_header;
 pub use protobuf_header::{EMPTY_BODY_CHECKSUM, ProtobufMessageHeader};
 
 pub trait MessageHeaderTrait: Sized + Clone + Copy + Send + Sync + 'static {
-    fn encode(&self, dst: &mut BytesMut);
+    fn encode(&self) -> &[u8];
 
     fn decode(src: &[u8]) -> Self;
 
@@ -100,8 +100,8 @@ macro_rules! impl_protobuf_message_header {
         }
 
         impl $crate::MessageHeaderTrait for $header_type {
-            fn encode(&self, dst: &mut bytes::BytesMut) {
-                self.0.encode(dst)
+            fn encode(&self) -> &[u8] {
+                self.0.encode()
             }
 
             fn decode(src: &[u8]) -> Self {

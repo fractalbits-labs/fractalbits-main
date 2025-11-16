@@ -1,7 +1,6 @@
 //! Blob storage server message format.
 //! Note if this file is updated, the corresponding message.zig file also needs to be updated!
 use bytemuck::{Pod, Zeroable};
-use bytes::{BufMut, BytesMut};
 use data_types::TraceId;
 use rpc_codec_common::MessageHeaderTrait;
 use std::mem::size_of;
@@ -131,9 +130,8 @@ impl MessageHeader {
 }
 
 impl MessageHeaderTrait for MessageHeader {
-    fn encode(&self, dst: &mut BytesMut) {
-        let bytes: &[u8] = bytemuck::bytes_of(self);
-        dst.put(bytes);
+    fn encode(&self) -> &[u8] {
+        bytemuck::bytes_of(self)
     }
 
     fn decode(src: &[u8]) -> Self {

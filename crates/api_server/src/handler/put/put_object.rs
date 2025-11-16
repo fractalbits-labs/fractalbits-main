@@ -25,6 +25,7 @@ use crate::{
             buffer_payload_with_capacity,
             checksum::{self, ChecksumAlgorithm, ChecksumValue},
             extract_metadata_headers,
+            request::extract::extract_authentication,
             s3_error::S3Error,
             signature::ChunkSignatureContext,
         },
@@ -757,10 +758,15 @@ async fn put_object_with_no_trailer(
 fn extract_chunk_signature_context(
     ctx: &ObjectRequestContext,
 ) -> Result<Option<(ChunkSignatureContext, Option<String>)>, S3Error> {
-    // Check if this is a streaming chunked request and we have auth info
-    if let Some(auth) = &ctx.auth
-        && auth.content_sha256 == STREAMING_PAYLOAD
-    {
+    // Extract auth from request
+    let auth = match extract_authentication(&ctx.request) {
+        Ok(Some(auth)) => auth,
+        Ok(None) => return Ok(None),
+        Err(_) => return Ok(None),
+    };
+
+    // Check if this is a streaming chunked request
+    if auth.content_sha256 == STREAMING_PAYLOAD {
         let api_key = ctx.api_key.as_ref().ok_or(S3Error::InvalidAccessKeyId)?;
 
         // Create signing key
@@ -771,11 +777,11 @@ fn extract_chunk_signature_context(
         let chunk_context = ChunkSignatureContext {
             signing_key,
             datetime: auth.date,
-            scope_string: auth.scope_string(),
+            scope_string: auth.scope_string.clone(),
         };
 
-        // Take ownership of the signature string by cloning just the string, not the entire Auth
-        let seed_signature = auth.signature.clone();
+        // Take ownership of the signature string
+        let seed_signature = auth.signature.to_string();
         return Ok(Some((chunk_context, Some(seed_signature))));
     }
 

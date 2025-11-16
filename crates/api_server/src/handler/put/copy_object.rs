@@ -236,7 +236,6 @@ pub async fn copy_object_handler(
         ctx.app,
         ctx.request,
         Some(api_key),
-        ctx.auth,
         ctx.bucket_name,
         ctx.key,
         ctx.checksum_value, // Pass through the original checksum value

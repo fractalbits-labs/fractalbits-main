@@ -19,7 +19,7 @@ use tracing::{debug, error, warn};
 pub async fn check_signature(
     app: Arc<AppState>,
     request: &HttpRequest,
-    auth: Option<&Authentication>,
+    auth: Option<&Authentication<'_>>,
     trace_id: &TraceId,
 ) -> Result<Versioned<ApiKey>, S3Error> {
     let allow_missing_or_bad_signature = app.config.allow_missing_or_bad_signature;

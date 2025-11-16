@@ -70,7 +70,6 @@ pub struct ObjectRequestContext {
     pub app: Arc<AppState>,
     pub request: HttpRequest,
     pub api_key: Option<Versioned<ApiKey>>,
-    pub auth: Option<Authentication>,
     pub bucket_name: String,
     pub key: String,
     pub checksum_value: Option<ChecksumValue>,
@@ -84,7 +83,6 @@ impl ObjectRequestContext {
         app: Arc<AppState>,
         request: HttpRequest,
         api_key: Option<Versioned<ApiKey>>,
-        auth: Option<Authentication>,
         bucket_name: String,
         key: String,
         checksum_value: Option<ChecksumValue>,
@@ -95,7 +93,6 @@ impl ObjectRequestContext {
             app,
             request,
             api_key,
-            auth,
             bucket_name,
             key,
             checksum_value,
@@ -143,11 +140,18 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
 
     // Extract all the required data using the macro
     let ApiCommandFromQuery(api_cmd) = extract_or_return!(ApiCommandFromQuery, &req, trace_id);
-    let AuthFromHeaders(auth) = extract_or_return!(AuthFromHeaders, &req, trace_id);
-    let BucketAndKeyName { bucket, key } = extract_or_return!(BucketAndKeyName, &req, trace_id);
     let api_sig = extract_or_return!(ApiSignatureExtractor, &req, trace_id);
     let ChecksumValueFromHeaders(checksum_value) =
         extract_or_return!(ChecksumValueFromHeaders, &req, trace_id);
+    let BucketAndKeyName { bucket, key } = extract_or_return!(BucketAndKeyName, &req, trace_id);
+    let resource = format!("/{bucket}{key}");
+    let auth = match extract_authentication(&req) {
+        Ok(auth) => auth,
+        Err(e) => {
+            tracing::warn!(%trace_id, "failed to extract authentication {e:?} {:?}", req.uri());
+            return Ok(S3Error::InternalError.error_response_with_resource(&resource, trace_id));
+        }
+    };
 
     let client_addr = req
         .connection_info()
@@ -156,8 +160,6 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
         .to_string();
 
     debug!(%trace_id, %bucket, %key, %client_addr);
-
-    let resource = format!("/{bucket}{key}");
     let endpoint = match Endpoint::from_extractors(&req, &bucket, &key, api_cmd, api_sig.0.clone())
     {
         Err(e) => {
@@ -219,11 +221,11 @@ pub async fn any_handler(req: HttpRequest, payload: Payload) -> Result<HttpRespo
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn any_handler_inner(
+async fn any_handler_inner<'a>(
     app: Arc<AppState>,
     bucket: String,
     key: String,
-    auth: Option<Authentication>,
+    auth: Option<Authentication<'a>>,
     checksum_value: Option<ChecksumValue>,
     request: &HttpRequest,
     payload: actix_web::dev::Payload,
@@ -270,7 +272,6 @@ async fn any_handler_inner(
                 app,
                 request.clone(),
                 Some(api_key),
-                auth,
                 bucket,
                 key,
                 checksum_value,

@@ -84,7 +84,6 @@ pub async fn delete_objects_handler(
             ctx.app.clone(),
             ctx.request.clone(),
             None,
-            None,
             ctx.bucket_name.clone(),
             key,
             None, // No checksum value needed for delete

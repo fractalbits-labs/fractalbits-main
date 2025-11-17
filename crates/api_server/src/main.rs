@@ -122,8 +122,21 @@ fn main() -> std::io::Result<()> {
         https_config.enabled = false;
     }
 
-    let core_ids = core_affinity::get_core_ids().expect("Failed to get core IDs");
-    let worker_count = core_ids.len();
+    let worker_count = config.worker_threads;
+    let worker_cores: Vec<_> = if config.set_thread_affinity {
+        let all_cores = core_affinity::get_core_ids().expect("Failed to get core IDs");
+        if worker_count > all_cores.len() {
+            error!(
+                "worker_threads ({}) exceeds available cores ({})",
+                worker_count,
+                all_cores.len()
+            );
+            std::process::exit(1);
+        }
+        all_cores.into_iter().take(worker_count).map(Some).collect()
+    } else {
+        vec![None; worker_count]
+    };
 
     let cache_coordinator: Arc<CacheCoordinator<Versioned<String>>> =
         Arc::new(CacheCoordinator::new());
@@ -142,7 +155,7 @@ fn main() -> std::io::Result<()> {
 
     info!(
         port,
-        mgmt_port, worker_count, "Starting server with per-core threads (SO_REUSEPORT)"
+        mgmt_port, worker_count, "Starting server with {worker_count} threads"
     );
 
     let stats_writer_handle = if config.enable_stats_writer {
@@ -180,7 +193,7 @@ fn main() -> std::io::Result<()> {
     let mut server_handles = Vec::new();
     let (handle_tx, handle_rx) = std::sync::mpsc::channel();
 
-    for (worker_idx, core_id) in core_ids.iter().enumerate() {
+    for (worker_idx, core_id) in worker_cores.into_iter().enumerate() {
         let http_listener = make_reuseport_listener(http_addr)?;
         let mgmt_listener = make_reuseport_listener(mgmt_addr)?;
         let https_listener = https_addr.map(make_reuseport_listener).transpose()?;
@@ -190,18 +203,19 @@ fn main() -> std::io::Result<()> {
         let az_status_coordinator = az_status_coordinator.clone();
         let web_root = gui_web_root.clone();
         let https_config = https_config.clone();
-        let core_id = *core_id;
         let handle_tx = handle_tx.clone();
 
         let handle = thread::Builder::new()
             .name(format!("actix-core-{worker_idx}"))
             .spawn(move || {
-                core_affinity::set_for_current(core_id);
-                info!(
-                    worker_idx,
-                    core_id = core_id.id,
-                    "Worker thread pinned to core"
-                );
+                if let Some(core_id) = core_id {
+                    core_affinity::set_for_current(core_id);
+                    info!(
+                        worker_idx,
+                        core_id = core_id.id,
+                        "Worker thread pinned to core"
+                    );
+                }
 
                 System::new().block_on(async move {
                     let app_state = Arc::new(AppState::new_per_core_sync(
@@ -212,7 +226,9 @@ fn main() -> std::io::Result<()> {
                     ));
 
                     let mut server = HttpServer::new(move || {
-                        core_affinity::set_for_current(core_id);
+                        if let Some(core_id) = core_id {
+                            core_affinity::set_for_current(core_id);
+                        }
 
                         let app_state = app_state.clone();
                         let mut app = App::new()

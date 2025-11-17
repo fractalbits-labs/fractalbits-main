@@ -109,6 +109,8 @@ pub struct Config {
     pub enable_stats_writer: bool,
     pub blob_storage: BlobStorageConfig,
     pub allow_missing_or_bad_signature: bool,
+    pub worker_threads: usize,
+    pub set_thread_affinity: bool,
 }
 
 impl Config {
@@ -165,6 +167,8 @@ impl Config {
                 s3_express_multi_az: Some(S3ExpressMultiAzConfig::default()),
             },
             allow_missing_or_bad_signature: false,
+            worker_threads: 2,
+            set_thread_affinity: false,
         }
     }
 
@@ -196,6 +200,8 @@ impl Config {
                 s3_express_multi_az: None,
             },
             allow_missing_or_bad_signature: false,
+            worker_threads: 2,
+            set_thread_affinity: false,
         }
     }
 }

@@ -43,6 +43,7 @@ pub fn create_config(
     remote_az: Option<&str>,
 ) -> CmdResult {
     let aws_region = get_current_aws_region()?;
+    let num_cores = num_cpus()?;
     let config_content = if let Some(remote_az) = remote_az {
         // S3 Express Multi-AZ configuration
         let local_az = get_current_aws_az_id()?;
@@ -63,6 +64,8 @@ client_request_timeout_seconds = 8
 stats_dir = "/data/local/stats"
 enable_stats_writer = false
 allow_missing_or_bad_signature = false
+worker_threads = {num_cores}
+set_thread_affinity = true
 
 [https]
 enabled = false
@@ -117,6 +120,8 @@ client_request_timeout_seconds = 8
 stats_dir = "/data/local/stats"
 enable_stats_writer = false
 allow_missing_or_bad_signature = false
+worker_threads = {num_cores}
+set_thread_affinity = true
 
 [https]
 enabled = false

@@ -68,7 +68,11 @@ export AWS_DEFAULT_REGION={region}
 export AWS_ENDPOINT_URL_S3=http://{api_server_ip}
 bench_bucket=warp-benchmark-bucket
 
-aws s3api create-bucket --bucket $bench_bucket &> /dev/null || true
+if ! aws s3api head-bucket --bucket $bench_bucket &>/dev/null; then
+  aws s3api create-bucket --bucket $bench_bucket
+  aws s3api wait bucket-exists --bucket $bench_bucket
+  aws s3 ls
+fi
 
 /opt/fractalbits/bin/warp run /opt/fractalbits/etc/bench_${{WORKLOAD:-put_4k}}.yml
 "##

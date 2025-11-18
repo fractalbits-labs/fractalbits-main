@@ -352,6 +352,13 @@ export class FractalbitsVpcStack extends cdk.Stack {
     rssListener.addTargets("RssTargets", {
       port: servicePort,
       targets: rssTargets,
+      healthCheck: {
+        enabled: true,
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 2,
+        interval: cdk.Duration.seconds(5),
+        timeout: cdk.Duration.seconds(2),
+      },
     });
 
     // Only create mirrord for s3ExpressMultiAz mode
@@ -430,6 +437,13 @@ export class FractalbitsVpcStack extends cdk.Stack {
     listener.addTargets("ApiTargets", {
       port: 80,
       targets: [apiServerAsg],
+      healthCheck: {
+        enabled: true,
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 2,
+        interval: cdk.Duration.seconds(5),
+        timeout: cdk.Duration.seconds(2),
+      },
     });
 
     // Create EBS Volumes for nss_servers using resolved zone names

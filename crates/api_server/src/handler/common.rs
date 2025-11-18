@@ -84,7 +84,7 @@ pub async fn get_raw_object(
         nss_codec::get_inode_response::Result::ErrNotFound(()) => {
             return Err(S3Error::NoSuchKey);
         }
-        nss_codec::get_inode_response::Result::ErrOthers(e) => {
+        nss_codec::get_inode_response::Result::ErrOther(e) => {
             tracing::error!(e);
             return Err(S3Error::InternalError);
         }

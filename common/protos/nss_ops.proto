@@ -41,7 +41,7 @@ message GetInodeResponse {
   oneof result {
     bytes ok = 1;
     google.protobuf.Empty err_not_found = 2;
-    string err_others = 3;
+    string err_other = 3;
   }
 }
 
@@ -82,7 +82,7 @@ message DeleteInodeResponse {
     bytes ok = 1;
     google.protobuf.Empty err_not_found = 2;
     google.protobuf.Empty err_already_deleted = 3;
-    string err_others = 4;
+    string err_other = 4;
   }
 }
 
@@ -114,7 +114,7 @@ message DeleteRootInodeResponse {
   oneof result {
     string ok = 1;
     google.protobuf.Empty err_not_empty = 2;
-    string err_others = 3;
+    string err_other = 3;
   }
 }
 
@@ -130,6 +130,6 @@ message RenameResponse {
     string ok = 1;
     google.protobuf.Empty err_src_nonexisted = 2;
     google.protobuf.Empty err_dst_existed = 3;
-    string err_others = 4;
+    string err_other = 4;
   }
 }

@@ -51,7 +51,7 @@ pub async fn delete_object_handler(ctx: ObjectRequestContext) -> Result<HttpResp
             );
             return Ok(HttpResponse::NoContent().finish());
         }
-        delete_inode_response::Result::ErrOthers(e) => {
+        delete_inode_response::Result::ErrOther(e) => {
             tracing::error!("delete_inode error: {}", e);
             return Err(S3Error::InternalError);
         }

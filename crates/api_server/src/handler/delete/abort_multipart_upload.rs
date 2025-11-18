@@ -40,7 +40,7 @@ pub async fn abort_multipart_upload_handler(
         get_inode_response::Result::ErrNotFound(()) => {
             return Err(S3Error::NoSuchUpload);
         }
-        get_inode_response::Result::ErrOthers(e) => {
+        get_inode_response::Result::ErrOther(e) => {
             tracing::error!(e);
             return Err(S3Error::InternalError);
         }

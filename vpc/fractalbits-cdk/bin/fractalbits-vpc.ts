@@ -16,10 +16,9 @@ const apiServerInstanceType =
   app.node.tryGetContext("apiServerInstanceType") ?? "c8g.xlarge";
 const benchClientInstanceType =
   app.node.tryGetContext("benchClientInstanceType") ?? "c8g.xlarge";
-const browserIp = app.node.tryGetContext("browserIp") ?? null;
-const dataBlobStorage =
-  app.node.tryGetContext("dataBlobStorage") ?? "s3HybridSingleAz";
+const dataBlobStorage = app.node.tryGetContext("dataBlobStorage") ?? "singleAz";
 const rootServerHa = app.node.tryGetContext("rootServerHa") ?? false;
+const browserIp = app.node.tryGetContext("browserIp") ?? null;
 
 // Get the current region - CDK will auto-detect from AWS config/credentials
 const env = {
@@ -27,14 +26,19 @@ const env = {
   region: process.env.CDK_DEFAULT_REGION,
 };
 
-// Set default azPair based on region
-let defaultAzPair: string;
-if (env.region === "us-east-1") {
-  defaultAzPair = "use1-az4,use1-az6";
-} else {
-  defaultAzPair = "usw2-az3,usw2-az4";
+// Determine default AZ based on deployment mode and region
+// For singleAz: single AZ ID (e.g., "usw2-az3")
+// For multiAz: AZ pair (e.g., "usw2-az3,usw2-az4")
+let az = app.node.tryGetContext("az");
+if (!az) {
+  if (dataBlobStorage === "singleAz") {
+    // Default single AZ based on region
+    az = env.region === "us-east-1" ? "use1-az4" : "usw2-az3";
+  } else {
+    // Default AZ pair for multi-AZ based on region
+    az = env.region === "us-east-1" ? "use1-az4,use1-az6" : "usw2-az3,usw2-az4";
+  }
 }
-const azPair = app.node.tryGetContext("azPair") ?? defaultAzPair;
 
 const vpcStack = new FractalbitsVpcStack(app, "FractalbitsVpcStack", {
   env: env,
@@ -43,7 +47,7 @@ const vpcStack = new FractalbitsVpcStack(app, "FractalbitsVpcStack", {
   numBenchClients: numBenchClients,
   numBssNodes: numBssNodes,
   benchType: benchType,
-  azPair: azPair,
+  az: az,
   bssInstanceTypes: bssInstanceTypes,
   apiServerInstanceType: apiServerInstanceType,
   benchClientInstanceType: benchClientInstanceType,

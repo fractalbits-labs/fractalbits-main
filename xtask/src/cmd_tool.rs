@@ -20,12 +20,21 @@ pub fn run_cmd_tool(tool_kind: ToolKind) -> CmdResult {
 
 fn describe_stack(stack_name: &str) -> CmdResult {
     // Get direct EC2 instance IDs from the CloudFormation stack
-    let direct_instance_ids = run_fun! {
+    let direct_instance_ids = match run_fun! {
         aws cloudformation describe-stack-resources
             --stack-name "$stack_name"
             --query r#"StackResources[?ResourceType==`AWS::EC2::Instance`].PhysicalResourceId"#
-            --output text
-    }?;
+            --output text 2>/dev/null
+    } {
+        Ok(output) => output,
+        Err(_) => {
+            warn!("Stack '{stack_name}' does not exist or is not accessible");
+            warn!(
+                "Please deploy the stack first using 'just deploy' or check if you're using the correct AWS credentials"
+            );
+            return Ok(());
+        }
+    };
 
     // Get Auto Scaling Group names from the CloudFormation stack
     let asg_names = run_fun! {

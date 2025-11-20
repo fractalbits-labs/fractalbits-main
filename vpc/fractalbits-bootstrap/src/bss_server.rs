@@ -110,6 +110,7 @@ use_direct_io = true
 io_concurrency = 256
 data_volume_shards = {BSS_DATA_VOLUME_SHARDS}
 metadata_volume_shards = {BSS_METADATA_VOLUME_SHARDS}
+set_thread_affinity = true
 "##
     );
     run_cmd! {

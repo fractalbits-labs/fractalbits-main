@@ -804,7 +804,7 @@ Environment="BSS_WORKING_DIR=./data/bss%i""##;
             env_settings = r##"
 Environment="AWS_DEFAULT_REGION=fakeRegion"
 Environment="AWS_ACCESS_KEY_ID=fakeMyKeyId"
-Environment="AWS_ACCESS_KEY_ID=fakeMyKeyId"
+Environment="AWS_SECRET_ACCESS_KEY=fakeSecretAccessKey"
 Environment="AWS_ENDPOINT_URL_DYNAMODB=http://localhost:8000""##
                 .to_string();
             env_settings += env_rust_log(build_mode);

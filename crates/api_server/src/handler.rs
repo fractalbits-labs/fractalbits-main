@@ -367,12 +367,7 @@ async fn delete_handler(
     }
 }
 
-#[cfg(feature = "metrics_statsd")]
-struct InflightRequestGuard {
-    gauge: Gauge,
-}
-
-#[cfg(feature = "metrics_prometheus")]
+#[cfg(any(feature = "metrics_statsd", feature = "metrics_prometheus"))]
 struct InflightRequestGuard {
     gauge: Gauge,
 }

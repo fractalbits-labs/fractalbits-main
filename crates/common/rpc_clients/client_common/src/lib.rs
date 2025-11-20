@@ -8,6 +8,9 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing::{debug, error};
 
+#[cfg(feature = "metrics")]
+use metrics_wrapper::{Gauge, counter, gauge, histogram};
+
 pub mod generic_client;
 pub use generic_client::RpcCodec;
 pub use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
@@ -165,7 +168,7 @@ where
 #[cfg(feature = "metrics")]
 pub struct InflightRpcGuard {
     start: std::time::Instant,
-    gauge: metrics::Gauge,
+    gauge: Gauge,
     rpc_type: &'static str,
     rpc_name: &'static str,
 }
@@ -176,9 +179,9 @@ pub struct InflightRpcGuard;
 #[cfg(feature = "metrics")]
 impl InflightRpcGuard {
     pub fn new(rpc_type: &'static str, rpc_name: &'static str) -> Self {
-        let gauge = metrics::gauge!("inflight_rpc", "type" => rpc_type, "name" => rpc_name);
+        let gauge = gauge!("inflight_rpc", "type" => rpc_type, "name" => rpc_name);
         gauge.increment(1.0);
-        metrics::counter!("rpc_request_sent", "type" => rpc_type, "name" => rpc_name).increment(1);
+        counter!("rpc_request_sent", "type" => rpc_type, "name" => rpc_name).increment(1);
 
         Self {
             start: std::time::Instant::now(),
@@ -200,7 +203,7 @@ impl InflightRpcGuard {
 #[cfg(feature = "metrics")]
 impl Drop for InflightRpcGuard {
     fn drop(&mut self) {
-        metrics::histogram!("rpc_duration_nanos", "type" => self.rpc_type, "name" => self.rpc_name)
+        histogram!("rpc_duration_nanos", "type" => self.rpc_type, "name" => self.rpc_name)
             .record(self.start.elapsed().as_nanos() as f64);
         self.gauge.decrement(1.0);
     }

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-metrics = ["metrics_wrapper/metrics"]
+metrics = ["metrics_wrapper/metrics", "dep:metrics"]
 
 [dependencies]
 bytes.workspace = true
@@ -15,6 +15,7 @@ tracing.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 metrics_wrapper.workspace = true
+metrics = { workspace = true, optional = true }
 tokio-retry.workspace = true
 parking_lot.workspace = true
 strum.workspace = true

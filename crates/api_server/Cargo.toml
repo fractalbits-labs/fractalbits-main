@@ -15,6 +15,7 @@ data_types.workspace = true
 data_blob_tracking.workspace = true
 volume_group_proxy.workspace = true
 metrics_wrapper.workspace = true
+metrics = { workspace = true, optional = true }
 
 serde.workspace = true
 config.workspace = true
@@ -90,5 +91,5 @@ reqwest.workspace = true
 
 [features]
 default = []
-metrics_statsd = ["dep:metrics-exporter-statsd", "metrics_wrapper/metrics", "rpc_client_common/metrics"]
-metrics_prometheus = ["dep:metrics-exporter-prometheus", "metrics_wrapper/metrics", "rpc_client_common/metrics"]
+metrics_statsd = ["dep:metrics-exporter-statsd", "metrics_wrapper/metrics", "dep:metrics", "rpc_client_common/metrics", "volume_group_proxy/metrics"]
+metrics_prometheus = ["dep:metrics-exporter-prometheus", "metrics_wrapper/metrics", "dep:metrics", "rpc_client_common/metrics", "volume_group_proxy/metrics"]

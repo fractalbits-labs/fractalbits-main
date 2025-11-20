@@ -20,6 +20,9 @@ pub fn init_service(
 ) -> CmdResult {
     stop_service(service)?;
 
+    // We are using minio to test large blob IO
+    ensure_minio()?;
+
     // Create systemd unit files for the services being initialized
     create_systemd_unit_files_for_init(service, build_mode, init_config)?;
 
@@ -204,9 +207,7 @@ pub fn init_service(
         stop_service(ServiceName::Bss)?;
         Ok(())
     };
-    let init_minio = || run_cmd!(mkdir -p data/s3);
-    let init_minio_dev_az1 = || run_cmd!(mkdir -p data/s3-localdev-az1);
-    let init_minio_dev_az2 = || run_cmd!(mkdir -p data/s3-localdev-az2);
+    let init_minio = |data_dir: &str| -> CmdResult { run_cmd!(mkdir -p $data_dir) };
     let init_mirrord = || -> CmdResult {
         let format_log = "data/logs/format_mirrord.log";
         create_dirs_for_mirrord_server()?;
@@ -233,9 +234,9 @@ pub fn init_service(
             }
         }
         ServiceName::DdbLocal => init_ddb_local()?,
-        ServiceName::Minio => init_minio()?,
-        ServiceName::MinioAz1 => init_minio_dev_az1()?,
-        ServiceName::MinioAz2 => init_minio_dev_az2()?,
+        ServiceName::Minio => init_minio("data/s3")?,
+        ServiceName::MinioAz1 => init_minio("data/s3-localdev-az1")?,
+        ServiceName::MinioAz2 => init_minio("data/s3-localdev-az2")?,
         ServiceName::Bss => {
             init_all_bss(init_config.bss_count)?;
         }
@@ -250,9 +251,9 @@ pub fn init_service(
             init_rss()?;
             init_nss()?; // bss is initialized inside
             init_mirrord()?;
-            init_minio()?;
-            init_minio_dev_az1()?;
-            init_minio_dev_az2()?;
+            init_minio("data/s3")?;
+            init_minio("data/s3-localdev-az1")?;
+            init_minio("data/s3-localdev-az2")?;
         }
     }
 
@@ -262,6 +263,7 @@ pub fn init_service(
         systemctl --user reset-failed;
     }?;
 
+    info!("All services are initialized successfully!");
     Ok(())
 }
 
@@ -291,6 +293,25 @@ fn ensure_dynamodb_local() -> CmdResult {
         mkdir -p dynamodb_local;
         cd dynamodb_local;
         tar -xzf ../$dynamodb_file;
+    }?;
+
+    Ok(())
+}
+
+fn ensure_minio() -> CmdResult {
+    let minio_dir = "third_party/minio";
+    let minio_path = format!("{minio_dir}/minio");
+
+    if run_cmd!(bash -c "command -v minio" &>/dev/null).is_ok() || Path::new(&minio_path).exists() {
+        return Ok(());
+    }
+
+    let download_url = "https://dl.min.io/server/minio/release/linux-amd64/minio";
+    run_cmd! {
+        info "Downloading minio binary for testing since command not found";
+        mkdir -p $minio_dir;
+        curl -L -o $minio_path $download_url 2>&1;
+        chmod +x $minio_path;
     }?;
 
     Ok(())
@@ -410,7 +431,6 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
         service.as_ref()
     );
     for service in services {
-        info!("Stopping service: {}", service.as_ref());
         if service == ServiceName::Nss || service == ServiceName::Mirrord {
             // skip stopping managed services directly
             warn!(
@@ -423,7 +443,10 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
                 if run_cmd!(systemctl --user is-active --quiet $service_name.service).is_err() {
                     return Ok(());
                 }
-                run_cmd!(systemctl --user stop $service_name.service)?;
+                run_cmd! {
+                    info "Stopping service: $service_name";
+                    systemctl --user stop $service_name.service
+                }?;
 
                 // make sure the process is really killed
                 if run_cmd!(systemctl --user is-active --quiet $service_name.service).is_ok() {
@@ -445,7 +468,10 @@ pub fn stop_service(service: ServiceName) -> CmdResult {
                     std::thread::sleep(Duration::from_secs(1));
                 }
             }
-            run_cmd!(systemctl --user stop $service_name.service)?;
+            run_cmd! {
+                info "Stopping service: $service_name";
+                systemctl --user stop $service_name.service
+            }?;
 
             // make sure the process is really killed
             if run_cmd!(systemctl --user is-active --quiet $service_name.service).is_ok() {
@@ -673,7 +699,7 @@ fn start_all_services() -> CmdResult {
         start_service(ServiceName::ApiServer)?;
     }
 
-    info!("All services started successfully!");
+    info!("All services are started successfully!");
     Ok(())
 }
 
@@ -734,7 +760,10 @@ Environment="RUST_LOG=warn""##
             }
         }
     };
-    let minio_bin = run_fun!(bash -c "command -v minio")?;
+    let minio_bin = match run_fun!(bash -c "command -v minio") {
+        Ok(path) => path,
+        Err(_) => run_fun!(realpath "third_party/minio/minio")?,
+    };
     let exec_start = match service {
         ServiceName::Bss => {
             // Create template for BSS services using %i placeholder

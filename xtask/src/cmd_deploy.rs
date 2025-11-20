@@ -206,9 +206,9 @@ pub fn build(
         }?;
     }
 
-    // Build (extract) warp binary for each architecture
+    // Download (extract) warp binary for each architecture
     if deploy_target == DeployTarget::All {
-        build_warp_binaries()?;
+        download_warp_binaries()?;
     }
 
     info!("Deploy build is done");
@@ -216,13 +216,13 @@ pub fn build(
     Ok(())
 }
 
-fn build_warp_binaries() -> CmdResult {
+fn download_warp_binaries() -> CmdResult {
     for arch in ["x86_64", "aarch64"] {
         let linux_arch = if arch == "aarch64" { "arm64" } else { "x86_64" };
 
         let warp_version = "v1.3.0";
         let warp_file = format!("warp_Linux_{linux_arch}.tar.gz");
-        let warp_path = format!("third_party/{warp_file}");
+        let warp_path = format!("third_party/minio/{warp_file}");
 
         let base_url = "https://github.com/minio/warp/releases/download";
         let download_url = format!("{base_url}/{warp_version}/{warp_file}");
@@ -232,12 +232,13 @@ fn build_warp_binaries() -> CmdResult {
         if !Path::new(&warp_path).exists() {
             run_cmd! {
                 info "Downloading warp binary for $linux_arch";
+                mkdir -p third_party/minio;
                 curl -sL -o $warp_path $download_url;
             }?;
         }
 
         run_cmd! {
-            cd third_party;
+            cd third_party/minio;
             info "Verifying warp binary checksum for $linux_arch";
             curl -sL -o warp_checksums.txt $checksums_url;
             grep $warp_file warp_checksums.txt | sha256sum -c --quiet;
@@ -248,7 +249,7 @@ fn build_warp_binaries() -> CmdResult {
         let deploy_dir = format!("prebuilt/deploy/{}", arch);
         run_cmd! {
             info "Extracting warp binary to $deploy_dir for $linux_arch";
-            tar -xzf third_party/$warp_file -C $deploy_dir warp;
+            tar -xzf third_party/minio/$warp_file -C $deploy_dir warp;
         }?;
     }
 

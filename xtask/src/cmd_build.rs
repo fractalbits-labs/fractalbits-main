@@ -112,6 +112,8 @@ pub fn build_zig_servers(mode: BuildMode) -> CmdResult {
 }
 
 pub fn build_rust_servers(mode: BuildMode) -> CmdResult {
+    ensure_protoc()?;
+
     let build_envs = get_build_envs();
     match mode {
         BuildMode::Debug => {
@@ -129,6 +131,29 @@ pub fn build_rust_servers(mode: BuildMode) -> CmdResult {
             }
         }
     }
+}
+
+fn ensure_protoc() -> CmdResult {
+    let protoc_dir = "third_party/protoc";
+    let protoc_path = format!("{protoc_dir}/bin/protoc");
+
+    if run_cmd!(bash -c "command -v protoc" &>/dev/null).is_ok() || Path::new(&protoc_path).exists()
+    {
+        return Ok(());
+    }
+
+    let version = "33.1";
+    let base_url = "https://github.com/protocolbuffers/protobuf/releases/download";
+    let file_name = format!("protoc-{version}-linux-x86_64.zip");
+    let download_url = format!("{base_url}/v{version}/{file_name}");
+    run_cmd! {
+        info "Downloading protoc binary since command not found";
+        curl -qL -o third_party/$file_name $download_url &>/dev/null;
+        mkdir -p $protoc_dir;
+        unzip -q third_party/$file_name -d $protoc_dir;
+    }?;
+
+    Ok(())
 }
 
 pub fn build_ui(region: &str) -> CmdResult {

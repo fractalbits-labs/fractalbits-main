@@ -1,8 +1,11 @@
 use crate::*;
+use std::fs;
+use std::io;
 use std::io::Error;
 use std::path::Path;
 use std::sync::LazyLock;
 use strum::{AsRefStr, EnumString};
+use zip::ZipArchive;
 
 pub static BUILD_ENVS: LazyLock<Vec<String>> =
     LazyLock::new(|| build_envs().expect("failed to initialize BUILD_ENVS"));
@@ -133,6 +136,36 @@ pub fn build_rust_servers(mode: BuildMode) -> CmdResult {
     }
 }
 
+fn extract_zip(source: &str, dest: &str) -> io::Result<()> {
+    let file = fs::File::open(source)?;
+    let mut archive = ZipArchive::new(file)?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let outpath = Path::new(dest).join(file.mangled_name());
+
+        if file.is_dir() {
+            fs::create_dir_all(&outpath)?;
+        } else {
+            if let Some(parent) = outpath.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut outfile = fs::File::create(&outpath)?;
+            io::copy(&mut file, &mut outfile)?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Some(mode) = file.unix_mode() {
+                    fs::set_permissions(&outpath, fs::Permissions::from_mode(mode))?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn ensure_protoc() -> CmdResult {
     let protoc_dir = "third_party/protoc";
     let protoc_path = format!("{protoc_dir}/bin/protoc");
@@ -146,12 +179,15 @@ fn ensure_protoc() -> CmdResult {
     let base_url = "https://github.com/protocolbuffers/protobuf/releases/download";
     let file_name = format!("protoc-{version}-linux-x86_64.zip");
     let download_url = format!("{base_url}/v{version}/{file_name}");
+    let zip_path = format!("third_party/{file_name}");
+
     run_cmd! {
         info "Downloading protoc binary since command not found";
-        curl -qL -o third_party/$file_name $download_url &>/dev/null;
+        curl -qL -o $zip_path $download_url &>/dev/null;
         mkdir -p $protoc_dir;
-        unzip -q third_party/$file_name -d $protoc_dir;
     }?;
+
+    extract_zip(&zip_path, protoc_dir)?;
 
     Ok(())
 }

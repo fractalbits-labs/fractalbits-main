@@ -21,3 +21,4 @@ uuid.workspace = true
 comfy-table.workspace = true
 glob.workspace = true
 dialoguer.workspace = true
+zip.workspace = true

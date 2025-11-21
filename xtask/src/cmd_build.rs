@@ -232,7 +232,8 @@ pub fn build_prebuilt(_release: bool) -> CmdResult {
         $[build_envs] zig build -p ../$build_dir/zig-out
             -Doptimize=ReleaseSafe
             -Dtarget=x86_64-linux-gnu
-            -Dcpu=x86_64_v3 2>&1;
+            -Dcpu=x86_64_v3
+            -Dfor_prebuilt=true 2>&1;
         info "Zig build complete";
     }?;
 

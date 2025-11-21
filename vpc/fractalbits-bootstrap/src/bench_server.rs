@@ -4,6 +4,8 @@ mod yaml_put;
 
 use super::common::*;
 use cmd_lib::*;
+use std::net::TcpStream;
+use std::time::Duration;
 use {yaml_get::*, yaml_mixed::*, yaml_put::*};
 
 struct WorkloadConfig {
@@ -29,7 +31,6 @@ const WORKLOAD_CONFIGS: &[WorkloadConfig] = &[
 ];
 
 pub fn bootstrap(api_server_endpoint: String, bench_client_num: usize) -> CmdResult {
-    install_rpms(&["nmap-ncat"])?;
     download_binaries(&["warp"])?;
     setup_serial_console_password()?;
 
@@ -72,11 +73,11 @@ pub fn bootstrap(api_server_endpoint: String, bench_client_num: usize) -> CmdRes
         "Waiting for api_server endpoint {} to be ready",
         api_server_endpoint
     );
-    while run_cmd!(nc -z $api_server_endpoint 80 &>/dev/null).is_err() {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+    while !check_port_ready(&api_server_endpoint, 80) {
+        std::thread::sleep(Duration::from_secs(1));
     }
     info!(
-        "api_server endpoint can be reached (`nc -z {} 80` is ok)",
+        "api_server endpoint {}:80 is reachable",
         api_server_endpoint
     );
 
@@ -112,4 +113,12 @@ fi
         chmod +x $BIN_PATH/$BENCH_SERVER_BENCH_START_SCRIPT;
     }?;
     Ok(())
+}
+
+fn check_port_ready(host: &str, port: u16) -> bool {
+    TcpStream::connect_timeout(
+        &format!("{}:{}", host, port).parse().unwrap(),
+        Duration::from_secs(1),
+    )
+    .is_ok()
 }

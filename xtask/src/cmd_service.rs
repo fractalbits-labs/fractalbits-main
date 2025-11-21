@@ -1,3 +1,4 @@
+use std::net::TcpStream;
 use std::path::Path;
 use std::time::Duration;
 
@@ -1029,8 +1030,12 @@ pub fn wait_for_service_ready(service: ServiceName, timeout_secs: u32) -> CmdRes
     cmd_die!("Timeout waiting for ${service_name} to be ready after ${timeout_secs}s")
 }
 
-fn check_port_ready(port: u16) -> bool {
-    run_cmd!(nc -z localhost $port &>/dev/null).is_ok()
+pub fn check_port_ready(port: u16) -> bool {
+    TcpStream::connect_timeout(
+        &format!("127.0.0.1:{}", port).parse().unwrap(),
+        Duration::from_secs(1),
+    )
+    .is_ok()
 }
 
 fn register_local_api_server() -> CmdResult {

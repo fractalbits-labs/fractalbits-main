@@ -32,7 +32,7 @@ pub const S3EXPRESS_REMOTE_BUCKET_CONFIG: &str = "s3express-remote-bucket-config
 pub fn common_setup() -> CmdResult {
     create_network_tuning_sysctl_file()?;
     create_storage_tuning_sysctl_file()?;
-    install_rpms(&["amazon-cloudwatch-agent", "nmap-ncat", "perf", "lldb"])?;
+    install_rpms(&["amazon-cloudwatch-agent", "perf", "lldb"])?;
     // setup_serial_console_password()?;
     Ok(())
 }

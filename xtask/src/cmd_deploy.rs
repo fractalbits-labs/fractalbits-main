@@ -80,6 +80,13 @@ pub fn build(
         .map(|opt| format!("-D{}", opt))
         .collect();
 
+    // Ensure required Rust targets are installed
+    run_cmd! {
+        info "Ensuring required Rust targets are installed";
+        rustup target add x86_64-unknown-linux-gnu;
+        rustup target add aarch64-unknown-linux-gnu;
+    }?;
+
     // Create deploy directories for all CPU targets
     for target in CPU_TARGETS {
         let deploy_dir = format!("prebuilt/deploy/{}/{}", target.arch, target.name);

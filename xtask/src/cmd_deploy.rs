@@ -72,7 +72,10 @@ pub fn build(
     };
 
     // Format Zig extra build options as -Dkey=value
-    let zig_extra_opts: &Vec<String> = &zig_extra_build
+    // Always include journal_atomic_write_size=16384 (16KB) for deployment
+    let mut zig_build_with_defaults = vec!["journal_atomic_write_size=16384".to_string()];
+    zig_build_with_defaults.extend_from_slice(zig_extra_build);
+    let zig_extra_opts: &Vec<String> = &zig_build_with_defaults
         .iter()
         .map(|opt| format!("-D{}", opt))
         .collect();

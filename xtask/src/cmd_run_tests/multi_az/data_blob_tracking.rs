@@ -1,4 +1,4 @@
-use crate::cmd_service::{start_service, stop_service, wait_for_service_ready};
+use crate::cmd_service::{check_port_ready, start_service, stop_service, wait_for_service_ready};
 use crate::{CmdResult, ServiceName};
 use aws_sdk_s3::primitives::ByteStream;
 use cmd_lib::*;
@@ -135,7 +135,7 @@ async fn test_remote_az_service_interruption_and_recovery() -> CmdResult {
     sleep(Duration::from_secs(2)).await;
 
     // Verify remote AZ is down by checking port
-    let remote_az_down = run_cmd!(nc -z localhost 9002).is_err();
+    let remote_az_down = !check_port_ready(9002);
     assert!(remote_az_down, "Remote AZ service should be down");
     println!("OK: Remote AZ service confirmed down");
 

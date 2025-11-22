@@ -18,9 +18,9 @@ struct WorkloadConfig {
 const WORKLOAD_CONFIGS: &[WorkloadConfig] = &[
     WorkloadConfig {
         size_kb: 4,
-        put_concurrent_ops: 48,
-        get_concurrent_ops: 96,
-        mixed_concurrent_ops: 72,
+        put_concurrent_ops: 36,
+        get_concurrent_ops: 72,
+        mixed_concurrent_ops: 54,
     },
     WorkloadConfig {
         size_kb: 64,

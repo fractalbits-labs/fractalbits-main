@@ -15,7 +15,7 @@ pub fn bootstrap(
 
     if for_bench {
         // Try to download tools for micro-benchmarking
-        download_binaries(&["rewrk_rpc", "test_art"])?;
+        download_binaries(&["rewrk_rpc", "test_fractal_art"])?;
     }
 
     create_ena_irq_affinity_service()?;

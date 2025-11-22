@@ -10,8 +10,8 @@ const EBS_SPACE_PERCENT: f64 = 0.2;
 
 const NSS_META_CACHE_SHARDS: usize = 256;
 
-/// Calculate art_journal_segment_size based on EBS volume size
-fn calculate_art_journal_segment_size(volume_dev: &str) -> Result<u64, Error> {
+/// Calculate fa_journal_segment_size based on EBS volume size
+fn calculate_fa_journal_segment_size(volume_dev: &str) -> Result<u64, Error> {
     // Get total size of volume_dev in bytes
     let ebs_blockdev_size_str = run_fun!(blockdev --getsize64 ${volume_dev})?;
     let ebs_blockdev_size = ebs_blockdev_size_str.trim().parse::<u64>().map_err(|_| {
@@ -20,9 +20,8 @@ fn calculate_art_journal_segment_size(volume_dev: &str) -> Result<u64, Error> {
         ))
     })?;
     let ebs_blockdev_mb = ebs_blockdev_size / 1024 / 1024;
-    let art_journal_segment_size =
-        (ebs_blockdev_mb as f64 * EBS_SPACE_PERCENT) as u64 * 1024 * 1024;
-    Ok(art_journal_segment_size)
+    let fa_journal_segment_size = (ebs_blockdev_mb as f64 * EBS_SPACE_PERCENT) as u64 * 1024 * 1024;
+    Ok(fa_journal_segment_size)
 }
 
 pub fn bootstrap(
@@ -34,7 +33,7 @@ pub fn bootstrap(
 ) -> CmdResult {
     install_rpms(&["nvme-cli", "mdadm"])?;
     if meta_stack_testing || for_bench {
-        download_binaries(&["test_art", "rewrk_rpc"])?;
+        download_binaries(&["test_fractal_art", "rewrk_rpc"])?;
     }
     format_local_nvme_disks(false)?;
     download_binaries(&["nss_server", "nss_role_agent"])?;
@@ -82,23 +81,23 @@ fn create_nss_config(volume_dev: &str) -> CmdResult {
     // Calculate total memory for blob_dram_kilo_bytes
     let blob_dram_kilo_bytes = (total_mem_kb as f64 * BLOB_DRAM_MEM_PERCENT) as u64;
 
-    // Calculate art_journal_segment_size based on EBS volume size
-    let art_journal_segment_size = calculate_art_journal_segment_size(volume_dev)?;
+    // Calculate fa_journal_segment_size based on EBS volume size
+    let fa_journal_segment_size = calculate_fa_journal_segment_size(volume_dev)?;
 
     let num_cores = num_cpus()?;
     let net_worker_thread_count = num_cores / 2;
-    let art_thread_dataop_count = num_cores / 2;
-    let art_thread_count = art_thread_dataop_count + 4;
+    let fa_thread_dataop_count = num_cores / 2;
+    let fa_thread_count = fa_thread_dataop_count + 4;
 
     let config_content = format!(
         r##"working_dir = "/data"
 server_port = 8088
 health_port = 19999
 net_worker_thread_count = {net_worker_thread_count}
-art_thread_count = {art_thread_count}
-art_thread_dataop_count = {art_thread_dataop_count}
+fa_thread_count = {fa_thread_count}
+fa_thread_dataop_count = {fa_thread_dataop_count}
 blob_dram_kilo_bytes = {blob_dram_kilo_bytes}
-art_journal_segment_size = {art_journal_segment_size}
+fa_journal_segment_size = {fa_journal_segment_size}
 log_level = "info"
 mirrord_port = 9999
 meta_cache_shards = {NSS_META_CACHE_SHARDS}
@@ -113,15 +112,15 @@ meta_cache_shards = {NSS_META_CACHE_SHARDS}
 
 fn create_mirrord_config(volume_dev: &str) -> CmdResult {
     let num_cores = run_fun!(nproc)?;
-    // Calculate art_journal_segment_size based on EBS volume size (same as nss_server)
-    let art_journal_segment_size = calculate_art_journal_segment_size(volume_dev)?;
+    // Calculate fa_journal_segment_size based on EBS volume size (same as nss_server)
+    let fa_journal_segment_size = calculate_fa_journal_segment_size(volume_dev)?;
     let config_content = format!(
         r##"working_dir = "/data"
 server_port = 9999
 health_port = 19999
 num_threads = {num_cores}
 log_level = "info"
-art_journal_segment_size = {art_journal_segment_size}
+fa_journal_segment_size = {fa_journal_segment_size}
 "##
     );
     run_cmd! {

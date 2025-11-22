@@ -60,8 +60,8 @@ enum Cmd {
         )]
         debug_api_server: bool,
 
-        #[clap(long, long_help = "Run art tests in addition to other tests")]
-        with_art_tests: bool,
+        #[clap(long, long_help = "Run fractal art tests in addition to other tests")]
+        with_fractal_art_tests: bool,
 
         #[clap(long, long_help = "Enable HTTPS tests")]
         with_https: bool,
@@ -398,7 +398,7 @@ async fn main() -> CmdResult {
             s3_api_only,
             zig_unit_tests_only,
             debug_api_server,
-            with_art_tests,
+            with_fractal_art_tests,
             with_https,
             data_blob_storage,
         } => {
@@ -413,7 +413,7 @@ async fn main() -> CmdResult {
                 s3_api_only,
                 zig_unit_tests_only,
                 debug_api_server,
-                with_art_tests,
+                with_fractal_art_tests,
             )?;
         }
         Cmd::Nightly => cmd_nightly::run_cmd_nightly()?,

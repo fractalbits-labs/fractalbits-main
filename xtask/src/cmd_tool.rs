@@ -116,6 +116,32 @@ fn describe_stack(stack_name: &str) -> CmdResult {
         return Ok(());
     }
 
+    // Get NLB ARNs from the CloudFormation stack
+    let nlb_arns = run_fun! {
+        aws cloudformation describe-stack-resources
+            --stack-name "$stack_name"
+            --query r#"StackResources[?ResourceType==`AWS::ElasticLoadBalancingV2::LoadBalancer`].PhysicalResourceId"#
+            --output text
+    }?;
+
+    // Get NLB DNS names
+    let mut nlb_endpoint = String::new();
+    if !nlb_arns.trim().is_empty() {
+        for nlb_arn in nlb_arns.split_whitespace() {
+            let nlb_dns = run_fun! {
+                aws elbv2 describe-load-balancers
+                    --load-balancer-arns "$nlb_arn"
+                    --query r#"LoadBalancers[0].DNSName"#
+                    --output text
+            }?;
+
+            if !nlb_dns.trim().is_empty() {
+                nlb_endpoint = nlb_dns.trim().to_string();
+                break;
+            }
+        }
+    }
+
     // Get zone name to zone ID mapping
     let zone_info = run_fun! {
         aws ec2 describe-availability-zones
@@ -210,5 +236,10 @@ fn describe_stack(stack_name: &str) -> CmdResult {
     }
 
     println!("{table}");
+
+    if !nlb_endpoint.is_empty() {
+        println!("\n API Server NLB Endpoint: {nlb_endpoint}");
+    }
+
     Ok(())
 }

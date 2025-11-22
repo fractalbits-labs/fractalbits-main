@@ -5,7 +5,7 @@ pub fn run_cmd_precheckin(
     s3_api_only: bool,
     zig_unit_tests_only: bool,
     debug_api_server: bool,
-    with_art_tests: bool,
+    with_fractal_art_tests: bool,
 ) -> CmdResult {
     if debug_api_server {
         cmd_service::stop_service(ServiceName::ApiServer)?;
@@ -35,8 +35,8 @@ pub fn run_cmd_precheckin(
 
     run_s3_api_tests(init_config, false)?;
 
-    if with_art_tests {
-        run_art_tests()?;
+    if with_fractal_art_tests {
+        run_fractal_art_tests()?;
     }
 
     if let Ok(core_file) = run_fun!(ls data | grep ^core) {
@@ -48,17 +48,18 @@ pub fn run_cmd_precheckin(
     Ok(())
 }
 
-fn run_art_tests() -> CmdResult {
-    let rand_log = "data/logs/test_art_random.log";
+fn run_fractal_art_tests() -> CmdResult {
+    let rand_log = "data/logs/test_fractal_art_random.log";
     let format_log = "data/logs/format.log";
     let ts = ["ts", "-m", TS_FMT];
     let working_dir = run_fun!(pwd)?;
     let nss_server = format!("{working_dir}/{ZIG_DEBUG_OUT}/bin/nss_server");
-    let test_art = format!("{working_dir}/{ZIG_DEBUG_OUT}/bin/test_art");
-    let test_async_art = format!("{working_dir}/{ZIG_DEBUG_OUT}/bin/test_async_art");
+    let test_fractal_art = format!("{working_dir}/{ZIG_DEBUG_OUT}/bin/test_fractal_art");
+    let test_async_fractal_art =
+        format!("{working_dir}/{ZIG_DEBUG_OUT}/bin/test_async_fractal_art");
 
-    if !std::path::Path::new(&test_art).exists() {
-        info!("Skipping art-tests");
+    if !std::path::Path::new(&test_fractal_art).exists() {
+        info!("Skipping fractal-art-tests");
         return Ok(());
     }
 
@@ -66,33 +67,33 @@ fn run_art_tests() -> CmdResult {
     cmd_service::start_service(ServiceName::Bss)?;
     run_cmd! {
         mkdir -p data/logs;
-        info "Running art tests (random) with log $rand_log";
+        info "Running fractal art tests (random) with log $rand_log";
         $nss_server format |& $[ts] >$format_log;
-        $test_art --tests random --size 400000 --ops 1000000 --threads 20 |& $[ts] >$rand_log;
+        $test_fractal_art --tests random --size 400000 --ops 1000000 --threads 20 |& $[ts] >$rand_log;
     }?;
 
-    let fat_log = "data/logs/test_art_fat.log";
+    let fat_log = "data/logs/test_fractal_art_fat.log";
     run_cmd! {
-        info "Running art tests (fat) with log $fat_log";
+        info "Running fractal art tests (fat) with log $fat_log";
         $nss_server format |& $[ts] >$format_log;
-        $test_art --tests fat --ops 1000000 |& $[ts] >$fat_log;
+        $test_fractal_art --tests fat --ops 1000000 |& $[ts] >$fat_log;
     }?;
 
-    let async_art_log = "data/logs/test_async_art_rename.log";
+    let async_fractal_art_log = "data/logs/test_async_fractal_art_rename.log";
     run_cmd! {
-        info "Running async art rename tests with log $async_art_log";
+        info "Running async fractal art rename tests with log $async_fractal_art_log";
         $nss_server format --init_test_tree |& $[ts] >$format_log;
-        $test_async_art --prefill 100000 --tests rename
-            --ops 10000 --parallelism 1000 --debug |& $[ts] >$async_art_log;
+        $test_async_fractal_art --prefill 100000 --tests rename
+            --ops 10000 --parallelism 1000 --debug |& $[ts] >$async_fractal_art_log;
     }?;
 
-    let async_art_log = "data/logs/test_async_art.log";
+    let async_fractal_art_log = "data/logs/test_async_fractal_art.log";
     run_cmd! {
-        info "Running async art tests with log $async_art_log";
+        info "Running async fractal art tests with log $async_fractal_art_log";
         $nss_server format --init_test_tree |& $[ts] >$format_log;
-        $test_async_art -p 20 |& $[ts] >$async_art_log;
-        $test_async_art -p 20 |& $[ts] >>$async_art_log;
-        $test_async_art -p 20 |& $[ts] >>$async_art_log;
+        $test_async_fractal_art -p 20 |& $[ts] >$async_fractal_art_log;
+        $test_async_fractal_art -p 20 |& $[ts] >>$async_fractal_art_log;
+        $test_async_fractal_art -p 20 |& $[ts] >>$async_fractal_art_log;
     }?;
 
     // Stop all BSS instances

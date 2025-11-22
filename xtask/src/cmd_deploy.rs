@@ -57,7 +57,7 @@ const RUST_BINS: &[&str] = &[
     "rewrk_rpc",
 ];
 
-const ZIG_BINS: &[&str] = &["nss_server", "bss_server", "test_art"];
+const ZIG_BINS: &[&str] = &["nss_server", "bss_server", "test_fractal_art"];
 
 pub fn build(
     deploy_target: DeployTarget,

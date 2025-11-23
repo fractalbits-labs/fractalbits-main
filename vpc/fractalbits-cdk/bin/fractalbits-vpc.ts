@@ -7,8 +7,8 @@ import { PeeringStack } from "../lib/fractalbits-peering-stack";
 const app = new cdk.App();
 
 const numApiServers = app.node.tryGetContext("numApiServers") ?? 1;
-const numBenchClients = app.node.tryGetContext("numBenchClients") ?? 2;
-const numBssNodes = app.node.tryGetContext("numBssNodes") ?? 6;
+const numBenchClients = app.node.tryGetContext("numBenchClients") ?? 1;
+const numBssNodes = app.node.tryGetContext("numBssNodes") ?? 1;
 const benchType = app.node.tryGetContext("benchType") ?? null;
 const bssInstanceTypes =
   app.node.tryGetContext("bssInstanceTypes") ?? "i8g.2xlarge";

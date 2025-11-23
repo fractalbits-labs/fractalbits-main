@@ -153,7 +153,46 @@ pub enum DeployCommand {
     Upload,
 
     #[clap(about = "Create VPC infrastructure using CDK")]
-    CreateVpc,
+    CreateVpc {
+        #[clap(
+            long,
+            value_enum,
+            long_help = "VPC deployment template (minimal or perf_demo)"
+        )]
+        template: Option<VpcTemplate>,
+
+        #[clap(long, long_help = "Number of API servers", default_value = "1")]
+        num_api_servers: u32,
+
+        #[clap(long, long_help = "Number of benchmark clients", default_value = "1")]
+        num_bench_clients: u32,
+
+        #[clap(long, long_help = "Number of BSS nodes", default_value = "1")]
+        num_bss_nodes: u32,
+
+        #[clap(long, long_help = "Enable external benchmark mode")]
+        with_bench: bool,
+
+        #[clap(long, long_help = "BSS instance type", default_value = "i8g.2xlarge")]
+        bss_instance_type: String,
+
+        #[clap(
+            long,
+            long_help = "API server instance type",
+            default_value = "c8g.xlarge"
+        )]
+        api_server_instance_type: String,
+
+        #[clap(
+            long,
+            long_help = "Benchmark client instance type",
+            default_value = "c8g.xlarge"
+        )]
+        bench_client_instance_type: String,
+
+        #[clap(long, long_help = "Availability zone ID (e.g., usw2-az3, use1-az4)")]
+        az: Option<String>,
+    },
 
     #[clap(about = "Destroy VPC infrastructure (including s3 builds bucket cleanup)")]
     DestroyVpc,
@@ -222,6 +261,14 @@ pub enum DeployTarget {
     Ui,
     #[default]
     All,
+}
+
+#[derive(AsRefStr, EnumString, Copy, Clone, PartialEq, Debug, clap::ValueEnum)]
+#[strum(serialize_all = "snake_case")]
+#[clap(rename_all = "snake_case")]
+pub enum VpcTemplate {
+    Minimal,
+    PerfDemo,
 }
 
 #[derive(AsRefStr, EnumString, Copy, Clone, Default)]
@@ -481,7 +528,27 @@ async fn main() -> CmdResult {
                 api_server_build_env,
             } => cmd_deploy::build(target, release, &zig_extra_build, &api_server_build_env)?,
             DeployCommand::Upload => cmd_deploy::upload()?,
-            DeployCommand::CreateVpc => cmd_deploy::create_vpc()?,
+            DeployCommand::CreateVpc {
+                template,
+                num_api_servers,
+                num_bench_clients,
+                num_bss_nodes,
+                with_bench,
+                bss_instance_type,
+                api_server_instance_type,
+                bench_client_instance_type,
+                az,
+            } => cmd_deploy::create_vpc(cmd_deploy::VpcConfig {
+                template,
+                num_api_servers,
+                num_bench_clients,
+                num_bss_nodes,
+                with_bench,
+                bss_instance_type,
+                api_server_instance_type,
+                bench_client_instance_type,
+                az,
+            })?,
             DeployCommand::DestroyVpc => cmd_deploy::destroy_vpc()?,
         },
         Cmd::RunTests { test_type } => {

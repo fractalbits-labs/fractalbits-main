@@ -3,6 +3,18 @@ use colored::*;
 use dialoguer::Input;
 use std::path::Path;
 
+pub struct VpcConfig {
+    pub template: Option<crate::VpcTemplate>,
+    pub num_api_servers: u32,
+    pub num_bench_clients: u32,
+    pub num_bss_nodes: u32,
+    pub with_bench: bool,
+    pub bss_instance_type: String,
+    pub api_server_instance_type: String,
+    pub bench_client_instance_type: String,
+    pub az: Option<String>,
+}
+
 #[derive(Clone)]
 struct CpuTarget {
     name: &'static str,
@@ -356,7 +368,48 @@ fn cleanup_builds_bucket() -> CmdResult {
     Ok(())
 }
 
-pub fn create_vpc() -> CmdResult {
+pub fn create_vpc(config: VpcConfig) -> CmdResult {
+    let VpcConfig {
+        template,
+        mut num_api_servers,
+        mut num_bench_clients,
+        mut num_bss_nodes,
+        with_bench,
+        bss_instance_type,
+        api_server_instance_type,
+        bench_client_instance_type,
+        az,
+    } = config;
+
+    // Apply template settings if specified
+    if let Some(tmpl) = template {
+        match tmpl {
+            crate::VpcTemplate::Minimal => {
+                num_api_servers = 1;
+                num_bss_nodes = 1;
+                // Only create bench clients if --with-bench is set
+                if with_bench {
+                    num_bench_clients = 1;
+                } else {
+                    num_bench_clients = 0;
+                }
+            }
+            crate::VpcTemplate::PerfDemo => {
+                num_api_servers = 14;
+                num_bss_nodes = 6;
+                // Only create bench clients if --with-bench is set
+                if with_bench {
+                    num_bench_clients = 42;
+                } else {
+                    num_bench_clients = 0;
+                }
+            }
+        }
+    } else if !with_bench {
+        // If no template and --with-bench is not set, don't create bench clients
+        num_bench_clients = 0;
+    }
+
     let cdk_dir = "vpc/fractalbits-cdk";
 
     // Check if node_modules exists, if not run npm install
@@ -388,12 +441,34 @@ pub fn create_vpc() -> CmdResult {
         }?;
     }
 
+    // Build CDK context parameters (each --context flag and value must be separate arguments)
+    let mut context_params = Vec::new();
+    let mut add_context = |key: &str, value: String| {
+        context_params.push("--context".to_string());
+        context_params.push(format!("{}={}", key, value));
+    };
+
+    add_context("numApiServers", num_api_servers.to_string());
+    add_context("numBenchClients", num_bench_clients.to_string());
+    add_context("numBssNodes", num_bss_nodes.to_string());
+    add_context("bssInstanceTypes", bss_instance_type);
+    add_context("apiServerInstanceType", api_server_instance_type);
+    add_context("benchClientInstanceType", bench_client_instance_type);
+
+    if with_bench {
+        add_context("benchType", "external".to_string());
+    }
+
+    if let Some(az_val) = az {
+        add_context("az", az_val);
+    }
+
     // Deploy the VPC stack
     run_cmd! {
         info "Deploying FractalbitsVpcStack...";
         cd $cdk_dir;
         npx cdk deploy FractalbitsVpcStack
-            --context benchType=external
+            $[context_params]
             --require-approval never 2>&1;
         info "VPC deployment completed successfully";
     }?;

@@ -6,9 +6,13 @@ import { PeeringStack } from "../lib/fractalbits-peering-stack";
 
 const app = new cdk.App();
 
-const numApiServers = app.node.tryGetContext("numApiServers") ?? 1;
-const numBenchClients = app.node.tryGetContext("numBenchClients") ?? 1;
-const numBssNodes = app.node.tryGetContext("numBssNodes") ?? 1;
+// Get template type to determine default configurations
+const vpcTemplate = app.node.tryGetContext("vpcTemplate") ?? null;
+
+// Get context values (may be overridden by template)
+let numApiServers = app.node.tryGetContext("numApiServers") ?? 1;
+let numBenchClients = app.node.tryGetContext("numBenchClients") ?? 1;
+let numBssNodes = app.node.tryGetContext("numBssNodes") ?? 1;
 const benchType = app.node.tryGetContext("benchType") ?? null;
 const bssInstanceTypes =
   app.node.tryGetContext("bssInstanceTypes") ?? "i8g.2xlarge";
@@ -17,8 +21,42 @@ const apiServerInstanceType =
 const benchClientInstanceType =
   app.node.tryGetContext("benchClientInstanceType") ?? "c8g.xlarge";
 const dataBlobStorage = app.node.tryGetContext("dataBlobStorage") ?? "singleAz";
-const rootServerHa = app.node.tryGetContext("rootServerHa") ?? false;
 const browserIp = app.node.tryGetContext("browserIp") ?? null;
+
+// Check if rootServerHa is explicitly provided (overrides template default)
+const explicitRootServerHa = app.node.tryGetContext("rootServerHa");
+
+// Configure based on template type
+let nssInstanceType: string;
+let ebsVolumeSize: number;
+let ebsVolumeIops: number;
+let rootServerHa: boolean;
+
+if (vpcTemplate === "mini") {
+  nssInstanceType = "m7gd.2xlarge";
+  ebsVolumeSize = 5;
+  ebsVolumeIops = 1000;
+  rootServerHa = false; // Mini template: no HA
+  // Instance counts
+  numApiServers = 1;
+  numBssNodes = 1;
+  numBenchClients = 1;
+} else if (vpcTemplate === "perf_demo") {
+  nssInstanceType = "m7gd.4xlarge";
+  ebsVolumeSize = 20;
+  ebsVolumeIops = 10000;
+  rootServerHa = true; // PerfDemo template: HA enabled
+  // Instance counts
+  numApiServers = 14;
+  numBssNodes = 6;
+  numBenchClients = 42;
+} else {
+  // Default configuration
+  nssInstanceType = "m7gd.2xlarge";
+  ebsVolumeSize = 5;
+  ebsVolumeIops = 1000;
+  rootServerHa = explicitRootServerHa ?? false;
+}
 
 // Get the current region - CDK will auto-detect from AWS config/credentials
 const env = {
@@ -51,8 +89,11 @@ const vpcStack = new FractalbitsVpcStack(app, "FractalbitsVpcStack", {
   bssInstanceTypes: bssInstanceTypes,
   apiServerInstanceType: apiServerInstanceType,
   benchClientInstanceType: benchClientInstanceType,
+  nssInstanceType: nssInstanceType,
   dataBlobStorage: dataBlobStorage,
   rootServerHa: rootServerHa,
+  ebsVolumeSize: ebsVolumeSize,
+  ebsVolumeIops: ebsVolumeIops,
 });
 
 if (benchType === "service_endpoint") {

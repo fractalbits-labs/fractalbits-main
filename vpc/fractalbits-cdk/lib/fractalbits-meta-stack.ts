@@ -68,7 +68,7 @@ export class FractalbitsMetaStack extends cdk.Stack {
         autoDeleteObjects: true, // Empty bucket before deletion
       });
       const nssInstanceType = new ec2.InstanceType(
-        props.nssInstanceType ?? "m7gd.4xlarge",
+        props.nssInstanceType ?? "m7gd.2xlarge",
       );
       const instance = createInstance(
         this,

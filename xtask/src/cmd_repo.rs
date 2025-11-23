@@ -50,12 +50,12 @@ const PREBUILT_REPO: Repo = Repo {
     branch: "main",
 };
 
-pub fn run_cmd_git(git_cmd: GitCommand) -> CmdResult {
-    match git_cmd {
-        GitCommand::List => list_repos()?,
-        GitCommand::Status => show_repos_status()?,
-        GitCommand::Init { all } => init_repos(all)?,
-        GitCommand::Foreach { command } => run_foreach_repo(&command)?,
+pub fn run_cmd_repo(repo_cmd: RepoCommand) -> CmdResult {
+    match repo_cmd {
+        RepoCommand::List => list_repos()?,
+        RepoCommand::Status => show_repos_status()?,
+        RepoCommand::Init { all } => init_repos(all)?,
+        RepoCommand::Foreach { command } => run_foreach_repo(&command)?,
     }
     Ok(())
 }

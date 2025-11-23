@@ -1,9 +1,9 @@
 mod cmd_bench;
 mod cmd_build;
 mod cmd_deploy;
-mod cmd_git;
 mod cmd_nightly;
 mod cmd_precheckin;
+mod cmd_repo;
 mod cmd_run_tests;
 mod cmd_service;
 mod cmd_tool;
@@ -100,7 +100,7 @@ enum Cmd {
 
     #[clap(about = "Git repos management commands")]
     #[command(subcommand)]
-    Git(GitCommand),
+    Repo(RepoCommand),
 }
 
 #[derive(Parser, Clone)]
@@ -193,7 +193,10 @@ pub enum DeployCommand {
         #[clap(long, long_help = "Availability zone ID (e.g., usw2-az3, use1-az4)")]
         az: Option<String>,
 
-        #[clap(long, long_help = "Enable root server high availability (2 RSS instances)")]
+        #[clap(
+            long,
+            long_help = "Enable root server high availability (2 RSS instances)"
+        )]
         root_server_ha: bool,
     },
 
@@ -367,7 +370,7 @@ pub enum MultiAzTestType {
 }
 
 #[derive(Parser, Clone)]
-pub enum GitCommand {
+pub enum RepoCommand {
     #[clap(about = "List all configured git repos")]
     List,
 
@@ -560,7 +563,7 @@ async fn main() -> CmdResult {
             let test_type = test_type.unwrap_or(TestType::All);
             cmd_run_tests::run_tests(test_type).await?
         }
-        Cmd::Git(git_cmd) => cmd_git::run_cmd_git(git_cmd)?,
+        Cmd::Repo(repo_cmd) => cmd_repo::run_cmd_repo(repo_cmd)?,
     }
     Ok(())
 }

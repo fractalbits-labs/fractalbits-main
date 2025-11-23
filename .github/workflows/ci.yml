@@ -25,8 +25,8 @@ jobs:
     - name: Load Rust cache
       uses: Swatinem/rust-cache@v2
 
-    - name: Run git init
-      run: cargo xtask git init
+    - name: Run repo init
+      run: cargo xtask repo init
 
     - name: Run precheckin
       run: cargo xtask precheckin

@@ -17,7 +17,7 @@ dump-vg-config *args:
   cargo xtask tools dump-vg-config {{args}}
 
 repo *args:
-  cargo xtask git {{args}}
+  cargo xtask repo {{args}}
 
 git *args:
-  cargo xtask git foreach git {{args}}
+  cargo xtask repo foreach git {{args}}

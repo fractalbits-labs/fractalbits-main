@@ -234,13 +234,15 @@ export const createEbsVolume = (
   id: string,
   az: string,
   instanceId: string,
+  volumeSize: number,
+  volumeIops: number,
 ): ec2.Volume => {
   const ebsVolume = new ec2.Volume(scope, id, {
     removalPolicy: cdk.RemovalPolicy.DESTROY,
     availabilityZone: az,
-    size: cdk.Size.gibibytes(20),
+    size: cdk.Size.gibibytes(volumeSize),
     volumeType: ec2.EbsDeviceVolumeType.IO2,
-    iops: 10000,
+    iops: volumeIops,
     enableMultiAttach: true,
   });
 

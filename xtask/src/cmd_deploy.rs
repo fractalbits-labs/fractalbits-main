@@ -13,6 +13,7 @@ pub struct VpcConfig {
     pub api_server_instance_type: String,
     pub bench_client_instance_type: String,
     pub az: Option<String>,
+    pub root_server_ha: bool,
 }
 
 #[derive(Clone)]
@@ -371,45 +372,19 @@ fn cleanup_builds_bucket() -> CmdResult {
 pub fn create_vpc(config: VpcConfig) -> CmdResult {
     let VpcConfig {
         template,
-        mut num_api_servers,
-        mut num_bench_clients,
-        mut num_bss_nodes,
+        num_api_servers,
+        num_bench_clients,
+        num_bss_nodes,
         with_bench,
         bss_instance_type,
         api_server_instance_type,
         bench_client_instance_type,
         az,
+        root_server_ha,
     } = config;
 
-    // Apply template settings if specified
-    if let Some(tmpl) = template {
-        match tmpl {
-            crate::VpcTemplate::Minimal => {
-                num_api_servers = 1;
-                num_bss_nodes = 1;
-                // Only create bench clients if --with-bench is set
-                if with_bench {
-                    num_bench_clients = 1;
-                } else {
-                    num_bench_clients = 0;
-                }
-            }
-            crate::VpcTemplate::PerfDemo => {
-                num_api_servers = 14;
-                num_bss_nodes = 6;
-                // Only create bench clients if --with-bench is set
-                if with_bench {
-                    num_bench_clients = 42;
-                } else {
-                    num_bench_clients = 0;
-                }
-            }
-        }
-    } else if !with_bench {
-        // If no template and --with-bench is not set, don't create bench clients
-        num_bench_clients = 0;
-    }
-
+    // Note: Template-based configuration is handled in CDK (vpc/fractalbits-cdk/bin/fractalbits-vpc.ts)
+    // The values passed here may be overridden by the template in CDK
     let cdk_dir = "vpc/fractalbits-cdk";
 
     // Check if node_modules exists, if not run npm install
@@ -454,13 +429,17 @@ pub fn create_vpc(config: VpcConfig) -> CmdResult {
     add_context("bssInstanceTypes", bss_instance_type);
     add_context("apiServerInstanceType", api_server_instance_type);
     add_context("benchClientInstanceType", bench_client_instance_type);
-
     if with_bench {
         add_context("benchType", "external".to_string());
     }
-
+    if let Some(template_val) = template {
+        add_context("vpcTemplate", template_val.as_ref().to_string());
+    }
     if let Some(az_val) = az {
         add_context("az", az_val);
+    }
+    if root_server_ha {
+        add_context("rootServerHa", "true".to_string());
     }
 
     // Deploy the VPC stack

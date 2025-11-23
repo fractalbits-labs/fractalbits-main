@@ -157,7 +157,7 @@ pub enum DeployCommand {
         #[clap(
             long,
             value_enum,
-            long_help = "VPC deployment template (minimal or perf_demo)"
+            long_help = "VPC deployment template (mini or perf_demo)"
         )]
         template: Option<VpcTemplate>,
 
@@ -192,6 +192,9 @@ pub enum DeployCommand {
 
         #[clap(long, long_help = "Availability zone ID (e.g., usw2-az3, use1-az4)")]
         az: Option<String>,
+
+        #[clap(long, long_help = "Enable root server high availability (2 RSS instances)")]
+        root_server_ha: bool,
     },
 
     #[clap(about = "Destroy VPC infrastructure (including s3 builds bucket cleanup)")]
@@ -267,7 +270,7 @@ pub enum DeployTarget {
 #[strum(serialize_all = "snake_case")]
 #[clap(rename_all = "snake_case")]
 pub enum VpcTemplate {
-    Minimal,
+    Mini,
     PerfDemo,
 }
 
@@ -538,6 +541,7 @@ async fn main() -> CmdResult {
                 api_server_instance_type,
                 bench_client_instance_type,
                 az,
+                root_server_ha,
             } => cmd_deploy::create_vpc(cmd_deploy::VpcConfig {
                 template,
                 num_api_servers,
@@ -548,6 +552,7 @@ async fn main() -> CmdResult {
                 api_server_instance_type,
                 bench_client_instance_type,
                 az,
+                root_server_ha,
             })?,
             DeployCommand::DestroyVpc => cmd_deploy::destroy_vpc()?,
         },

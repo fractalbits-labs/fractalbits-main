@@ -27,9 +27,12 @@ export interface FractalbitsVpcStackProps extends cdk.StackProps {
   bssInstanceTypes: string;
   apiServerInstanceType: string;
   benchClientInstanceType: string;
+  nssInstanceType: string;
   browserIp?: string;
   dataBlobStorage: "singleAz" | "multiAz";
   rootServerHa: boolean;
+  ebsVolumeSize: number;
+  ebsVolumeIops: number;
 }
 
 export class FractalbitsVpcStack extends cdk.Stack {
@@ -184,7 +187,7 @@ export class FractalbitsVpcStack extends cdk.Stack {
     // });
 
     // Define instance metadata, and create instances
-    const nssInstanceType = new ec2.InstanceType("m7gd.4xlarge");
+    const nssInstanceType = new ec2.InstanceType(props.nssInstanceType);
     const rssInstanceType = new ec2.InstanceType("c7g.medium");
     const benchInstanceType = new ec2.InstanceType("c7g.large");
     const bucketName = bucket.bucketName;
@@ -433,6 +436,8 @@ export class FractalbitsVpcStack extends cdk.Stack {
       "MultiAttachVolumeA",
       subnet1.availabilityZone,
       instances["nss-A"].instanceId,
+      props.ebsVolumeSize,
+      props.ebsVolumeIops,
     );
 
     // Only create volume B for multiAz mode
@@ -444,6 +449,8 @@ export class FractalbitsVpcStack extends cdk.Stack {
         "MultiAttachVolumeB",
         subnet2.availabilityZone,
         instances["nss-B"].instanceId,
+        props.ebsVolumeSize,
+        props.ebsVolumeIops,
       );
       ebsVolumeBId = ebsVolumeB.volumeId;
     }

@@ -24,9 +24,9 @@ const WORKLOAD_CONFIGS: &[WorkloadConfig] = &[
     },
     WorkloadConfig {
         size_kb: 64,
-        put_concurrent_ops: 12,
+        put_concurrent_ops: 6,
         get_concurrent_ops: 12,
-        mixed_concurrent_ops: 12,
+        mixed_concurrent_ops: 9,
     },
 ];
 

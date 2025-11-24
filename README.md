@@ -118,7 +118,7 @@ export AWS_SECRET_ACCESS_KEY=test_api_secret
 aws s3 mb s3://my-bucket
 
 # Upload an object
-echo "Hello FractalBits!" > test.txt
+echo 'Hello FractalBits!' > test.txt
 aws s3 cp test.txt s3://my-bucket/
 
 # Download an object

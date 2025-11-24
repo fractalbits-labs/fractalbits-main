@@ -26,7 +26,7 @@ pub fn bootstrap(
     remote_az: Option<&str>,
     num_bss_nodes: Option<usize>,
     ha_enabled: bool,
-    _for_bench: bool,
+    for_bench: bool,
 ) -> CmdResult {
     // download_binaries(&["rss_admin", "root_server", "ebs-failover"])?;
     download_binaries(&["rss_admin", "root_server"])?;
@@ -97,7 +97,10 @@ pub fn bootstrap(
     if ha_enabled {
         wait_for_leadership()?;
     }
-    run_cmd!($BIN_PATH/rss_admin --rss-addr=127.0.0.1:8088 api-key init-test)?;
+
+    if for_bench {
+        run_cmd!($BIN_PATH/rss_admin --rss-addr=127.0.0.1:8088 api-key init-test)?;
+    }
 
     // Start follower root server if follower_id is provided
     if let Some(follower_id) = follower_id {

@@ -5,7 +5,6 @@
 [![CI](https://github.com/fractalbits-labs/fractalbits-main/actions/workflows/ci.yml/badge.svg)](https://github.com/fractalbits-labs/fractalbits-main/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Rust](https://img.shields.io/badge/-Rust-orange?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Zig](https://img.shields.io/badge/-Zig-orange?logo=zig&logoColor=white)](https://ziglang.org/)
 
 > ⚠️ **Beta Software**: FractalBits is currently in beta. While it demonstrates exceptional performance, we recommend thorough testing before production use. We welcome feedback, bug reports, and contributions!
 
@@ -15,7 +14,7 @@ FractalBits is an S3-compatible object storage system designed for high performa
 
 The **Fractal ART** (Adaptive Radix Tree) metadata engine uses a full-path name approach that avoids the heavy distributed transactions required by traditional inode-based systems, achieving superior scalability while still providing directory semantics including atomic rename, etc. This makes FractalBits ideal for AI training pipelines and data analytics workflows that require atomic operations for managing datasets and checkpoints. The system implements **two-tier storage**: an NVMe SSD tier for hot small objects with single-digit millisecond latency, and an S3 backend tier for larger objects to optimize costs.
 
-Built with **Rust** for the API gateway and control plane, **Zig** for the performance-critical metadata engine and data plane, and **io_uring** for asynchronous I/O. This combination enables hundreds of thousands of operations per second while maintaining ultra low latency.
+Built with Rust for the API gateway and control plane, and per core io_uring for asynchronous I/O for the performance-critical metadata engine and data plane. This combination enables hundreds of thousands of operations per second while maintaining ultra low latency.
 
 **Key Highlights:**
 - 🚀 **~1M IOPS** (4KB objects) for single bucket with p99 latency ~5ms
@@ -204,15 +203,6 @@ Based on performance testing, we recommend:
 FractalBits supports the most commonly used S3 operations with full AWS Signature V4 authentication. For complete details including supported operations, extension APIs, authentication, and limitations, see [S3 API Compatibility](docs/S3_API_COMPATIBILITY.md).
 
 We're actively working on expanding S3 API coverage. See our [Roadmap](docs/ROADMAP.md) for planned features and timeline.
-
-## Credits & Acknowledgments
-
-FractalBits builds upon excellent open source work:
-
-- **[TigerBeetle](https://github.com/tigerbeetle/tigerbeetle)**: io_uring library based on their high-performance I/O implementation
-- **[Adaptive Radix Tree](https://db.in.tum.de/~leis/papers/ART.pdf)**: Research paper by Viktor Leis et al.
-- **Rust Community**: For the amazing ecosystem of crates
-- **Zig Community**: For the excellent systems programming language
 
 ## Support
 

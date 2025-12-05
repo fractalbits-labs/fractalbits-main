@@ -153,9 +153,9 @@ FractalBits makes BYOC simple: build once, deploy with a single command, and lau
 
 *Note: Currently focused on AWS, with plans to expand to other cloud providers in the future.*
 
-### Deploy to AWS
+### Building from Source (Optional)
 
-Make sure your [AWS CLI Configuration Settings](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-files.html) are set up correctly.
+By default, deployment uses prebuilt binaries. To build and deploy your own binaries:
 
 ```bash
 # Make sure cargo-zigbuild is installed for cross-compilation
@@ -163,8 +163,14 @@ cargo install --locked cargo-zigbuild
 
 # Build binaries for deployment
 just deploy build
+```
 
-# Upload prebuilt binaries to S3 builds bucket
+### Deploy to AWS
+
+Make sure your [AWS CLI Configuration Settings](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-files.html) are set up correctly.
+
+```bash
+# Upload your binaries to S3 builds bucket
 just deploy upload
 
 # Deploy with perf_demo template (14 API servers, 42 bench clients, 6 BSS nodes)

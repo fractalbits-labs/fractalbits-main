@@ -2,6 +2,7 @@ use crate::RpcError;
 use bytes::Bytes;
 use metrics_wrapper::{counter, gauge};
 use parking_lot::Mutex;
+use rpc_auth::{NONCE_SIZE, RpcSecret};
 use rpc_codec_common::{MessageFrame, MessageHeaderTrait};
 use socket2::{Socket, TcpKeepalive};
 use std::collections::HashMap;
@@ -423,6 +424,7 @@ where
     pub async fn establish_connection(
         addr: String,
         connect_timeout: Duration,
+        rpc_secret: Option<&RpcSecret>,
     ) -> Result<Self, RpcError>
     where
         Header: Default,
@@ -433,7 +435,20 @@ where
 
         let client = match tokio::time::timeout(connect_timeout, async {
             let socket_addr = Self::resolve_address(&addr).await?;
-            let stream = tokio::net::TcpStream::connect(socket_addr).await?;
+            let mut stream = tokio::net::TcpStream::connect(socket_addr).await?;
+
+            // Perform auth handshake if secret is provided
+            if let Some(secret) = rpc_secret {
+                // Read 8-byte nonce from server
+                let mut nonce = [0u8; NONCE_SIZE];
+                stream.read_exact(&mut nonce).await?;
+
+                // Compute and send auth response
+                let auth = secret.compute_auth(&nonce);
+                stream.write_all(&auth).await?;
+
+                debug!(rpc_type=%Codec::RPC_TYPE, %addr, "RPC auth handshake completed");
+            }
 
             let std_stream = stream.into_std().map_err(RpcError::IoError)?;
             let socket = Socket::from(std_stream);

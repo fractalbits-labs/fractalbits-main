@@ -11,3 +11,4 @@ tracing.workspace = true
 rpc_client_common.workspace = true
 nss_codec.workspace = true
 rpc_codec_common.workspace = true
+rpc_auth.workspace = true

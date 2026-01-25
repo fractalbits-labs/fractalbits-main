@@ -228,8 +228,9 @@ pub fn init_service(
 
         // Initialize api key for testing using RSS RPC
         let rss_admin_path = resolve_binary_path("rss_admin", build_mode);
+        let rpc_secret = LOCAL_TEST_RPC_SECRET;
         run_cmd! {
-            $rss_admin_path --rss-addr=127.0.0.1:8086 api-key init-test;
+            RPC_SECRET=$rpc_secret $rss_admin_path --rss-addr=127.0.0.1:8086 api-key init-test;
         }?;
 
         // Stop services after initialization
@@ -270,13 +271,17 @@ pub fn init_service(
         match build_mode {
             BuildMode::Debug => run_cmd! {
                 info "formatting nss_server with default configs";
-                SHARED_DIR=$shared_dir JOURNAL_UUID=$journal_uuid $nss_binary format --init_test_tree
-                    |& ts -m $TS_FMT >$format_log;
+                RPC_SECRET=$LOCAL_TEST_RPC_SECRET
+                SHARED_DIR=$shared_dir
+                JOURNAL_UUID=$journal_uuid
+                $nss_binary format --init_test_tree |& ts -m $TS_FMT >$format_log;
             }?,
             BuildMode::Release => run_cmd! {
                 info "formatting nss_server for benchmarking";
-                SHARED_DIR=$shared_dir JOURNAL_UUID=$journal_uuid $nss_binary format --init_test_tree
-                    |& ts -m $TS_FMT >$format_log;
+                RPC_SECRET=$LOCAL_TEST_RPC_SECRET
+                SHARED_DIR=$shared_dir
+                JOURNAL_UUID=$journal_uuid
+                $nss_binary format --init_test_tree |& ts -m $TS_FMT >$format_log;
             }?,
         }
 
@@ -1005,6 +1010,11 @@ fn create_systemd_unit_files_for_init(
     Ok(())
 }
 
+// Default RPC secret for local testing (64 hex chars = 32 bytes)
+// This is only used for local development/testing
+pub const LOCAL_TEST_RPC_SECRET: &str =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
 fn create_systemd_unit_file(
     service: ServiceName,
     build_mode: BuildMode,
@@ -1037,6 +1047,7 @@ Environment="RUST_LOG=warn""##
             // Use bash arithmetic to calculate port dynamically: 8088 + instance_id
             env_settings += r##"
 Environment="BSS_WORKING_DIR=./data/bss%i""##;
+            env_settings += &format!("\nEnvironment=\"RPC_SECRET={}\"", LOCAL_TEST_RPC_SECRET);
             let bss_binary = resolve_binary_path("bss_server", build_mode);
             format!("/bin/bash -c 'BSS_PORT=$((8088 + %i)) {bss_binary}'")
         }
@@ -1045,6 +1056,7 @@ Environment="BSS_WORKING_DIR=./data/bss%i""##;
             // Use template-based service with instance suffix (A or B)
             // WORKING_DIR, SHARED_DIR, JOURNAL_UUID, and HEALTH_PORT are set based on instance
             env_settings += "\nEnvironment=\"WORKING_DIR=./data/nss-%i\"";
+            env_settings += &format!("\nEnvironment=\"RPC_SECRET={}\"", LOCAL_TEST_RPC_SECRET);
             env_settings += &format!("\nEnvironmentFile=-{pwd}/data/etc/nss.env");
             let nss_binary = resolve_binary_path("nss_server", build_mode);
             // Read journal_uuid from shared file and compute SHARED_DIR based on journal type
@@ -1082,6 +1094,7 @@ Environment="BSS_WORKING_DIR=./data/bss%i""##;
             env_settings += env_rust_log(build_mode);
             env_settings += "\nEnvironment=\"INSTANCE_ID=nss-A\"";
             env_settings += "\nEnvironment=\"RESTART_LOCKOUT_DIR=./data\"";
+            env_settings += &format!("\nEnvironment=\"RPC_SECRET={}\"", LOCAL_TEST_RPC_SECRET);
             if init_config.nss_disable_restart_limit {
                 env_settings += "\nEnvironment=\"NSS_DISABLE_RESTART_LIMIT=1\"";
             }
@@ -1091,6 +1104,7 @@ Environment="BSS_WORKING_DIR=./data/bss%i""##;
             env_settings += env_rust_log(build_mode);
             env_settings += "\nEnvironment=\"INSTANCE_ID=nss-B\"";
             env_settings += "\nEnvironment=\"RESTART_LOCKOUT_DIR=./data\"";
+            env_settings += &format!("\nEnvironment=\"RPC_SECRET={}\"", LOCAL_TEST_RPC_SECRET);
             if init_config.nss_disable_restart_limit {
                 env_settings += "\nEnvironment=\"NSS_DISABLE_RESTART_LIMIT=1\"";
             }
@@ -1109,6 +1123,8 @@ Environment="BSS_WORKING_DIR=./data/bss%i""##;
             env_settings += "\nEnvironment=\"INSTANCE_ID=rss-local\"";
             // Give services time to start before observer starts triggering failovers
             env_settings += "\nEnvironment=\"OBSERVER_INITIAL_GRACE_PERIOD_SECS=30\"";
+            // RPC authentication
+            env_settings += &format!("\nEnvironment=\"RPC_SECRET={}\"", LOCAL_TEST_RPC_SECRET);
             resolve_binary_path("root_server", build_mode)
         }
         ServiceName::ApiServer => {
@@ -1117,6 +1133,7 @@ Environment="BSS_WORKING_DIR=./data/bss%i""##;
                 "\nEnvironment=\"APP_BLOB_STORAGE_BACKEND={}\"",
                 init_config.data_blob_storage.as_ref()
             );
+            env_settings += &format!("\nEnvironment=\"APP_RPC_SECRET={}\"", LOCAL_TEST_RPC_SECRET);
             if !init_config.with_https {
                 env_settings += "\nEnvironment=\"HTTPS_DISABLED=1\"";
             }
@@ -1128,6 +1145,7 @@ Environment="BSS_WORKING_DIR=./data/bss%i""##;
                 "\nEnvironment=\"APP_BLOB_STORAGE_BACKEND={}\"",
                 init_config.data_blob_storage.as_ref()
             );
+            env_settings += &format!("\nEnvironment=\"APP_RPC_SECRET={}\"", LOCAL_TEST_RPC_SECRET);
             if !init_config.with_https {
                 env_settings += "\nEnvironment=\"HTTPS_DISABLED=1\"";
             }

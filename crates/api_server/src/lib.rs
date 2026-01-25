@@ -17,6 +17,7 @@ use data_types::{ApiKey, Bucket, TraceId, Versioned};
 use handler::common::s3_error::S3Error;
 use metrics_wrapper::counter;
 use moka::future::Cache;
+use rpc_auth::RpcSecret;
 use rpc_client_common::{RpcError, rss_rpc_retry};
 use rpc_client_nss::RpcClientNss;
 use rpc_client_rss::RpcClientRss;
@@ -54,6 +55,8 @@ pub struct AppState {
     blob_deletion_tx: Sender<BlobDeletionRequest>,
     blob_deletion_rx: Mutex<Option<Receiver<BlobDeletionRequest>>>,
     pub data_blob_tracker: OnceCell<Arc<DataBlobTracker>>,
+
+    rpc_secret: Option<RpcSecret>,
 }
 
 impl AppState {
@@ -79,12 +82,29 @@ impl AppState {
 
         debug!("Per-core AppState initialized with lazy BlobClient initialization");
 
+        // Parse RPC secret from config if configured
+        let rpc_secret =
+            config
+                .rpc_secret
+                .as_ref()
+                .and_then(|hex_str| match RpcSecret::from_hex(hex_str) {
+                    Ok(secret) => {
+                        debug!("RPC authentication enabled for worker {}", worker_id);
+                        Some(secret)
+                    }
+                    Err(e) => {
+                        tracing::error!("Invalid rpc_secret in config: {}", e);
+                        None
+                    }
+                });
+
         // NSS client starts uninitialized - will be set when we receive address from RSS
         let rpc_client_nss = Arc::new(RwLock::new(None));
         let nss_address = Arc::new(RwLock::new(None));
-        let rpc_client_rss = RpcClientRss::new_from_addresses(
+        let rpc_client_rss = RpcClientRss::new(
             config.rss_addrs.clone(),
             config.rpc_connection_timeout(),
+            rpc_secret.clone(),
         );
 
         Self {
@@ -101,6 +121,7 @@ impl AppState {
             az_status_enabled: AtomicBool::new(false),
             worker_id,
             data_blob_tracker: OnceCell::new(),
+            rpc_secret,
         }
     }
 
@@ -112,9 +133,10 @@ impl AppState {
 
     pub async fn update_nss_address(&self, new_address: String) {
         tracing::info!("Updating NSS address to: {}", new_address);
-        let new_client = RpcClientNss::new_from_address(
+        let new_client = RpcClientNss::new(
             new_address.clone(),
             self.config.rpc_connection_timeout(),
+            self.rpc_secret.clone(),
         );
         *self.nss_address.write().await = Some(new_address);
         *self.rpc_client_nss.write().await = Some(new_client);
@@ -231,6 +253,7 @@ impl AppState {
                     self.config.rpc_connection_timeout(),
                     None,
                     data_vg_info,
+                    self.rpc_secret.clone(),
                 )
                 .await
                 .map_err(|e| e.to_string())?;

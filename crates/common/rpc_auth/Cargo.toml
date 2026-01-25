@@ -1,0 +1,15 @@
+[package]
+name = "rpc_auth"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hmac.workspace = true
+sha2.workspace = true
+rand.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+subtle.workspace = true
+
+[dev-dependencies]
+rstest.workspace = true

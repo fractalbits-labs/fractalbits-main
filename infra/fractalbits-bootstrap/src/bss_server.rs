@@ -96,7 +96,7 @@ pub fn bootstrap(config: &BootstrapConfig, for_bench: bool) -> CmdResult {
 
     // Now get volume configs and setup directories
     setup_volume_directories(config, use_etcd)?;
-    create_bss_config()?;
+    create_bss_config(config)?;
     create_systemd_unit_file("bss", true)?;
 
     run_cmd! {
@@ -173,8 +173,15 @@ fn setup_volume_directories(config: &BootstrapConfig, use_etcd: bool) -> CmdResu
     Ok(())
 }
 
-fn create_bss_config() -> CmdResult {
+fn create_bss_config(config: &BootstrapConfig) -> CmdResult {
     let num_threads = run_fun!(nproc)?;
+    let rpc_secret_line = config
+        .global
+        .rpc_secret
+        .as_ref()
+        .map(|s| format!("rpc_secret = \"{s}\"\n"))
+        .unwrap_or_default();
+
     let config_content = format!(
         r##"working_dir = "/data"
 server_port = 8088
@@ -185,11 +192,12 @@ io_concurrency = 256
 data_volume_shards = {BSS_DATA_VOLUME_SHARDS}
 metadata_volume_shards = {BSS_METADATA_VOLUME_SHARDS}
 set_thread_affinity = true
-"##
+{rpc_secret_line}"##
     );
     run_cmd! {
         mkdir -p $ETC_PATH;
         echo $config_content > $ETC_PATH/$BSS_SERVER_CONFIG;
+        chmod 600 $ETC_PATH/$BSS_SERVER_CONFIG;
     }?;
 
     Ok(())

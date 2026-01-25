@@ -27,6 +27,7 @@ exclude = [
     "crates/common/rpc_codecs/rss_codec/src",
     "crates/common/test_common/src",
     "crates/common/volume_group_proxy/src",
+    "crates/common/rpc_auth/src",
     "crates/fractal-s3/demo",
     "crates/fractal-s3/src",
     "crates/ha/multi_az",
@@ -54,6 +55,7 @@ rpc_codec_common = { path = "crates/common/rpc_codecs/codec_common" }
 bss_codec = { path = "crates/common/rpc_codecs/bss_codec" }
 nss_codec = { path = "crates/common/rpc_codecs/nss_codec" }
 rss_codec = { path = "crates/common/rpc_codecs/rss_codec" }
+rpc_auth = { path = "crates/common/rpc_auth" }
 test_common = { path = "crates/common/test_common" }
 xtask_common = { path = "xtask/common" }
 
@@ -74,6 +76,7 @@ tower-http = { version = "0.5.2", features = ["trace", "fs"] }
 console-subscriber = "0.4.0"
 tower = "0.5.1"
 strum = { version = "0.26.3", features = ["derive"] }
+subtle = "2.6"
 quick-xml = { version = "0.36.2", features = ["serialize"] }
 http-body-util = "0.1.2"
 uuid = { version = "1.11.0", features = ["v4", "v7", "fast-rng"] }

@@ -579,6 +579,13 @@ fn create_rss_config(config: &BootstrapConfig, nss_endpoint: &str, ha_enabled: b
         String::new()
     };
 
+    let rpc_secret_line = config
+        .global
+        .rpc_secret
+        .as_ref()
+        .map(|s| format!("\n# RPC authentication secret (64-char hex)\nrpc_secret = \"{s}\""))
+        .unwrap_or_default();
+
     let config_content = format!(
         r##"# Root Server Configuration
 
@@ -601,7 +608,7 @@ api_server_mgmt_port = 18088
 nss_addr = "{nss_endpoint}:8088"
 
 # Backend storage (ddb or etcd)
-backend = "{backend}"{etcd_endpoints_line}
+backend = "{backend}"{etcd_endpoints_line}{rpc_secret_line}
 
 # Leader Election Configuration (uses the same backend as RSS: ddb or etcd)
 [leader_election]
@@ -645,6 +652,7 @@ health_stale_threshold_secs = 5.0
     run_cmd! {
         mkdir -p $ETC_PATH;
         echo $config_content > $ETC_PATH/$ROOT_SERVER_CONFIG;
+        chmod 600 $ETC_PATH/$ROOT_SERVER_CONFIG;
     }?;
     Ok(())
 }

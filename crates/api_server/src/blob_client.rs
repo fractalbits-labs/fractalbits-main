@@ -9,6 +9,7 @@ use bytes::Bytes;
 use data_blob_tracking::DataBlobTracker;
 use data_types::{DataBlobGuid, TraceId};
 use moka::future::Cache;
+use rpc_auth::RpcSecret;
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 
@@ -34,6 +35,7 @@ impl BlobClient {
         rpc_connection_timeout: Duration,
         data_blob_tracker: Option<Arc<DataBlobTracker>>,
         data_vg_info: data_types::DataVgInfo,
+        rpc_secret: Option<RpcSecret>,
     ) -> Result<(Self, Option<Arc<Cache<String, String>>>), BlobStorageError> {
         let (storage, az_status_cache) = Self::create_storage_impl(
             blob_storage_config,
@@ -41,6 +43,7 @@ impl BlobClient {
             rpc_connection_timeout,
             data_blob_tracker,
             data_vg_info,
+            rpc_secret,
         )
         .await?;
 
@@ -54,6 +57,7 @@ impl BlobClient {
         rpc_connection_timeout: Duration,
         data_blob_tracker: Option<Arc<DataBlobTracker>>,
         data_vg_info: data_types::DataVgInfo,
+        rpc_secret: Option<RpcSecret>,
     ) -> Result<(Arc<BlobStorageImpl>, Option<Arc<Cache<String, String>>>), BlobStorageError> {
         let storage = match &blob_storage_config.backend {
             BlobStorageBackend::S3HybridSingleAz => {
@@ -72,6 +76,7 @@ impl BlobClient {
                         s3_hybrid_config,
                         rpc_request_timeout,
                         rpc_connection_timeout,
+                        rpc_secret.clone(),
                     )
                     .await?,
                 )
@@ -109,6 +114,7 @@ impl BlobClient {
                     data_vg_info.clone(),
                     rpc_request_timeout,
                     rpc_connection_timeout,
+                    rpc_secret,
                 )
                 .await?,
             ),

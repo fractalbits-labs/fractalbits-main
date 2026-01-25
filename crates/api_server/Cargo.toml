@@ -8,6 +8,7 @@ rpc_client_common.workspace = true
 rpc_client_nss.workspace = true
 rpc_client_bss.workspace = true
 rpc_client_rss.workspace = true
+rpc_auth.workspace = true
 nss_codec.workspace = true
 aws_signature.workspace = true
 data_types.workspace = true

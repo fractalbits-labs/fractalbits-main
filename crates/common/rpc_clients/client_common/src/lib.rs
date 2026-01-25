@@ -1,6 +1,7 @@
 use bytes::{Bytes, BytesMut};
 use data_types::TraceId;
 use prost::Message as PbMessage;
+use rpc_auth::RpcSecret;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -45,6 +46,8 @@ pub enum RpcError {
     ConnectionClosed,
     #[error("Checksum mismatch")]
     ChecksumMismatch,
+    #[error("RPC authentication failed")]
+    AuthFailed,
 }
 
 impl<T> From<tokio::sync::mpsc::error::SendError<T>> for RpcError {
@@ -74,6 +77,7 @@ where
     addresses: Vec<String>,
     next_id: Arc<AtomicU32>,
     connection_timeout: Duration,
+    rpc_secret: Option<RpcSecret>,
 }
 
 impl<Codec, Header> AutoReconnectRpcClient<Codec, Header>
@@ -81,21 +85,17 @@ where
     Codec: RpcCodec<Header>,
     Header: MessageHeaderTrait + Clone + Send + Sync + 'static + Default,
 {
-    pub fn new_from_address(address: String, connection_timeout: Duration) -> Self {
-        Self {
-            inner: RwLock::new(None),
-            addresses: vec![address],
-            next_id: Arc::new(AtomicU32::new(1)),
-            connection_timeout,
-        }
-    }
-
-    pub fn new_from_addresses(addresses: Vec<String>, connection_timeout: Duration) -> Self {
+    pub fn new(
+        addresses: Vec<String>,
+        connection_timeout: Duration,
+        rpc_secret: Option<RpcSecret>,
+    ) -> Self {
         Self {
             inner: RwLock::new(None),
             addresses,
             next_id: Arc::new(AtomicU32::new(1)),
             connection_timeout,
+            rpc_secret,
         }
     }
 
@@ -120,12 +120,13 @@ where
         // Try all addresses
         for address in &self.addresses {
             debug!(%rpc_type, %address, "Trying to connect to RPC server");
-            match GenericRpcClient::<Codec, Header>::establish_connection(
+            let connect_result = GenericRpcClient::<Codec, Header>::establish_connection(
                 address.clone(),
                 self.connection_timeout,
+                self.rpc_secret.as_ref(),
             )
-            .await
-            {
+            .await;
+            match connect_result {
                 Ok(new_client) => {
                     debug!(%rpc_type, %address, "Successfully connected to RPC server");
                     *write = Some(Arc::new(new_client));

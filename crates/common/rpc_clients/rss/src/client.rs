@@ -1,3 +1,4 @@
+use rpc_auth::RpcSecret;
 use rpc_client_common::AutoReconnectRpcClient;
 use std::time::Duration;
 
@@ -6,8 +7,13 @@ pub struct RpcClient {
 }
 
 impl RpcClient {
-    pub fn new_from_addresses(addresses: Vec<String>, connection_timeout: Duration) -> Self {
-        let inner = AutoReconnectRpcClient::new_from_addresses(addresses, connection_timeout);
+    pub fn new(
+        addresses: Vec<String>,
+        connection_timeout: Duration,
+        rpc_secret: Option<RpcSecret>,
+    ) -> Self {
+        let inner =
+            AutoReconnectRpcClient::new(addresses, connection_timeout, rpc_secret);
         Self { inner }
     }
 

@@ -118,6 +118,8 @@ pub struct InputClusterGlobal {
     pub num_api_servers: Option<usize>,
     #[serde(default)]
     pub num_bench_clients: Option<usize>,
+    #[serde(default)]
+    pub rpc_secret: Option<String>,
 }
 
 fn default_region() -> String {
@@ -200,6 +202,7 @@ impl InputClusterConfig {
             workflow_cluster_id: Some(cluster_id),
             meta_stack_testing: false,
             use_generic_binaries: true,
+            rpc_secret: self.global.rpc_secret.clone(),
         };
 
         let nss_endpoint = self

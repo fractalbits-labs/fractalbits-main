@@ -6,6 +6,7 @@ use aws_sdk_s3::Client as S3Client;
 use bytes::Bytes;
 use data_types::{DataBlobGuid, DataVgInfo, TraceId};
 use metrics_wrapper::histogram;
+use rpc_auth::RpcSecret;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -25,13 +26,20 @@ impl S3HybridSingleAzStorage {
         s3_hybrid_config: &S3HybridSingleAzConfig,
         rpc_request_timeout: Duration,
         rpc_connection_timeout: Duration,
+        rpc_secret: Option<RpcSecret>,
     ) -> Result<Self, BlobStorageError> {
         debug!("Initializing S3HybridSingleAzStorage with pre-fetched DataVgInfo");
 
         let data_vg_proxy = Arc::new(
-            DataVgProxy::new(data_vg_info, rpc_request_timeout, rpc_connection_timeout).map_err(
-                |e| BlobStorageError::Config(format!("Failed to initialize DataVgProxy: {}", e)),
-            )?,
+            DataVgProxy::new(
+                data_vg_info,
+                rpc_request_timeout,
+                rpc_connection_timeout,
+                rpc_secret,
+            )
+            .map_err(|e| {
+                BlobStorageError::Config(format!("Failed to initialize DataVgProxy: {}", e))
+            })?,
         );
 
         let client_s3 = create_s3_client(

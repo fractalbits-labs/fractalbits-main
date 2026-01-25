@@ -165,7 +165,7 @@ fn setup_configs(
         JournalType::Nvme => (None, "local/journal".to_string()),
     };
 
-    create_nss_config(volume_dev.as_deref(), &shared_dir, journal_uuid)?;
+    create_nss_config(config, volume_dev.as_deref(), &shared_dir, journal_uuid)?;
     create_mirrord_config(volume_dev.as_deref(), &shared_dir)?;
 
     // EBS-specific: mount at /data/ebs (simple unit name: data-ebs.mount)
@@ -199,6 +199,7 @@ fn setup_configs(
 }
 
 fn create_nss_config(
+    config: &BootstrapConfig,
     volume_dev: Option<&str>,
     shared_dir: &str,
     journal_uuid: Option<&str>,
@@ -230,6 +231,14 @@ fn create_nss_config(
         None => String::new(),
     };
 
+    // Include rpc_secret in config if provided
+    let rpc_secret_line = config
+        .global
+        .rpc_secret
+        .as_ref()
+        .map(|s| format!("rpc_secret = \"{s}\"\n"))
+        .unwrap_or_default();
+
     let config_content = format!(
         r##"working_dir = "/data"
 shared_dir = "{shared_dir}"
@@ -243,11 +252,12 @@ fa_journal_segment_size = {fa_journal_segment_size}
 log_level = "info"
 mirrord_port = 9999
 meta_cache_shards = {NSS_META_CACHE_SHARDS}
-{journal_uuid_line}"##
+{journal_uuid_line}{rpc_secret_line}"##
     );
     run_cmd! {
         mkdir -p $ETC_PATH;
-        echo $config_content > $ETC_PATH/$NSS_SERVER_CONFIG
+        echo $config_content > $ETC_PATH/$NSS_SERVER_CONFIG;
+        chmod 600 $ETC_PATH/$NSS_SERVER_CONFIG;
     }?;
     Ok(())
 }

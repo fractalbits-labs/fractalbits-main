@@ -95,7 +95,6 @@ impl Default for HttpsConfig {
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct Config {
     pub rss_addrs: Vec<String>,
-
     pub port: u16,
     pub mgmt_port: u16,
     pub https: HttpsConfig,
@@ -113,6 +112,7 @@ pub struct Config {
     pub allow_missing_or_bad_signature: bool,
     pub worker_threads: usize,
     pub set_thread_affinity: bool,
+    pub rpc_secret: Option<String>,
 }
 
 impl Config {
@@ -180,6 +180,7 @@ impl Config {
             allow_missing_or_bad_signature: false,
             worker_threads: 2,
             set_thread_affinity: false,
+            rpc_secret: None,
         }
     }
 
@@ -214,6 +215,7 @@ impl Config {
             allow_missing_or_bad_signature: false,
             worker_threads: 2,
             set_thread_affinity: false,
+            rpc_secret: None,
         }
     }
 
@@ -241,6 +243,7 @@ impl Config {
             allow_missing_or_bad_signature: false,
             worker_threads: 2,
             set_thread_affinity: false,
+            rpc_secret: None,
         }
     }
 }

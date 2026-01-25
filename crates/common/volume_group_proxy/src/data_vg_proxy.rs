@@ -4,6 +4,7 @@ use data_types::{DataBlobGuid, DataVgInfo, QuorumConfig, TraceId};
 use futures::stream::{FuturesUnordered, StreamExt};
 use metrics_wrapper::{counter, histogram};
 use rand::seq::SliceRandom;
+use rpc_auth::RpcSecret;
 use rpc_client_bss::RpcClientBss;
 use rpc_client_common::RpcError;
 use std::{
@@ -169,9 +170,14 @@ struct BssNode {
 }
 
 impl BssNode {
-    fn new(address: String, cb_config: CircuitBreakerConfig, connection_timeout: Duration) -> Self {
+    fn new(
+        address: String,
+        cb_config: CircuitBreakerConfig,
+        connection_timeout: Duration,
+        rpc_secret: Option<RpcSecret>,
+    ) -> Self {
         debug!("Creating BSS RPC client for {}", address);
-        let client = RpcClientBss::new_from_address(address.clone(), connection_timeout);
+        let client = RpcClientBss::new(address.clone(), connection_timeout, rpc_secret);
         Self {
             address,
             client,
@@ -213,12 +219,14 @@ impl DataVgProxy {
         data_vg_info: DataVgInfo,
         rpc_request_timeout: Duration,
         rpc_connection_timeout: Duration,
+        rpc_secret: Option<RpcSecret>,
     ) -> Result<Self, DataVgError> {
         Self::new_with_circuit_breaker(
             data_vg_info,
             rpc_request_timeout,
             rpc_connection_timeout,
             CircuitBreakerConfig::default(),
+            rpc_secret,
         )
     }
 
@@ -227,6 +235,7 @@ impl DataVgProxy {
         rpc_request_timeout: Duration,
         rpc_connection_timeout: Duration,
         cb_config: CircuitBreakerConfig,
+        rpc_secret: Option<RpcSecret>,
     ) -> Result<Self, DataVgError> {
         info!(
             "Initializing DataVgProxy with {} volumes, circuit breaker config: {:?}",
@@ -256,6 +265,7 @@ impl DataVgProxy {
                     address,
                     cb_config.clone(),
                     rpc_connection_timeout,
+                    rpc_secret.clone(),
                 )));
             }
 

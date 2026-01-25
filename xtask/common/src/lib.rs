@@ -126,6 +126,8 @@ pub struct ClusterGlobalConfig {
     pub meta_stack_testing: bool,
     #[serde(default)]
     pub use_generic_binaries: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rpc_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

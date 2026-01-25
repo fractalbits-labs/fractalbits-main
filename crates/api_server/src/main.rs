@@ -90,6 +90,12 @@ fn main() -> std::io::Result<()> {
         }
     };
 
+    // Override rpc_secret from environment if set
+    if let Ok(rpc_secret) = std::env::var("APP_RPC_SECRET") {
+        info!("APP_RPC_SECRET: configured from environment");
+        config.rpc_secret = Some(rpc_secret);
+    }
+
     if config.with_metrics {
         #[cfg(feature = "metrics_statsd")]
         {

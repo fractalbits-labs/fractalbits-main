@@ -1,3 +1,4 @@
+use rpc_auth::RpcSecret;
 use rpc_client_common::AutoReconnectRpcClient;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,12 +13,19 @@ pub struct RpcClient {
 }
 
 impl RpcClient {
-    pub fn new_from_address(address: String, connection_timeout: Duration) -> Self {
+    pub fn new(
+        address: String,
+        connection_timeout: Duration,
+        rpc_secret: Option<RpcSecret>,
+    ) -> Self {
         let mut connections = Vec::with_capacity(CONNS_PER_CORE);
 
         for _ in 0..CONNS_PER_CORE {
-            let inner =
-                AutoReconnectRpcClient::new_from_address(address.clone(), connection_timeout);
+            let inner = AutoReconnectRpcClient::new(
+                vec![address.clone()],
+                connection_timeout,
+                rpc_secret.clone(),
+            );
             connections.push(Arc::new(inner));
         }
 

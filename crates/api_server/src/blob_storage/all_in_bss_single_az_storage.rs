@@ -2,6 +2,7 @@ use super::{BlobStorageError, DataVgProxy};
 use bytes::Bytes;
 use data_types::{DataBlobGuid, DataVgInfo, TraceId};
 use metrics_wrapper::histogram;
+use rpc_auth::RpcSecret;
 use std::{sync::Arc, time::Duration};
 use tracing::debug;
 
@@ -14,13 +15,20 @@ impl AllInBssSingleAzStorage {
         data_vg_info: DataVgInfo,
         rpc_request_timeout: Duration,
         rpc_connection_timeout: Duration,
+        rpc_secret: Option<RpcSecret>,
     ) -> Result<Self, BlobStorageError> {
         debug!("Initializing AllInBssSingleAzStorage with pre-fetched DataVgInfo");
 
         let data_vg_proxy = Arc::new(
-            DataVgProxy::new(data_vg_info, rpc_request_timeout, rpc_connection_timeout).map_err(
-                |e| BlobStorageError::Config(format!("Failed to initialize DataVgProxy: {}", e)),
-            )?,
+            DataVgProxy::new(
+                data_vg_info,
+                rpc_request_timeout,
+                rpc_connection_timeout,
+                rpc_secret,
+            )
+            .map_err(|e| {
+                BlobStorageError::Config(format!("Failed to initialize DataVgProxy: {}", e))
+            })?,
         );
 
         Ok(Self { data_vg_proxy })

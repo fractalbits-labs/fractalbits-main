@@ -80,6 +80,13 @@ pub fn create_config(config: &BootstrapConfig) -> CmdResult {
         .collect::<Vec<_>>()
         .join(", ");
 
+    let rpc_secret_line = config
+        .global
+        .rpc_secret
+        .as_ref()
+        .map(|s| format!("rpc_secret = \"{s}\"\n"))
+        .unwrap_or_default();
+
     let config_content = if *data_blob_storage == DataBlobStorage::S3ExpressMultiAz {
         let remote_az =
             remote_az.ok_or_else(|| Error::other("remote_az required for s3_express_multi_az"))?;
@@ -106,7 +113,7 @@ enable_stats_writer = false
 allow_missing_or_bad_signature = false
 worker_threads = {num_cores}
 set_thread_affinity = true
-
+{rpc_secret_line}
 [https]
 enabled = false
 port = 443
@@ -162,7 +169,7 @@ enable_stats_writer = false
 allow_missing_or_bad_signature = false
 worker_threads = {num_cores}
 set_thread_affinity = true
-
+{rpc_secret_line}
 [https]
 enabled = false
 port = 443
@@ -212,7 +219,7 @@ enable_stats_writer = false
 allow_missing_or_bad_signature = false
 worker_threads = {num_cores}
 set_thread_affinity = true
-
+{rpc_secret_line}
 [https]
 enabled = false
 port = 443
@@ -228,7 +235,8 @@ backend = "all_in_bss_single_az"
 
     run_cmd! {
         mkdir -p $ETC_PATH;
-        echo $config_content > $ETC_PATH/$API_SERVER_CONFIG
+        echo $config_content > $ETC_PATH/$API_SERVER_CONFIG;
+        chmod 600 $ETC_PATH/$API_SERVER_CONFIG;
     }?;
     Ok(())
 }

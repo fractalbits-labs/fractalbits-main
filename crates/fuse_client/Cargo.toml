@@ -1,0 +1,32 @@
+[package]
+name = "fuse_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rpc_client_common.workspace = true
+rpc_client_nss.workspace = true
+rpc_client_rss.workspace = true
+nss_codec.workspace = true
+data_types.workspace = true
+volume_group_proxy.workspace = true
+metrics_wrapper.workspace = true
+
+tokio.workspace = true
+bytes.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rkyv.workspace = true
+moka.workspace = true
+dashmap.workspace = true
+uuid.workspace = true
+config.workspace = true
+rand.workspace = true
+futures.workspace = true
+libc = "0.2"
+
+fuse3 = { version = "0.8", features = ["tokio-runtime", "unprivileged"] }

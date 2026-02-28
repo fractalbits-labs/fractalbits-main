@@ -10,7 +10,7 @@ use volume_group_proxy::DataVgProxy;
 
 use crate::config::Config;
 use crate::error::FuseError;
-use crate::object_layout::{ObjectCoreMetaData, ObjectLayout, ObjectMetaData, ObjectState};
+use data_types::object_layout::{ObjectCoreMetaData, ObjectLayout, ObjectMetaData, ObjectState};
 
 /// Represents a listed entry from NSS
 pub struct ListEntry {

@@ -1,5 +1,5 @@
-use crate::object_layout::ObjectLayout;
 use dashmap::DashMap;
+use data_types::object_layout::ObjectLayout;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 

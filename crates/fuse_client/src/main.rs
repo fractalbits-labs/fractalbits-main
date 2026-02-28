@@ -4,8 +4,6 @@ mod config;
 mod error;
 mod fs;
 mod inode;
-mod object_layout;
-
 use clap::Parser;
 use fuse3::MountOptions;
 use fuse3::raw::Session;

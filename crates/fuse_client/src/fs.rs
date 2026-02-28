@@ -20,7 +20,7 @@ use crate::backend::StorageBackend;
 use crate::cache::{BlockCache, DirCache, DirEntry};
 use crate::error::FuseError;
 use crate::inode::{EntryType, InodeTable, ROOT_INODE};
-use crate::object_layout::{
+use data_types::object_layout::{
     MpuState, ObjectCoreMetaData, ObjectLayout, ObjectMetaData, ObjectState,
 };
 
@@ -94,7 +94,9 @@ impl FuseFs {
         s3_key: &str,
         layout: &ObjectLayout,
     ) -> fuse3::Result<BytesMut> {
-        let size = layout.size().map_err(std::io::Error::from)?;
+        let size = layout
+            .size()
+            .map_err(|e| std::io::Error::from(FuseError::from(e)))?;
         if size == 0 {
             return Ok(BytesMut::new());
         }

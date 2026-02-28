@@ -71,6 +71,12 @@ impl From<FuseError> for Errno {
     }
 }
 
+impl From<data_types::object_layout::ObjectLayoutError> for FuseError {
+    fn from(_: data_types::object_layout::ObjectLayoutError) -> Self {
+        FuseError::InvalidState
+    }
+}
+
 impl From<rkyv::rancor::Error> for FuseError {
     fn from(e: rkyv::rancor::Error) -> Self {
         FuseError::Deserialize(e.to_string())

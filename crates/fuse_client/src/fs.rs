@@ -125,15 +125,16 @@ impl FuseFs {
 
     async fn flush_write_buffer(&self, fh_id: u64) -> fuse3::Result<()> {
         let (s3_key, data) = {
-            let handle = self
+            let mut handle = self
                 .file_handles
-                .get(&fh_id)
+                .get_mut(&fh_id)
                 .ok_or_else(|| Errno::from(libc::EBADF))?;
-            let wb = match &handle.write_buf {
+            let s3_key = handle.s3_key.clone();
+            let wb = match &mut handle.write_buf {
                 Some(wb) if wb.dirty => wb,
                 _ => return Ok(()),
             };
-            (handle.s3_key.clone(), Bytes::copy_from_slice(&wb.data))
+            (s3_key, wb.data.split().freeze())
         };
 
         let trace_id = TraceId::new();
@@ -451,6 +452,41 @@ impl FuseFs {
         let last_block = ((read_end - 1) / block_size) as u32;
 
         let trace_id = TraceId::new();
+
+        // Fast path: single-block read can return a zero-copy Bytes slice
+        if first_block == last_block {
+            let block_num = first_block;
+            let block_start = block_num as u64 * block_size;
+            let block_content_len = std::cmp::min(block_size, file_size - block_start) as usize;
+
+            let block_data = if let Some(cached) = self
+                .block_cache
+                .get(blob_guid.blob_id, blob_guid.volume_id, block_num)
+                .await
+            {
+                cached
+            } else {
+                let data = self
+                    .backend
+                    .read_block(blob_guid, block_num, block_content_len, &trace_id)
+                    .await?;
+                self.block_cache
+                    .insert(
+                        blob_guid.blob_id,
+                        blob_guid.volume_id,
+                        block_num,
+                        data.clone(),
+                    )
+                    .await;
+                data
+            };
+
+            let slice_start = (offset - block_start) as usize;
+            let slice_end = std::cmp::min((read_end - block_start) as usize, block_data.len());
+            return Ok(block_data.slice(slice_start..slice_end));
+        }
+
+        // Multi-block read: assemble from multiple blocks
         let mut result = BytesMut::with_capacity(actual_len);
 
         for block_num in first_block..=last_block {

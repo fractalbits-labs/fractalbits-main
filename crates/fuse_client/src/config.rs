@@ -28,6 +28,8 @@ pub struct Config {
     pub attr_cache_ttl_seconds: u64,
     #[serde(default = "default_block_cache_size_mb")]
     pub block_cache_size_mb: u64,
+    #[serde(default)]
+    pub read_write: bool,
 }
 
 fn default_rpc_request_timeout() -> u64 {
@@ -90,6 +92,7 @@ impl Default for Config {
             dir_cache_ttl_seconds: default_dir_cache_ttl(),
             attr_cache_ttl_seconds: default_attr_cache_ttl(),
             block_cache_size_mb: default_block_cache_size_mb(),
+            read_write: false,
         }
     }
 }

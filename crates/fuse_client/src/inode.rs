@@ -119,6 +119,63 @@ impl InodeTable {
         self.map.get(&ino).map(|e| e.s3_key.clone())
     }
 
+    /// Read-only lookup by key without creating entries or incrementing refcount.
+    pub fn find_ino_by_key(&self, s3_key: &str, entry_type: EntryType) -> Option<u64> {
+        self.key_to_ino
+            .get(&(s3_key.to_string(), entry_type))
+            .map(|r| *r)
+    }
+
+    /// Remove name mapping for an inode (used during unlink/rmdir).
+    /// Removes the reverse map entry but keeps the inode in the map for open
+    /// file handles. The inode will be fully removed when refcount reaches 0.
+    pub fn remove_name_mapping(&self, ino: u64) {
+        if ino == ROOT_INODE {
+            return;
+        }
+        if let Some(entry) = self.map.get(&ino) {
+            self.key_to_ino
+                .remove(&(entry.s3_key.clone(), entry.entry_type));
+        }
+    }
+
+    /// Update the s3_key for an inode (used during rename).
+    /// Updates both the inode entry and the reverse map.
+    pub fn update_s3_key(&self, ino: u64, new_key: &str) {
+        if let Some(mut entry) = self.map.get_mut(&ino) {
+            let old_key = (entry.s3_key.clone(), entry.entry_type);
+            self.key_to_ino.remove(&old_key);
+            entry.s3_key = new_key.to_string();
+            self.key_to_ino
+                .insert((new_key.to_string(), entry.entry_type), ino);
+        }
+    }
+
+    /// Update s3_keys for all child inodes under old_prefix to use new_prefix.
+    /// The directory inode itself should already have been updated via
+    /// `update_s3_key()` before calling this.
+    pub fn rename_children(&self, old_prefix: &str, new_prefix: &str) {
+        let children: Vec<u64> = self
+            .map
+            .iter()
+            .filter(|e| {
+                e.value().s3_key.starts_with(old_prefix)
+                    && *e.key() != ROOT_INODE
+                    && e.value().s3_key != old_prefix
+            })
+            .map(|e| *e.key())
+            .collect();
+        for ino in children {
+            if let Some(mut entry) = self.map.get_mut(&ino) {
+                let old_key = (entry.s3_key.clone(), entry.entry_type);
+                let new_key = format!("{}{}", new_prefix, &entry.s3_key[old_prefix.len()..]);
+                self.key_to_ino.remove(&old_key);
+                entry.s3_key = new_key.clone();
+                self.key_to_ino.insert((new_key, entry.entry_type), ino);
+            }
+        }
+    }
+
     /// Forget an inode (decrement refcount). Removes entry when refcount reaches 0.
     /// Root inode is never removed.
     pub fn forget(&self, ino: u64, nlookup: u64) {

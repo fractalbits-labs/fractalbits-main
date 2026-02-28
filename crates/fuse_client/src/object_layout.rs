@@ -20,6 +20,10 @@ pub struct ObjectLayout {
 impl ObjectLayout {
     pub const DEFAULT_BLOCK_SIZE: u32 = 1024 * 1024 - 256;
 
+    pub fn gen_version_id() -> Uuid {
+        Uuid::new_v4()
+    }
+
     pub fn is_listable(&self) -> bool {
         matches!(
             &self.state,

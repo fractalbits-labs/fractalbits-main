@@ -9,6 +9,18 @@ pub enum FuseError {
     #[error("not found")]
     NotFound,
 
+    #[error("already exists")]
+    AlreadyExists,
+
+    #[error("directory not empty")]
+    NotEmpty,
+
+    #[error("is a directory")]
+    IsDir,
+
+    #[error("not a directory")]
+    NotDir,
+
     #[error("read-only filesystem")]
     ReadOnly,
 
@@ -32,6 +44,10 @@ impl From<FuseError> for io::Error {
     fn from(e: FuseError) -> Self {
         match e {
             FuseError::NotFound => io::Error::from_raw_os_error(libc::ENOENT),
+            FuseError::AlreadyExists => io::Error::from_raw_os_error(libc::EEXIST),
+            FuseError::NotEmpty => io::Error::from_raw_os_error(libc::ENOTEMPTY),
+            FuseError::IsDir => io::Error::from_raw_os_error(libc::EISDIR),
+            FuseError::NotDir => io::Error::from_raw_os_error(libc::ENOTDIR),
             FuseError::ReadOnly => io::Error::from_raw_os_error(libc::EROFS),
             FuseError::Rpc(ref e) => {
                 if e.retryable() {

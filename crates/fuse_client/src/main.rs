@@ -27,6 +27,9 @@ struct Opt {
 
     #[clap(short = 'm', long = "mount", help = "Mount point (overrides config)")]
     mount_point: Option<String>,
+
+    #[clap(short = 'r', long = "read-write", help = "Enable read-write mode")]
+    read_write: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -73,15 +76,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(mount_point) = opt.mount_point {
         cfg.mount_point = mount_point;
     }
+    if opt.read_write {
+        cfg.read_write = true;
+    }
 
     let mount_point = cfg.mount_point.clone();
     let allow_other = cfg.allow_other;
+    let read_write = cfg.read_write;
     let worker_threads = cfg.worker_threads;
     let cfg = Arc::new(cfg);
 
     tracing::info!(
         bucket = %cfg.bucket_name,
         mount_point = %mount_point,
+        read_write = read_write,
         "Starting FUSE client"
     );
 
@@ -99,11 +107,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         let inodes = Arc::new(inode::InodeTable::new());
-        let fuse_fs = fs::FuseFs::new(backend, inodes);
+        let fuse_fs = fs::FuseFs::new(backend, inodes, read_write);
 
         // Configure mount options
         let mut mount_options = MountOptions::default();
-        mount_options.fs_name("fractalbits").read_only(true);
+        mount_options.fs_name("fractalbits").read_only(!read_write);
 
         if allow_other {
             mount_options.allow_other(true);

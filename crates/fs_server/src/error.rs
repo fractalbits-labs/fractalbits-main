@@ -1,8 +1,6 @@
-use fuse3::Errno;
-use rpc_client_common::RpcError;
+use crate::rpc::RpcError;
 use std::io;
 use thiserror::Error;
-use volume_group_proxy::DataVgError;
 
 #[derive(Error, Debug)]
 pub enum FuseError {
@@ -26,9 +24,6 @@ pub enum FuseError {
 
     #[error("RPC error: {0}")]
     Rpc(#[from] RpcError),
-
-    #[error("DataVg error: {0}")]
-    DataVg(#[from] DataVgError),
 
     #[error("invalid object state")]
     InvalidState,
@@ -56,7 +51,6 @@ impl From<FuseError> for io::Error {
                     io::Error::from_raw_os_error(libc::EIO)
                 }
             }
-            FuseError::DataVg(_) => io::Error::from_raw_os_error(libc::EIO),
             FuseError::InvalidState => io::Error::from_raw_os_error(libc::EINVAL),
             FuseError::Deserialize(_) => io::Error::from_raw_os_error(libc::EIO),
             FuseError::Internal(_) => io::Error::from_raw_os_error(libc::EIO),
@@ -64,10 +58,10 @@ impl From<FuseError> for io::Error {
     }
 }
 
-impl From<FuseError> for Errno {
+impl From<FuseError> for fractal_fuse::Errno {
     fn from(e: FuseError) -> Self {
         let io_err: io::Error = e.into();
-        Errno::from(io_err)
+        io_err.raw_os_error().unwrap_or(libc::EIO)
     }
 }
 

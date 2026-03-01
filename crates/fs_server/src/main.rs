@@ -4,29 +4,34 @@ mod config;
 mod error;
 mod fs;
 mod inode;
+mod rpc;
+mod rpc_bss;
+mod rpc_nss;
+mod rpc_rss;
+
 use clap::Parser;
-use fuse3::MountOptions;
-use fuse3::raw::Session;
+use fractal_fuse::MountOptions;
+use fractal_fuse::Session;
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::Config;
 
 #[derive(Parser)]
-#[clap(name = "fuse_client", about = "FUSE client for FractalBits S3")]
+#[clap(name = "fs_server", about = "FUSE file server for FractalBits S3")]
 struct Opt {
     #[clap(short = 'c', long = "config", help = "Config file path")]
     config_file: Option<PathBuf>,
 
-    #[clap(short = 'b', long = "bucket", help = "Bucket name (overrides config)")]
+    #[clap(short = 'b', long = "bucket", env = "FUSE_BUCKET_NAME", help = "Bucket name (overrides config)")]
     bucket: Option<String>,
 
-    #[clap(short = 'm', long = "mount", help = "Mount point (overrides config)")]
+    #[clap(short = 'm', long = "mount", env = "FUSE_MOUNT_POINT", help = "Mount point (overrides config)")]
     mount_point: Option<String>,
 
-    #[clap(short = 'r', long = "read-write", help = "Enable read-write mode")]
+    #[clap(short = 'r', long = "read-write", env = "FUSE_READ_WRITE", help = "Enable read-write mode")]
     read_write: bool,
 }
 
@@ -79,10 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mount_point = cfg.mount_point.clone();
-    let allow_other = cfg.allow_other;
     let read_write = cfg.read_write;
-    let worker_threads = cfg.worker_threads;
-    let cfg = Arc::new(cfg);
 
     tracing::info!(
         bucket = %cfg.bucket_name,
@@ -91,56 +93,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Starting FUSE client"
     );
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(worker_threads)
-        .enable_all()
-        .build()?;
+    // Discover backend configuration (NSS address, DataVgInfo, bucket) via RSS.
+    // This runs on a temporary compio runtime since we need async RPC.
+    let backend_config = {
+        let cfg_ref = &cfg;
+        compio_runtime::Runtime::new()
+            .expect("Failed to create compio runtime for discovery")
+            .block_on(backend::BackendConfig::discover(cfg_ref))
+            .map_err(|e| std::io::Error::other(format!("Backend discovery failed: {e}")))?
+    };
+    let backend_config = Arc::new(backend_config);
 
-    rt.block_on(async move {
-        // Initialize storage backend
-        let backend = Arc::new(
-            backend::StorageBackend::new(cfg)
-                .await
-                .map_err(std::io::Error::other)?,
-        );
+    let inodes = Arc::new(inode::InodeTable::new());
+    let fuse_fs = fs::FuseFs::new(backend_config, inodes, read_write);
 
-        let inodes = Arc::new(inode::InodeTable::new());
-        let fuse_fs = fs::FuseFs::new(backend, inodes, read_write);
+    // Configure mount options
+    let mount_options = MountOptions::default()
+        .fs_name("fractalbits")
+        .read_only(!read_write)
+        .allow_other(cfg.allow_other);
 
-        // Configure mount options
-        let mut mount_options = MountOptions::default();
-        mount_options.fs_name("fractalbits").read_only(!read_write);
+    // Mount and run the filesystem (blocks until shutdown)
+    Session::new(mount_options).run(fuse_fs, Path::new(&mount_point))?;
 
-        if allow_other {
-            mount_options.allow_other(true);
-        }
-
-        // Mount the filesystem
-        let mount_handle = Session::new(mount_options)
-            .mount_with_unprivileged(fuse_fs, &mount_point)
-            .await?;
-
-        // Wait for either the mount to end or a signal
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("Failed to register SIGTERM handler");
-        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-            .expect("Failed to register SIGINT handler");
-
-        tokio::select! {
-            res = mount_handle => {
-                res?;
-            }
-            _ = sigterm.recv() => {
-                tracing::info!("Received SIGTERM, unmounting");
-            }
-            _ = sigint.recv() => {
-                tracing::info!("Received SIGINT, unmounting");
-            }
-        }
-
-        tracing::info!("FUSE client exited");
-        Ok::<(), std::io::Error>(())
-    })?;
-
+    tracing::info!("FUSE client exited");
     Ok(())
 }

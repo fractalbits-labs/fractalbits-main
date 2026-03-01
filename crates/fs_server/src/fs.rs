@@ -1,22 +1,15 @@
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
 use data_types::TraceId;
-use fuse3::Errno;
-use fuse3::raw::reply::{
-    DirectoryEntry, DirectoryEntryPlus, FileAttr, ReplyAttr, ReplyCreated, ReplyData,
-    ReplyDirectory, ReplyDirectoryPlus, ReplyEntry, ReplyInit, ReplyOpen, ReplyStatFs, ReplyWrite,
-};
-use fuse3::raw::{Filesystem, Request};
-use fuse3::{FileType, SetAttr, Timestamp};
-use futures::stream;
+use fractal_fuse::*;
 use rkyv::api::high::to_bytes_in;
+use std::cell::Cell;
 use std::ffi::OsStr;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::backend::StorageBackend;
+use crate::backend::{BackendConfig, StorageBackend};
 use crate::cache::{BlockCache, DirCache, DirEntry};
 use crate::error::FuseError;
 use crate::inode::{EntryType, InodeTable, ROOT_INODE};
@@ -26,6 +19,10 @@ use data_types::object_layout::{
 
 const TTL: Duration = Duration::from_secs(1);
 const DEFAULT_BLOCK_SIZE: u32 = 1024 * 1024 - 256;
+
+thread_local! {
+    static THREAD_BACKEND: Cell<Option<&'static StorageBackend>> = const { Cell::new(None) };
+}
 
 struct WriteBuffer {
     data: BytesMut,
@@ -40,7 +37,7 @@ struct FileHandle {
 }
 
 pub struct FuseFs {
-    backend: Arc<StorageBackend>,
+    backend_config: Arc<BackendConfig>,
     inodes: Arc<InodeTable>,
     block_cache: BlockCache,
     dir_cache: DirCache,
@@ -53,11 +50,15 @@ pub struct FuseFs {
 }
 
 impl FuseFs {
-    pub fn new(backend: Arc<StorageBackend>, inodes: Arc<InodeTable>, read_write: bool) -> Self {
-        let block_cache_size_mb = backend.config().block_cache_size_mb;
-        let dir_cache_ttl = backend.config().dir_cache_ttl();
+    pub fn new(
+        backend_config: Arc<BackendConfig>,
+        inodes: Arc<InodeTable>,
+        read_write: bool,
+    ) -> Self {
+        let block_cache_size_mb = backend_config.config.block_cache_size_mb;
+        let dir_cache_ttl = backend_config.config.dir_cache_ttl();
         Self {
-            backend,
+            backend_config,
             inodes,
             block_cache: BlockCache::new(block_cache_size_mb),
             dir_cache: DirCache::new(dir_cache_ttl),
@@ -68,6 +69,25 @@ impl FuseFs {
         }
     }
 
+    /// Get the per-thread StorageBackend, creating it on first access.
+    /// The backend is leaked into 'static storage because each compio thread
+    /// runs for the lifetime of the process and we need references that can
+    /// be held across await points.
+    fn backend(&self) -> &StorageBackend {
+        THREAD_BACKEND.with(|cell| match cell.get() {
+            Some(b) => b,
+            None => {
+                let b = Box::new(
+                    StorageBackend::new(&self.backend_config)
+                        .expect("Failed to create per-thread StorageBackend"),
+                );
+                let leaked: &'static StorageBackend = Box::leak(b);
+                cell.set(Some(leaked));
+                leaked
+            }
+        })
+    }
+
     fn alloc_fh(&self) -> u64 {
         self.next_fh.fetch_add(1, Ordering::Relaxed)
     }
@@ -76,9 +96,9 @@ impl FuseFs {
         self.inodes.get_s3_key(ino)
     }
 
-    fn check_write_enabled(&self) -> fuse3::Result<()> {
+    fn check_write_enabled(&self) -> fractal_fuse::Result<()> {
         if !self.read_write {
-            return Err(Errno::from(libc::EROFS));
+            return Err(libc::EROFS);
         }
         Ok(())
     }
@@ -93,24 +113,18 @@ impl FuseFs {
         &self,
         s3_key: &str,
         layout: &ObjectLayout,
-    ) -> fuse3::Result<BytesMut> {
-        let size = layout
-            .size()
-            .map_err(|e| std::io::Error::from(FuseError::from(e)))?;
+    ) -> fractal_fuse::Result<BytesMut> {
+        let size = layout.size().map_err(FuseError::from)?;
         if size == 0 {
             return Ok(BytesMut::new());
         }
         let read_size = size.min(u32::MAX as u64) as u32;
         let data = match &layout.state {
-            ObjectState::Normal(_) => self
-                .read_normal(layout, 0, read_size)
-                .await
-                .map_err(std::io::Error::from)?,
-            ObjectState::Mpu(MpuState::Completed(_)) => self
-                .read_mpu(s3_key, layout, 0, read_size)
-                .await
-                .map_err(std::io::Error::from)?,
-            _ => return Err(Errno::from(libc::EIO)),
+            ObjectState::Normal(_) => self.read_normal(layout, 0, read_size).await?,
+            ObjectState::Mpu(MpuState::Completed(_)) => {
+                self.read_mpu(s3_key, layout, 0, read_size).await?
+            }
+            _ => return Err(libc::EIO),
         };
         Ok(BytesMut::from(data.as_ref()))
     }
@@ -123,12 +137,9 @@ impl FuseFs {
         if self.read_write { 0o755 } else { 0o555 }
     }
 
-    async fn flush_write_buffer(&self, fh_id: u64) -> fuse3::Result<()> {
+    async fn flush_write_buffer(&self, fh_id: u64) -> fractal_fuse::Result<()> {
         let (s3_key, data) = {
-            let mut handle = self
-                .file_handles
-                .get_mut(&fh_id)
-                .ok_or_else(|| Errno::from(libc::EBADF))?;
+            let mut handle = self.file_handles.get_mut(&fh_id).ok_or(libc::EBADF)?;
             let s3_key = handle.s3_key.clone();
             let wb = match &mut handle.write_buf {
                 Some(wb) if wb.dirty => wb,
@@ -138,7 +149,7 @@ impl FuseFs {
         };
 
         let trace_id = TraceId::new();
-        let blob_guid = self.backend.create_blob_guid();
+        let blob_guid = self.backend().create_blob_guid();
         let block_size = DEFAULT_BLOCK_SIZE as usize;
 
         // Write data blocks
@@ -151,10 +162,9 @@ impl FuseFs {
             let start = block_i * block_size;
             let end = std::cmp::min(start + block_size, data.len());
             let chunk = data.slice(start..end);
-            self.backend
+            self.backend()
                 .write_block(blob_guid, block_i as u32, chunk, &trace_id)
-                .await
-                .map_err(std::io::Error::from)?;
+                .await?;
         }
 
         // Build ObjectLayout
@@ -179,22 +189,21 @@ impl FuseFs {
 
         // Serialize layout
         let layout_bytes: Bytes = to_bytes_in::<_, rkyv::rancor::Error>(&layout, Vec::new())
-            .map_err(|e| std::io::Error::other(format!("Failed to serialize object layout: {e}")))?
+            .map_err(FuseError::from)?
             .into();
 
         // Put inode in NSS, get old object bytes
         let old_bytes = self
-            .backend
+            .backend()
             .put_inode(&s3_key, layout_bytes, &trace_id)
-            .await
-            .map_err(std::io::Error::from)?;
+            .await?;
 
         // Delete old blob blocks if there was a previous version
         if !old_bytes.is_empty()
             && let Ok(old_layout) =
                 rkyv::from_bytes::<ObjectLayout, rkyv::rancor::Error>(&old_bytes)
         {
-            self.backend
+            self.backend()
                 .delete_blob_blocks(&old_layout, &trace_id)
                 .await;
         }
@@ -219,7 +228,7 @@ impl FuseFs {
 
         // Invalidate dir cache for parent prefix
         let parent_prefix = parent_prefix_of(&s3_key);
-        self.dir_cache.invalidate(&parent_prefix).await;
+        self.dir_cache.invalidate(&parent_prefix);
 
         Ok(())
     }
@@ -228,8 +237,8 @@ impl FuseFs {
         &self,
         parent: u64,
         prefix: &str,
-    ) -> fuse3::Result<Arc<Vec<DirEntry>>> {
-        if let Some(cached) = self.dir_cache.get(prefix).await {
+    ) -> fractal_fuse::Result<Arc<Vec<DirEntry>>> {
+        if let Some(cached) = self.dir_cache.get(prefix) {
             let stale = cached
                 .iter()
                 .any(|entry| self.inodes.get(entry.ino).is_none());
@@ -237,7 +246,7 @@ impl FuseFs {
                 return Ok(cached);
             }
             tracing::debug!(%prefix, "Directory cache contains stale inode(s), rebuilding");
-            self.dir_cache.invalidate(prefix).await;
+            self.dir_cache.invalidate(prefix);
         }
 
         let trace_id = TraceId::new();
@@ -279,10 +288,9 @@ impl FuseFs {
         let mut start_after = String::new();
         loop {
             let entries = self
-                .backend
+                .backend()
                 .list_objects(prefix, "/", &start_after, 1000, &trace_id)
-                .await
-                .map_err(std::io::Error::from)?;
+                .await?;
 
             if entries.is_empty() {
                 break;
@@ -342,15 +350,17 @@ impl FuseFs {
         }
 
         let entries = Arc::new(all_entries);
-        self.dir_cache
-            .insert(prefix.to_string(), entries.clone())
-            .await;
+        self.dir_cache.insert(prefix.to_string(), entries.clone());
         Ok(entries)
     }
 
-    fn make_file_attr(&self, ino: u64, layout: &ObjectLayout) -> Result<FileAttr, FuseError> {
+    fn make_file_attr(
+        &self,
+        ino: u64,
+        layout: &ObjectLayout,
+    ) -> std::result::Result<FileAttr, FuseError> {
         let size = layout.size()?;
-        let ts = Timestamp::new((layout.timestamp / 1000) as i64, 0);
+        let ts = Timestamp::new(layout.timestamp / 1000, 0);
         Ok(FileAttr {
             ino,
             size,
@@ -358,8 +368,7 @@ impl FuseFs {
             atime: ts,
             mtime: ts,
             ctime: ts,
-            kind: FileType::RegularFile,
-            perm: self.file_perm(),
+            mode: FileType::RegularFile.to_mode() | self.file_perm() as u32,
             nlink: 1,
             uid: 0,
             gid: 0,
@@ -380,8 +389,7 @@ impl FuseFs {
             atime: now,
             mtime: now,
             ctime: now,
-            kind: FileType::RegularFile,
-            perm: self.file_perm(),
+            mode: FileType::RegularFile.to_mode() | self.file_perm() as u32,
             nlink: 1,
             uid: 0,
             gid: 0,
@@ -399,8 +407,7 @@ impl FuseFs {
             atime: now,
             mtime: now,
             ctime: now,
-            kind: FileType::Directory,
-            perm: self.dir_perm(),
+            mode: FileType::Directory.to_mode() | self.dir_perm() as u32,
             nlink: 2,
             uid: 0,
             gid: 0,
@@ -413,7 +420,7 @@ impl FuseFs {
         let now_secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs() as i64;
+            .as_secs();
         let ts = Timestamp::new(now_secs, 0);
         FileAttr {
             ino,
@@ -422,8 +429,7 @@ impl FuseFs {
             atime: ts,
             mtime: ts,
             ctime: ts,
-            kind: FileType::RegularFile,
-            perm: self.file_perm(),
+            mode: FileType::RegularFile.to_mode() | self.file_perm() as u32,
             nlink: 1,
             uid: 0,
             gid: 0,
@@ -437,7 +443,7 @@ impl FuseFs {
         layout: &ObjectLayout,
         offset: u64,
         size: u32,
-    ) -> Result<Bytes, FuseError> {
+    ) -> std::result::Result<Bytes, FuseError> {
         let file_size = layout.size()?;
         if size == 0 || offset >= file_size {
             return Ok(Bytes::new());
@@ -459,25 +465,22 @@ impl FuseFs {
             let block_start = block_num as u64 * block_size;
             let block_content_len = std::cmp::min(block_size, file_size - block_start) as usize;
 
-            let block_data = if let Some(cached) = self
-                .block_cache
-                .get(blob_guid.blob_id, blob_guid.volume_id, block_num)
-                .await
+            let block_data = if let Some(cached) =
+                self.block_cache
+                    .get(blob_guid.blob_id, blob_guid.volume_id, block_num)
             {
                 cached
             } else {
                 let data = self
-                    .backend
+                    .backend()
                     .read_block(blob_guid, block_num, block_content_len, &trace_id)
                     .await?;
-                self.block_cache
-                    .insert(
-                        blob_guid.blob_id,
-                        blob_guid.volume_id,
-                        block_num,
-                        data.clone(),
-                    )
-                    .await;
+                self.block_cache.insert(
+                    blob_guid.blob_id,
+                    blob_guid.volume_id,
+                    block_num,
+                    data.clone(),
+                );
                 data
             };
 
@@ -493,25 +496,22 @@ impl FuseFs {
             let block_start = block_num as u64 * block_size;
             let block_content_len = std::cmp::min(block_size, file_size - block_start) as usize;
 
-            let block_data = if let Some(cached) = self
-                .block_cache
-                .get(blob_guid.blob_id, blob_guid.volume_id, block_num)
-                .await
+            let block_data = if let Some(cached) =
+                self.block_cache
+                    .get(blob_guid.blob_id, blob_guid.volume_id, block_num)
             {
                 cached
             } else {
                 let data = self
-                    .backend
+                    .backend()
                     .read_block(blob_guid, block_num, block_content_len, &trace_id)
                     .await?;
-                self.block_cache
-                    .insert(
-                        blob_guid.blob_id,
-                        blob_guid.volume_id,
-                        block_num,
-                        data.clone(),
-                    )
-                    .await;
+                self.block_cache.insert(
+                    blob_guid.blob_id,
+                    blob_guid.volume_id,
+                    block_num,
+                    data.clone(),
+                );
                 data
             };
 
@@ -541,7 +541,7 @@ impl FuseFs {
         layout: &ObjectLayout,
         offset: u64,
         size: u32,
-    ) -> Result<Bytes, FuseError> {
+    ) -> std::result::Result<Bytes, FuseError> {
         let file_size = layout.size()?;
         if size == 0 || offset >= file_size {
             return Ok(Bytes::new());
@@ -551,7 +551,7 @@ impl FuseFs {
         let actual_len = (read_end - offset) as usize;
         let trace_id = TraceId::new();
 
-        let parts = self.backend.list_mpu_parts(key, &trace_id).await?;
+        let parts = self.backend().list_mpu_parts(key, &trace_id).await?;
 
         let mut result = BytesMut::with_capacity(actual_len);
         let mut obj_offset: u64 = 0;
@@ -583,25 +583,22 @@ impl FuseFs {
                     let block_content_len =
                         std::cmp::min(block_size, part_size - block_start) as usize;
 
-                    let block_data = if let Some(cached) = self
-                        .block_cache
-                        .get(blob_guid.blob_id, blob_guid.volume_id, block_num)
-                        .await
+                    let block_data = if let Some(cached) =
+                        self.block_cache
+                            .get(blob_guid.blob_id, blob_guid.volume_id, block_num)
                     {
                         cached
                     } else {
                         let data = self
-                            .backend
+                            .backend()
                             .read_block(blob_guid, block_num, block_content_len, &trace_id)
                             .await?;
-                        self.block_cache
-                            .insert(
-                                blob_guid.blob_id,
-                                blob_guid.volume_id,
-                                block_num,
-                                data.clone(),
-                            )
-                            .await;
+                        self.block_cache.insert(
+                            blob_guid.blob_id,
+                            blob_guid.volume_id,
+                            block_num,
+                            data.clone(),
+                        );
                         data
                     };
 
@@ -641,27 +638,27 @@ fn parent_prefix_of(key: &str) -> String {
 }
 
 impl Filesystem for FuseFs {
-    type DirEntryStream<'a> = stream::Iter<std::vec::IntoIter<Result<DirectoryEntry, Errno>>>;
-    type DirEntryPlusStream<'a> =
-        stream::Iter<std::vec::IntoIter<Result<fuse3::raw::reply::DirectoryEntryPlus, Errno>>>;
-
-    async fn init(&self, _req: Request) -> fuse3::Result<ReplyInit> {
+    async fn init(&self, _req: Request) -> fractal_fuse::Result<ReplyInit> {
         tracing::info!("FUSE filesystem mounted");
         Ok(ReplyInit {
-            max_write: NonZeroU32::new(1024 * 1024).unwrap(),
+            max_write: 1024 * 1024,
+            ..Default::default()
         })
     }
 
-    async fn destroy(&self, _req: Request) {
+    async fn destroy(&self) {
         tracing::info!("FUSE filesystem unmounted");
     }
 
-    async fn lookup(&self, _req: Request, parent: u64, name: &OsStr) -> fuse3::Result<ReplyEntry> {
-        let name_str = name.to_str().ok_or_else(|| Errno::from(libc::EINVAL))?;
+    async fn lookup(
+        &self,
+        _req: Request,
+        parent: u64,
+        name: &OsStr,
+    ) -> fractal_fuse::Result<ReplyEntry> {
+        let name_str = name.to_str().ok_or(libc::EINVAL)?;
 
-        let prefix = self
-            .dir_prefix(parent)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+        let prefix = self.dir_prefix(parent).ok_or(libc::ENOENT)?;
 
         let full_key = if prefix.is_empty() {
             name_str.to_string()
@@ -672,10 +669,10 @@ impl Filesystem for FuseFs {
         let trace_id = TraceId::new();
 
         // Try as file first
-        match self.backend.get_object(&full_key, &trace_id).await {
+        match self.backend().get_object(&full_key, &trace_id).await {
             Ok(layout) => {
                 if !layout.is_listable() {
-                    return Err(Errno::from(libc::ENOENT));
+                    return Err(libc::ENOENT);
                 }
                 let (ino, _) =
                     self.inodes
@@ -688,13 +685,13 @@ impl Filesystem for FuseFs {
                 });
             }
             Err(FuseError::NotFound) => {}
-            Err(e) => return Err(std::io::Error::from(e).into()),
+            Err(e) => return Err(e.into()),
         }
 
         // Try as directory
         let dir_key = format!("{}/", full_key);
         let entries = self
-            .backend
+            .backend()
             .list_objects(&dir_key, "/", "", 1, &trace_id)
             .await;
 
@@ -710,11 +707,11 @@ impl Filesystem for FuseFs {
                     generation: 0,
                 })
             }
-            _ => Err(Errno::from(libc::ENOENT)),
+            _ => Err(libc::ENOENT),
         }
     }
 
-    async fn forget(&self, _req: Request, inode: u64, nlookup: u64) {
+    fn forget(&self, _req: Request, inode: u64, nlookup: u64) {
         self.inodes.forget(inode, nlookup);
     }
 
@@ -724,7 +721,7 @@ impl Filesystem for FuseFs {
         inode: u64,
         fh: Option<u64>,
         _flags: u32,
-    ) -> fuse3::Result<ReplyAttr> {
+    ) -> fractal_fuse::Result<ReplyAttr> {
         if inode == ROOT_INODE {
             return Ok(ReplyAttr {
                 ttl: TTL,
@@ -742,10 +739,7 @@ impl Filesystem for FuseFs {
             return Ok(ReplyAttr { ttl: TTL, attr });
         }
 
-        let entry = self
-            .inodes
-            .get(inode)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+        let entry = self.inodes.get(inode).ok_or(libc::ENOENT)?;
 
         match entry.entry_type {
             EntryType::Directory => {
@@ -760,11 +754,7 @@ impl Filesystem for FuseFs {
                     let key = entry.s3_key.clone();
                     drop(entry);
                     let trace_id = TraceId::new();
-                    let layout = self
-                        .backend
-                        .get_object(&key, &trace_id)
-                        .await
-                        .map_err(std::io::Error::from)?;
+                    let layout = self.backend().get_object(&key, &trace_id).await?;
                     let attr = self.make_file_attr(inode, &layout)?;
                     if let Some(mut entry) = self.inodes.get_mut(inode) {
                         entry.layout = Some(layout);
@@ -781,14 +771,11 @@ impl Filesystem for FuseFs {
         inode: u64,
         fh: Option<u64>,
         set_attr: SetAttr,
-    ) -> fuse3::Result<ReplyAttr> {
+    ) -> fractal_fuse::Result<ReplyAttr> {
         // Only handle truncate to zero
         if let Some(0) = set_attr.size {
-            let fh_id = fh.ok_or_else(|| Errno::from(libc::ENOSYS))?;
-            let mut handle = self
-                .file_handles
-                .get_mut(&fh_id)
-                .ok_or_else(|| Errno::from(libc::EBADF))?;
+            let fh_id = fh.ok_or(libc::ENOSYS)?;
+            let mut handle = self.file_handles.get_mut(&fh_id).ok_or(libc::EBADF)?;
             if let Some(ref mut wb) = handle.write_buf {
                 wb.data.clear();
                 wb.dirty = true;
@@ -806,7 +793,7 @@ impl Filesystem for FuseFs {
         self.getattr(_req, inode, fh, 0).await
     }
 
-    async fn open(&self, _req: Request, inode: u64, flags: u32) -> fuse3::Result<ReplyOpen> {
+    async fn open(&self, _req: Request, inode: u64, flags: u32) -> fractal_fuse::Result<ReplyOpen> {
         let write_flags = libc::O_WRONLY as u32
             | libc::O_RDWR as u32
             | libc::O_APPEND as u32
@@ -814,16 +801,13 @@ impl Filesystem for FuseFs {
         let is_write = flags & write_flags != 0;
 
         if is_write && !self.read_write {
-            return Err(Errno::from(libc::EROFS));
+            return Err(libc::EROFS);
         }
 
-        let entry = self
-            .inodes
-            .get(inode)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+        let entry = self.inodes.get(inode).ok_or(libc::ENOENT)?;
 
         if entry.entry_type != EntryType::File {
-            return Err(Errno::from(libc::EISDIR));
+            return Err(libc::EISDIR);
         }
 
         let s3_key = entry.s3_key.clone();
@@ -835,10 +819,10 @@ impl Filesystem for FuseFs {
             Some(l) => Some(l),
             None => {
                 let trace_id = TraceId::new();
-                match self.backend.get_object(&s3_key, &trace_id).await {
+                match self.backend().get_object(&s3_key, &trace_id).await {
                     Ok(l) => Some(l),
                     Err(FuseError::NotFound) if is_write => None,
-                    Err(e) => return Err(std::io::Error::from(e).into()),
+                    Err(e) => return Err(e.into()),
                 }
             }
         };
@@ -884,11 +868,8 @@ impl Filesystem for FuseFs {
         fh: u64,
         offset: u64,
         size: u32,
-    ) -> fuse3::Result<ReplyData> {
-        let handle = self
-            .file_handles
-            .get(&fh)
-            .ok_or_else(|| Errno::from(libc::EBADF))?;
+    ) -> fractal_fuse::Result<ReplyData> {
+        let handle = self.file_handles.get(&fh).ok_or(libc::EBADF)?;
 
         // If there's a dirty write buffer, read from it
         if let Some(ref wb) = handle.write_buf
@@ -916,7 +897,7 @@ impl Filesystem for FuseFs {
                 self.read_mpu(&s3_key, &layout, offset, size).await?
             }
             _ => {
-                return Err(Errno::from(libc::EIO));
+                return Err(libc::EIO);
             }
         };
 
@@ -932,11 +913,8 @@ impl Filesystem for FuseFs {
         data: &[u8],
         _write_flags: u32,
         _flags: u32,
-    ) -> fuse3::Result<ReplyWrite> {
-        let mut handle = self
-            .file_handles
-            .get_mut(&fh)
-            .ok_or_else(|| Errno::from(libc::EBADF))?;
+    ) -> fractal_fuse::Result<ReplyWrite> {
+        let mut handle = self.file_handles.get_mut(&fh).ok_or(libc::EBADF)?;
 
         let wb = handle.write_buf.get_or_insert_with(|| WriteBuffer {
             data: BytesMut::new(),
@@ -961,7 +939,7 @@ impl Filesystem for FuseFs {
         _inode: u64,
         fh: u64,
         _lock_owner: u64,
-    ) -> fuse3::Result<()> {
+    ) -> fractal_fuse::Result<()> {
         self.flush_write_buffer(fh).await
     }
 
@@ -973,7 +951,7 @@ impl Filesystem for FuseFs {
         _flags: u32,
         _lock_owner: u64,
         _flush: bool,
-    ) -> fuse3::Result<()> {
+    ) -> fractal_fuse::Result<()> {
         // Flush any dirty write buffer before releasing
         let has_dirty = self
             .file_handles
@@ -999,7 +977,7 @@ impl Filesystem for FuseFs {
                 if let Ok(old_layout) =
                     rkyv::from_bytes::<ObjectLayout, rkyv::rancor::Error>(&old_bytes)
                 {
-                    self.backend
+                    self.backend()
                         .delete_blob_blocks(&old_layout, &trace_id)
                         .await;
                 }
@@ -1019,13 +997,11 @@ impl Filesystem for FuseFs {
         name: &OsStr,
         _mode: u32,
         _flags: u32,
-    ) -> fuse3::Result<ReplyCreated> {
+    ) -> fractal_fuse::Result<ReplyCreate> {
         self.check_write_enabled()?;
 
-        let name_str = name.to_str().ok_or_else(|| Errno::from(libc::EINVAL))?;
-        let prefix = self
-            .dir_prefix(parent)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+        let name_str = name.to_str().ok_or(libc::EINVAL)?;
+        let prefix = self.dir_prefix(parent).ok_or(libc::ENOENT)?;
         let key = format!("{}{}", prefix, name_str);
 
         let (ino, _) = self.inodes.lookup_or_insert(&key, EntryType::File, None);
@@ -1047,9 +1023,9 @@ impl Filesystem for FuseFs {
         let attr = self.make_new_file_attr(ino, 0);
 
         // Invalidate dir cache so the new file shows up in listings
-        self.dir_cache.invalidate(&prefix).await;
+        self.dir_cache.invalidate(&prefix);
 
-        Ok(ReplyCreated {
+        Ok(ReplyCreate {
             ttl: TTL,
             attr,
             generation: 0,
@@ -1058,26 +1034,20 @@ impl Filesystem for FuseFs {
         })
     }
 
-    async fn unlink(&self, _req: Request, parent: u64, name: &OsStr) -> fuse3::Result<()> {
+    async fn unlink(&self, _req: Request, parent: u64, name: &OsStr) -> fractal_fuse::Result<()> {
         self.check_write_enabled()?;
 
-        let name_str = name.to_str().ok_or_else(|| Errno::from(libc::EINVAL))?;
-        let prefix = self
-            .dir_prefix(parent)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+        let name_str = name.to_str().ok_or(libc::EINVAL)?;
+        let prefix = self.dir_prefix(parent).ok_or(libc::ENOENT)?;
         let key = format!("{}{}", prefix, name_str);
 
         let trace_id = TraceId::new();
 
         // Delete the inode from NSS
-        let old_bytes = self
-            .backend
-            .delete_inode(&key, &trace_id)
-            .await
-            .map_err(std::io::Error::from)?;
+        let old_bytes = self.backend().delete_inode(&key, &trace_id).await?;
 
         // Return ENOENT if file didn't exist
-        let old_bytes = old_bytes.ok_or_else(|| Errno::from(libc::ENOENT))?;
+        let old_bytes = old_bytes.ok_or(libc::ENOENT)?;
 
         // Remove name mapping from inode table (read-only lookup, no refcount leak)
         let ino = self.inodes.find_ino_by_key(&key, EntryType::File);
@@ -1097,17 +1067,17 @@ impl Filesystem for FuseFs {
             {
                 match &old_layout.state {
                     ObjectState::Normal(_) => {
-                        self.backend
+                        self.backend()
                             .delete_blob_blocks(&old_layout, &trace_id)
                             .await;
                     }
                     ObjectState::Mpu(MpuState::Completed(_)) => {
-                        if let Ok(parts) = self.backend.list_mpu_parts(&key, &trace_id).await {
+                        if let Ok(parts) = self.backend().list_mpu_parts(&key, &trace_id).await {
                             for (part_key, part_layout) in &parts {
-                                self.backend
+                                self.backend()
                                     .delete_blob_blocks(part_layout, &trace_id)
                                     .await;
-                                let _ = self.backend.delete_inode(part_key, &trace_id).await;
+                                let _ = self.backend().delete_inode(part_key, &trace_id).await;
                             }
                         }
                     }
@@ -1117,7 +1087,7 @@ impl Filesystem for FuseFs {
         }
 
         // Invalidate dir cache for parent
-        self.dir_cache.invalidate(&prefix).await;
+        self.dir_cache.invalidate(&prefix);
 
         Ok(())
     }
@@ -1129,27 +1099,22 @@ impl Filesystem for FuseFs {
         name: &OsStr,
         _mode: u32,
         _umask: u32,
-    ) -> fuse3::Result<ReplyEntry> {
+    ) -> fractal_fuse::Result<ReplyEntry> {
         self.check_write_enabled()?;
 
-        let name_str = name.to_str().ok_or_else(|| Errno::from(libc::EINVAL))?;
-        let prefix = self
-            .dir_prefix(parent)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+        let name_str = name.to_str().ok_or(libc::EINVAL)?;
+        let prefix = self.dir_prefix(parent).ok_or(libc::ENOENT)?;
         let key = format!("{}{}/", prefix, name_str);
 
         let trace_id = TraceId::new();
-        self.backend
-            .put_dir_marker(&key, &trace_id)
-            .await
-            .map_err(std::io::Error::from)?;
+        self.backend().put_dir_marker(&key, &trace_id).await?;
 
         let (ino, _) = self
             .inodes
             .lookup_or_insert(&key, EntryType::Directory, None);
 
         // Invalidate dir cache for parent
-        self.dir_cache.invalidate(&prefix).await;
+        self.dir_cache.invalidate(&prefix);
 
         let attr = self.make_dir_attr(ino);
         Ok(ReplyEntry {
@@ -1159,39 +1124,33 @@ impl Filesystem for FuseFs {
         })
     }
 
-    async fn rmdir(&self, _req: Request, parent: u64, name: &OsStr) -> fuse3::Result<()> {
+    async fn rmdir(&self, _req: Request, parent: u64, name: &OsStr) -> fractal_fuse::Result<()> {
         self.check_write_enabled()?;
 
-        let name_str = name.to_str().ok_or_else(|| Errno::from(libc::EINVAL))?;
-        let prefix = self
-            .dir_prefix(parent)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+        let name_str = name.to_str().ok_or(libc::EINVAL)?;
+        let prefix = self.dir_prefix(parent).ok_or(libc::ENOENT)?;
         let key = format!("{}{}/", prefix, name_str);
 
         let trace_id = TraceId::new();
 
         // List to check existence and emptiness
         let entries = self
-            .backend
+            .backend()
             .list_objects(&key, "/", "", 2, &trace_id)
-            .await
-            .map_err(std::io::Error::from)?;
+            .await?;
 
         // If no entries at all, directory doesn't exist
         if entries.is_empty() {
-            return Err(Errno::from(libc::ENOENT));
+            return Err(libc::ENOENT);
         }
 
         let has_children = entries.iter().any(|e| e.key != key);
         if has_children {
-            return Err(Errno::from(libc::ENOTEMPTY));
+            return Err(libc::ENOTEMPTY);
         }
 
         // Delete the directory marker
-        self.backend
-            .delete_inode(&key, &trace_id)
-            .await
-            .map_err(std::io::Error::from)?;
+        self.backend().delete_inode(&key, &trace_id).await?;
 
         // Remove from inode table (read-only lookup, no refcount leak)
         if let Some(ino) = self.inodes.find_ino_by_key(&key, EntryType::Directory) {
@@ -1199,8 +1158,8 @@ impl Filesystem for FuseFs {
         }
 
         // Invalidate dir cache for parent and self
-        self.dir_cache.invalidate(&prefix).await;
-        self.dir_cache.invalidate(&key).await;
+        self.dir_cache.invalidate(&prefix);
+        self.dir_cache.invalidate(&key);
 
         Ok(())
     }
@@ -1212,18 +1171,15 @@ impl Filesystem for FuseFs {
         name: &OsStr,
         new_parent: u64,
         new_name: &OsStr,
-    ) -> fuse3::Result<()> {
+        _flags: u32,
+    ) -> fractal_fuse::Result<()> {
         self.check_write_enabled()?;
 
-        let name_str = name.to_str().ok_or_else(|| Errno::from(libc::EINVAL))?;
-        let new_name_str = new_name.to_str().ok_or_else(|| Errno::from(libc::EINVAL))?;
+        let name_str = name.to_str().ok_or(libc::EINVAL)?;
+        let new_name_str = new_name.to_str().ok_or(libc::EINVAL)?;
 
-        let src_prefix = self
-            .dir_prefix(parent)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
-        let dst_prefix = self
-            .dir_prefix(new_parent)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+        let src_prefix = self.dir_prefix(parent).ok_or(libc::ENOENT)?;
+        let dst_prefix = self.dir_prefix(new_parent).ok_or(libc::ENOENT)?;
 
         let src_key = format!("{}{}", src_prefix, name_str);
         let dst_key = format!("{}{}", dst_prefix, new_name_str);
@@ -1231,20 +1187,19 @@ impl Filesystem for FuseFs {
         let trace_id = TraceId::new();
 
         // Determine type by probing NSS backend directly (no inode side effects)
-        let is_dir = match self.backend.get_object(&src_key, &trace_id).await {
+        let is_dir = match self.backend().get_object(&src_key, &trace_id).await {
             Ok(_) => false,
             Err(FuseError::NotFound) => true,
-            Err(e) => return Err(std::io::Error::from(e).into()),
+            Err(e) => return Err(e.into()),
         };
 
         if is_dir {
             let src_dir_key = format!("{}/", src_key);
             let dst_dir_key = format!("{}/", dst_key);
 
-            self.backend
+            self.backend()
                 .rename_folder(&src_dir_key, &dst_dir_key, &trace_id)
-                .await
-                .map_err(std::io::Error::from)?;
+                .await?;
 
             // Update the directory inode's s3_key since the kernel still
             // holds a reference to it after rename.
@@ -1259,14 +1214,13 @@ impl Filesystem for FuseFs {
             // kernel's existing inode references remain valid.
             self.inodes.rename_children(&src_dir_key, &dst_dir_key);
 
-            self.dir_cache.invalidate(&src_prefix).await;
-            self.dir_cache.invalidate(&dst_prefix).await;
-            self.dir_cache.invalidate(&src_dir_key).await;
+            self.dir_cache.invalidate(&src_prefix);
+            self.dir_cache.invalidate(&dst_prefix);
+            self.dir_cache.invalidate(&src_dir_key);
         } else {
-            self.backend
+            self.backend()
                 .rename_object(&src_key, &dst_key, &trace_id)
-                .await
-                .map_err(std::io::Error::from)?;
+                .await?;
 
             // Update inode s3_key if cached (read-only lookup, no refcount leak)
             if let Some(ino) = self.inodes.find_ino_by_key(&src_key, EntryType::File) {
@@ -1280,21 +1234,23 @@ impl Filesystem for FuseFs {
                 }
             }
 
-            self.dir_cache.invalidate(&src_prefix).await;
-            self.dir_cache.invalidate(&dst_prefix).await;
+            self.dir_cache.invalidate(&src_prefix);
+            self.dir_cache.invalidate(&dst_prefix);
         }
 
         Ok(())
     }
 
-    async fn opendir(&self, _req: Request, inode: u64, _flags: u32) -> fuse3::Result<ReplyOpen> {
+    async fn opendir(
+        &self,
+        _req: Request,
+        inode: u64,
+        _flags: u32,
+    ) -> fractal_fuse::Result<ReplyOpen> {
         if inode != ROOT_INODE {
-            let entry = self
-                .inodes
-                .get(inode)
-                .ok_or_else(|| Errno::from(libc::ENOENT))?;
+            let entry = self.inodes.get(inode).ok_or(libc::ENOENT)?;
             if entry.entry_type != EntryType::Directory {
-                return Err(Errno::from(libc::ENOTDIR));
+                return Err(libc::ENOTDIR);
             }
         }
 
@@ -1307,35 +1263,30 @@ impl Filesystem for FuseFs {
         _req: Request,
         parent: u64,
         _fh: u64,
-        offset: i64,
-    ) -> fuse3::Result<ReplyDirectory<Self::DirEntryStream<'_>>> {
-        let prefix = self
-            .dir_prefix(parent)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+        offset: u64,
+        _size: u32,
+    ) -> fractal_fuse::Result<Vec<DirectoryEntry>> {
+        let prefix = self.dir_prefix(parent).ok_or(libc::ENOENT)?;
         let dir_entries = self.fetch_dir_entries(parent, &prefix).await?;
 
         let offset = offset as usize;
-        let fuse_entries: Vec<Result<DirectoryEntry, Errno>> = dir_entries
+        let entries: Vec<DirectoryEntry> = dir_entries
             .iter()
             .skip(offset)
             .enumerate()
-            .map(|(idx, entry)| {
-                Ok(DirectoryEntry {
-                    inode: entry.ino,
-                    kind: if entry.is_dir {
-                        FileType::Directory
-                    } else {
-                        FileType::RegularFile
-                    },
-                    name: entry.name.clone().into(),
-                    offset: (offset + idx + 1) as i64,
-                })
+            .map(|(idx, entry)| DirectoryEntry {
+                ino: entry.ino,
+                kind: if entry.is_dir {
+                    FileType::Directory
+                } else {
+                    FileType::RegularFile
+                },
+                name: entry.name.as_bytes().to_vec(),
+                offset: (offset + idx + 1) as u64,
             })
             .collect();
 
-        Ok(ReplyDirectory {
-            entries: stream::iter(fuse_entries),
-        })
+        Ok(entries)
     }
 
     async fn readdirplus(
@@ -1344,15 +1295,13 @@ impl Filesystem for FuseFs {
         parent: u64,
         _fh: u64,
         offset: u64,
-        _lock_owner: u64,
-    ) -> fuse3::Result<ReplyDirectoryPlus<Self::DirEntryPlusStream<'_>>> {
-        let prefix = self
-            .dir_prefix(parent)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+        _size: u32,
+    ) -> fractal_fuse::Result<Vec<DirectoryEntryPlus>> {
+        let prefix = self.dir_prefix(parent).ok_or(libc::ENOENT)?;
         let dir_entries = self.fetch_dir_entries(parent, &prefix).await?;
 
         let offset = offset as usize;
-        let fuse_entries: Vec<Result<DirectoryEntryPlus, Errno>> = dir_entries
+        let entries: std::result::Result<Vec<DirectoryEntryPlus>, Errno> = dir_entries
             .iter()
             .skip(offset)
             .enumerate()
@@ -1367,25 +1316,22 @@ impl Filesystem for FuseFs {
                         .unwrap_or_else(|| self.make_default_file_attr(entry.ino))
                 };
                 Ok(DirectoryEntryPlus {
-                    inode: entry.ino,
+                    ino: entry.ino,
                     generation: 0,
                     kind: if entry.is_dir {
                         FileType::Directory
                     } else {
                         FileType::RegularFile
                     },
-                    name: entry.name.clone().into(),
-                    offset: (offset + idx + 1) as i64,
+                    name: entry.name.as_bytes().to_vec(),
+                    offset: (offset + idx + 1) as u64,
                     attr,
                     entry_ttl: TTL,
-                    attr_ttl: TTL,
                 })
             })
             .collect();
 
-        Ok(ReplyDirectoryPlus {
-            entries: stream::iter(fuse_entries),
-        })
+        entries
     }
 
     async fn releasedir(
@@ -1394,12 +1340,12 @@ impl Filesystem for FuseFs {
         _inode: u64,
         _fh: u64,
         _flags: u32,
-    ) -> fuse3::Result<()> {
+    ) -> fractal_fuse::Result<()> {
         Ok(())
     }
 
-    async fn statfs(&self, _req: Request, _inode: u64) -> fuse3::Result<ReplyStatFs> {
-        Ok(ReplyStatFs {
+    async fn statfs(&self, _req: Request, _inode: u64) -> fractal_fuse::Result<ReplyStatfs> {
+        Ok(ReplyStatfs {
             blocks: 1024 * 1024,
             bfree: if self.read_write { 512 * 1024 } else { 0 },
             bavail: if self.read_write { 512 * 1024 } else { 0 },

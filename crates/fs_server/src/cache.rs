@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use moka::future::Cache;
+use moka::sync::Cache;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -23,14 +23,12 @@ impl BlockCache {
         Self { inner: cache }
     }
 
-    pub async fn get(&self, blob_id: Uuid, volume_id: u16, block_number: u32) -> Option<Bytes> {
-        self.inner.get(&(blob_id, volume_id, block_number)).await
+    pub fn get(&self, blob_id: Uuid, volume_id: u16, block_number: u32) -> Option<Bytes> {
+        self.inner.get(&(blob_id, volume_id, block_number))
     }
 
-    pub async fn insert(&self, blob_id: Uuid, volume_id: u16, block_number: u32, data: Bytes) {
-        self.inner
-            .insert((blob_id, volume_id, block_number), data)
-            .await;
+    pub fn insert(&self, blob_id: Uuid, volume_id: u16, block_number: u32, data: Bytes) {
+        self.inner.insert((blob_id, volume_id, block_number), data);
     }
 }
 
@@ -54,15 +52,15 @@ impl DirCache {
         Self { inner: cache }
     }
 
-    pub async fn get(&self, prefix: &str) -> Option<Arc<Vec<DirEntry>>> {
-        self.inner.get(prefix).await
+    pub fn get(&self, prefix: &str) -> Option<Arc<Vec<DirEntry>>> {
+        self.inner.get(prefix)
     }
 
-    pub async fn insert(&self, prefix: String, entries: Arc<Vec<DirEntry>>) {
-        self.inner.insert(prefix, entries).await;
+    pub fn insert(&self, prefix: String, entries: Arc<Vec<DirEntry>>) {
+        self.inner.insert(prefix, entries);
     }
 
-    pub async fn invalidate(&self, prefix: &str) {
-        self.inner.invalidate(prefix).await;
+    pub fn invalidate(&self, prefix: &str) {
+        self.inner.invalidate(prefix);
     }
 }

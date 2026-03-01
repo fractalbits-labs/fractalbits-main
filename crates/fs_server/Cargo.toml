@@ -1,0 +1,41 @@
+[package]
+name = "fs_server"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "fs_server"
+path = "src/main.rs"
+
+[dependencies]
+fractal-fuse = { path = "fractal-fuse" }
+compio-runtime = { git = "https://github.com/compio-rs/compio", branch = "master", features = ["time"] }
+compio-net = { git = "https://github.com/compio-rs/compio", branch = "master" }
+compio-io = { git = "https://github.com/compio-rs/compio", branch = "master" }
+compio-buf = { git = "https://github.com/compio-rs/compio", branch = "master" }
+
+nss_codec = { workspace = true }
+rss_codec = { workspace = true }
+bss_codec = { workspace = true }
+rpc_codec_common = { workspace = true }
+data_types = { workspace = true }
+metrics_wrapper = { workspace = true }
+
+prost = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rkyv = { workspace = true }
+moka = { version = "0.12", features = ["sync"] }
+dashmap = { workspace = true }
+uuid = { workspace = true }
+config = { workspace = true }
+rand = { workspace = true }
+xxhash-rust = { workspace = true }
+reed-solomon-simd = { workspace = true }
+crc32fast = { workspace = true }
+libc = "0.2"

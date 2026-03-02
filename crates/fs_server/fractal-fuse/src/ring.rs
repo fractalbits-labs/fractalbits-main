@@ -200,6 +200,17 @@ impl FuseRegister {
     }
 }
 
+/// Patch the `addr` field (offset 16) in the raw SQE inside an Entry128.
+///
+/// The upstream io-uring crate (0.7.x) does not expose a setter for `sqe.addr`
+/// on `UringCmd80`. The field sits at a fixed kernel-ABI offset (16 bytes into
+/// `io_uring_sqe`), so we write it directly.
+unsafe fn set_sqe_addr(entry: &mut Entry128, addr: u64) {
+    const _: () = assert!(size_of::<Entry128>() == 128);
+    let ptr = entry as *mut Entry128 as *mut u8;
+    unsafe { ptr.add(16).cast::<u64>().write(addr) };
+}
+
 /// Patch the `len` field (offset 24) in the raw SQE inside an Entry128.
 ///
 /// The upstream io-uring crate does not expose a setter for `sqe.len` on
@@ -208,7 +219,6 @@ impl FuseRegister {
 unsafe fn set_sqe_len(entry: &mut Entry128, len: u32) {
     const _: () = assert!(size_of::<Entry128>() == 128);
     let ptr = entry as *mut Entry128 as *mut u8;
-    // sqe.len is at byte offset 24 in io_uring_sqe (stable kernel ABI)
     unsafe { ptr.add(24).cast::<u32>().write(len) };
 }
 
@@ -219,9 +229,10 @@ unsafe impl OpCode for FuseRegister {
 
         let mut entry = UringCmd80::new(Fixed(FUSE_FD_INDEX), FUSE_IO_URING_CMD_REGISTER)
             .cmd(cmd)
-            .addr(Some(*this.iov_ptr))
             .build();
 
+        // Set iovec pointer — upstream UringCmd80 doesn't expose .addr() yet
+        unsafe { set_sqe_addr(&mut entry, *this.iov_ptr) };
         // Set iovec count (2) via raw SQE poke — upstream has no .len() setter
         unsafe { set_sqe_len(&mut entry, 2) };
 

@@ -10,16 +10,9 @@ keywords = ["fuse", "io-uring", "filesystem", "async", "linux"]
 categories = ["filesystem", "asynchronous", "os::linux-apis"]
 
 [dependencies]
-# NOTE: git deps required until upstream publishes new versions with:
-#   - io-uring: UringCmd80::addr() method
-#   - compio-runtime: register_files/unregister_files functions
-# Once released, replace with:
-#   io-uring = "0.8"  (or whichever version adds .addr())
-#   compio-runtime = { version = "0.12", features = ["time"] }
-#   compio-driver = { version = "0.12", features = ["io-uring-sqe128"] }
-io-uring = { version = "0.7", git = "https://github.com/tokio-rs/io-uring", rev = "7ec7ae9" }
-compio-runtime = { version = "0.11", git = "https://github.com/compio-rs/compio", branch = "master", features = ["time"] }
-compio-driver = { version = "0.11", git = "https://github.com/compio-rs/compio", branch = "master", features = ["io-uring-sqe128"] }
+io-uring = "0.7"
+compio-runtime = { version = "0.11", features = ["time"] }
+compio-driver = { version = "0.11", features = ["io-uring-sqe128"] }
 libc = "0.2"
 nix = { version = "0.31", features = ["fs", "socket", "uio"] }
 bytes = "1"

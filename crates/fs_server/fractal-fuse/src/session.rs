@@ -9,6 +9,50 @@ use std::thread;
 use compio_runtime::Runtime;
 use tracing::{debug, error, info, warn};
 
+const IORING_REGISTER_FILES: libc::c_uint = 2;
+const IORING_UNREGISTER_FILES: libc::c_uint = 3;
+
+/// Register fixed files with the current thread's io_uring instance.
+///
+/// This calls the `io_uring_register` syscall directly because the published
+/// compio-runtime (0.11.x) does not yet expose `register_files`.
+fn register_files(fds: &[i32]) -> io::Result<()> {
+    let ring_fd = Runtime::with_current(|rt| rt.as_raw_fd());
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_io_uring_register,
+            ring_fd as libc::c_uint,
+            IORING_REGISTER_FILES,
+            fds.as_ptr(),
+            fds.len() as libc::c_uint,
+        )
+    };
+    if ret < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Unregister fixed files from the current thread's io_uring instance.
+fn unregister_files() -> io::Result<()> {
+    let ring_fd = Runtime::with_current(|rt| rt.as_raw_fd());
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_io_uring_register,
+            ring_fd as libc::c_uint,
+            IORING_UNREGISTER_FILES,
+            std::ptr::null::<libc::c_void>(),
+            0u32,
+        )
+    };
+    if ret < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 use crate::abi::*;
 use crate::dispatch;
 use crate::filesystem::Filesystem;
@@ -137,7 +181,7 @@ async fn run_queue<F: Filesystem>(
     shutdown: Arc<AtomicBool>,
 ) -> io::Result<()> {
     // Register fuse fd with this thread's io_uring
-    compio_runtime::register_files(&[fuse_raw_fd])?;
+    register_files(&[fuse_raw_fd])?;
 
     debug!(
         "queue {}: registered fuse fd, allocating {} entries",
@@ -169,7 +213,7 @@ async fn run_queue<F: Filesystem>(
         }
     }
 
-    compio_runtime::unregister_files()?;
+    unregister_files()?;
     Ok(())
 }
 

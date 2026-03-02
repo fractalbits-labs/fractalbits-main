@@ -1,7 +1,7 @@
 use crate::handler::{ObjectRequestContext, common::s3_error::S3Error};
-use actix_web::HttpResponse;
 use bytes::Bytes;
 use file_ops::{parse_get_inode, parse_put_inode};
+use ntex::web::HttpResponse;
 use rkyv::{self, api::high::to_bytes_in, rancor::Error};
 use rpc_client_common::nss_rpc_retry;
 

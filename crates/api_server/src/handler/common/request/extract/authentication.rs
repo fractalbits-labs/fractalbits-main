@@ -1,10 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
 
-use actix_web::{
-    HttpRequest,
-    http::header::{AUTHORIZATION, ToStrError},
-};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use ntex::http::header::{AUTHORIZATION, ToStrError};
+use ntex::web::HttpRequest;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -260,8 +258,8 @@ impl Default for CanonicalRequestHasher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::test::TestRequest;
     use chrono::{Datelike, Timelike};
+    use ntex::web::test::TestRequest;
 
     #[test]
     fn test_extract_auth_none() {

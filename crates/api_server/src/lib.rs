@@ -22,6 +22,7 @@ use rpc_client_rss::RpcClientRss;
 
 pub use cache_registry::CacheCoordinator;
 use std::{
+    rc::Rc,
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
@@ -49,7 +50,7 @@ pub struct AppState {
     nss_address: Arc<RwLock<Option<String>>>,
     rpc_client_rss: RpcClientRss,
 
-    blob_client: OnceCell<Arc<BlobClient>>,
+    blob_client: OnceCell<Rc<BlobClient>>,
     blob_deletion_tx: Sender<BlobDeletionRequest>,
     blob_deletion_rx: Mutex<Option<Receiver<BlobDeletionRequest>>>,
     pub data_blob_tracker: OnceCell<Arc<DataBlobTracker>>,
@@ -195,7 +196,7 @@ impl AppState {
         &self.rpc_client_rss
     }
 
-    pub async fn get_blob_client(&self) -> Result<Arc<BlobClient>, String> {
+    pub async fn get_blob_client(&self) -> Result<Rc<BlobClient>, String> {
         self.blob_client
             .get_or_try_init(|| async {
                 debug!("Creating per-worker BlobClient on-demand");
@@ -239,7 +240,7 @@ impl AppState {
                     self.az_status_coordinator.register_cache(cache);
                 }
 
-                Ok(Arc::new(blob_client))
+                Ok(Rc::new(blob_client))
             })
             .await
             .cloned()

@@ -1,6 +1,6 @@
 use aws_signature::sigv4::uri_encode;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::{
     AppState,
@@ -9,12 +9,13 @@ use crate::{
         signature::SignatureError,
     },
 };
-use actix_web::{HttpRequest, http::header::HOST, web::Query};
 use aws_signature::{get_signing_key_cached, verify_signature};
 use data_types::{ApiKey, TraceId, Versioned};
+use ntex::http::header::HOST;
+use ntex::web::{HttpRequest, types::Query};
 
 pub async fn check_signature_impl(
-    app: Arc<AppState>,
+    app: Rc<AppState>,
     auth: &Authentication<'_>,
     request: &HttpRequest,
     trace_id: &TraceId,
@@ -24,7 +25,7 @@ pub async fn check_signature_impl(
 }
 
 async fn check_header_based_signature(
-    app: Arc<AppState>,
+    app: Rc<AppState>,
     authentication: &Authentication<'_>,
     request: &HttpRequest,
     trace_id: &TraceId,
@@ -146,7 +147,7 @@ fn build_string_to_sign(
 }
 
 async fn verify_v4(
-    app: Arc<AppState>,
+    app: Rc<AppState>,
     auth: &Authentication<'_>,
     string_to_sign: &str,
     trace_id: &TraceId,

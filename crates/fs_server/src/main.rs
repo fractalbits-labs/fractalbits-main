@@ -26,7 +26,7 @@ struct Opt {
     #[clap(
         short = 'b',
         long = "bucket",
-        env = "FUSE_BUCKET_NAME",
+        env = "FS_SERVER_BUCKET_NAME",
         help = "Bucket name (overrides config)"
     )]
     bucket: Option<String>,
@@ -34,7 +34,7 @@ struct Opt {
     #[clap(
         short = 'm',
         long = "mount",
-        env = "FUSE_MOUNT_POINT",
+        env = "FS_SERVER_MOUNT_POINT",
         help = "Mount point (overrides config)"
     )]
     mount_point: Option<String>,
@@ -42,7 +42,7 @@ struct Opt {
     #[clap(
         short = 'r',
         long = "read-write",
-        env = "FUSE_READ_WRITE",
+        env = "FS_SERVER_READ_WRITE",
         help = "Enable read-write mode"
     )]
     read_write: bool,
@@ -87,11 +87,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg: Config = match opt.config_file {
         Some(config_file) => ::config::Config::builder()
             .add_source(::config::File::from(config_file).required(true))
-            .add_source(::config::Environment::with_prefix("FUSE"))
+            .add_source(::config::Environment::with_prefix("FS_SERVER"))
             .build()?
             .try_deserialize()?,
         None => ::config::Config::builder()
-            .add_source(::config::Environment::with_prefix("FUSE"))
+            .add_source(::config::Environment::with_prefix("FS_SERVER"))
             .build()?
             .try_deserialize()
             .unwrap_or_default(),

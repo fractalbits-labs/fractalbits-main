@@ -1,7 +1,7 @@
 use dashmap::DashMap;
 use data_types::object_layout::ObjectLayout;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub const ROOT_INODE: u64 = 1;
 
@@ -194,4 +194,28 @@ impl InodeTable {
                 .remove(&(entry.s3_key.clone(), entry.entry_type));
         }
     }
+
+    /// Evict inodes that haven't been accessed within `ttl`. Returns the set of
+    /// evicted inode numbers so the caller can skip any that have open handles.
+    /// Used in NFS mode where there is no FUSE FORGET to drive cleanup.
+    pub fn evict_stale(&self, ttl: Duration) -> Vec<u64> {
+        let cutoff = Instant::now() - ttl;
+        let stale: Vec<u64> = self
+            .map
+            .iter()
+            .filter(|e| *e.key() != ROOT_INODE && e.value().cache_expiry < cutoff)
+            .map(|e| *e.key())
+            .collect();
+
+        let mut evicted = Vec::new();
+        for ino in stale {
+            if let Some((_, entry)) = self.map.remove(&ino) {
+                self.key_to_ino
+                    .remove(&(entry.s3_key.clone(), entry.entry_type));
+                evicted.push(ino);
+            }
+        }
+        evicted
+    }
+
 }

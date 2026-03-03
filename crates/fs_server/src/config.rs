@@ -1,11 +1,21 @@
 use serde::Deserialize;
 use std::time::Duration;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ServerMode {
+    #[default]
+    Fuse,
+    Nfs,
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     pub rss_addrs: Vec<String>,
     pub bucket_name: String,
     pub mount_point: String,
+
+    #[serde(default = "default_nfs_port")]
+    pub nfs_port: u16,
 
     #[serde(default = "default_rpc_request_timeout")]
     pub rpc_request_timeout_seconds: u64,
@@ -54,6 +64,9 @@ fn default_attr_cache_ttl() -> u64 {
 fn default_block_cache_size_mb() -> u64 {
     256
 }
+fn default_nfs_port() -> u16 {
+    2049
+}
 
 impl Config {
     pub fn rpc_request_timeout(&self) -> Duration {
@@ -93,6 +106,7 @@ impl Default for Config {
             dir_cache_ttl_seconds: default_dir_cache_ttl(),
             attr_cache_ttl_seconds: default_attr_cache_ttl(),
             block_cache_size_mb: default_block_cache_size_mb(),
+            nfs_port: default_nfs_port(),
             read_write: false,
         }
     }

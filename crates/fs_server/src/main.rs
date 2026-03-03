@@ -2,8 +2,10 @@ mod backend;
 mod cache;
 mod config;
 mod error;
-mod fs;
+mod fuse_server;
 mod inode;
+mod nfs_server;
+mod vfs;
 
 use clap::Parser;
 use fractal_fuse::MountOptions;
@@ -13,10 +15,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::config::Config;
+use crate::config::{Config, ServerMode};
 
 #[derive(Parser)]
-#[clap(name = "fs_server", about = "FUSE file server for FractalBits S3")]
+#[clap(name = "fs_server", about = "FUSE/NFS file server for FractalBits S3")]
 struct Opt {
     #[clap(short = 'c', long = "config", help = "Config file path")]
     config_file: Option<PathBuf>,
@@ -44,6 +46,14 @@ struct Opt {
         help = "Enable read-write mode"
     )]
     read_write: bool,
+
+    #[clap(
+        long = "mode",
+        env = "FS_SERVER_MODE",
+        default_value = "fuse",
+        help = "Server mode: fuse or nfs"
+    )]
+    mode: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -69,6 +79,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let opt = Opt::parse();
+    let server_mode = match opt.mode.as_str() {
+        "nfs" => ServerMode::Nfs,
+        _ => ServerMode::Fuse,
+    };
 
     let mut cfg: Config = match opt.config_file {
         Some(config_file) => ::config::Config::builder()
@@ -99,9 +113,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(
         bucket = %cfg.bucket_name,
-        mount_point = %mount_point,
+        mode = ?server_mode,
         read_write = read_write,
-        "Starting FUSE client"
+        "Starting fs_server"
     );
 
     // Discover backend configuration (NSS address, DataVgInfo, bucket) via RSS.
@@ -116,17 +130,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend_config = Arc::new(backend_config);
 
     let inodes = Arc::new(inode::InodeTable::new());
-    let fuse_fs = fs::FuseFs::new(backend_config, inodes, read_write);
+    let vfs_core = vfs::VfsCore::new(backend_config, inodes, read_write);
 
-    // Configure mount options
-    let mount_options = MountOptions::default()
-        .fs_name("fractalbits")
-        .read_only(!read_write)
-        .allow_other(cfg.allow_other);
+    match server_mode {
+        ServerMode::Fuse => {
+            tracing::info!(mount_point = %mount_point, "Starting FUSE client");
+            let fuse_fs = fuse_server::FuseServer::new(vfs_core);
 
-    // Mount and run the filesystem (blocks until shutdown)
-    Session::new(mount_options).run(fuse_fs, Path::new(&mount_point))?;
+            let mount_options = MountOptions::default()
+                .fs_name("fractalbits")
+                .read_only(!read_write)
+                .allow_other(cfg.allow_other);
 
-    tracing::info!("FUSE client exited");
+            Session::new(mount_options).run(fuse_fs, Path::new(&mount_point))?;
+            tracing::info!("FUSE client exited");
+        }
+        ServerMode::Nfs => {
+            tracing::info!(port = cfg.nfs_port, "Starting NFS server");
+            let nfs_adapter = nfs_server::NfsAdapter::new(vfs_core, 1);
+
+            let nfs_config = fractal_nfs::NfsServerConfig {
+                port: cfg.nfs_port,
+                ..Default::default()
+            };
+
+            fractal_nfs::run(nfs_adapter, nfs_config)?;
+            tracing::info!("NFS server exited");
+        }
+    }
+
     Ok(())
 }

@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use volume_group_proxy::DataVgProxy;
 
 use crate::config::Config;
-use crate::error::FuseError;
+use crate::error::FsError;
 use data_types::object_layout::ObjectLayout;
 
 /// Discovered configuration from RSS (shared across threads).
@@ -113,7 +113,7 @@ impl StorageBackend {
     }
 
     /// Returns a borrow of the NSS client (for nss_rpc_retry! macro compatibility).
-    pub async fn get_nss_rpc_client(&self) -> Result<std::cell::Ref<'_, RpcClientNss>, FuseError> {
+    pub async fn get_nss_rpc_client(&self) -> Result<std::cell::Ref<'_, RpcClientNss>, FsError> {
         Ok(self.nss_client.borrow())
     }
 
@@ -149,11 +149,7 @@ impl StorageBackend {
 
     /// Get inode from NSS. The key should NOT have the trailing \0
     /// (the NSS client adds it).
-    pub async fn get_inode(
-        &self,
-        key: &str,
-        trace_id: &TraceId,
-    ) -> Result<ObjectLayout, FuseError> {
+    pub async fn get_inode(&self, key: &str, trace_id: &TraceId) -> Result<ObjectLayout, FsError> {
         let resp = nss_rpc_retry!(
             self.nss_client.borrow(),
             get_inode(
@@ -179,7 +175,7 @@ impl StorageBackend {
         start_after: &str,
         max_keys: u32,
         trace_id: &TraceId,
-    ) -> Result<Vec<ListEntry>, FuseError> {
+    ) -> Result<Vec<ListEntry>, FsError> {
         let resp = nss_rpc_retry!(
             self.nss_client.borrow(),
             list_inodes(
@@ -205,7 +201,7 @@ impl StorageBackend {
         &self,
         key: &str,
         trace_id: &TraceId,
-    ) -> Result<Vec<(String, ObjectLayout)>, FuseError> {
+    ) -> Result<Vec<(String, ObjectLayout)>, FsError> {
         let mpu_prefix = mpu_get_part_prefix(key.to_string(), 0);
         let resp = nss_rpc_retry!(
             self.nss_client.borrow(),
@@ -234,7 +230,7 @@ impl StorageBackend {
         block_number: u32,
         content_len: usize,
         trace_id: &TraceId,
-    ) -> Result<Bytes, FuseError> {
+    ) -> Result<Bytes, FsError> {
         let mut body = Bytes::new();
         self.data_vg_proxy
             .get_blob(blob_guid, block_number, content_len, &mut body, trace_id)
@@ -254,7 +250,7 @@ impl StorageBackend {
         block_number: u32,
         body: Bytes,
         trace_id: &TraceId,
-    ) -> Result<(), FuseError> {
+    ) -> Result<(), FsError> {
         self.data_vg_proxy
             .put_blob(blob_guid, block_number, body, trace_id)
             .await?;
@@ -268,7 +264,7 @@ impl StorageBackend {
         key: &str,
         value: Bytes,
         trace_id: &TraceId,
-    ) -> Result<Bytes, FuseError> {
+    ) -> Result<Bytes, FsError> {
         let resp = nss_rpc_retry!(
             self.nss_client.borrow(),
             put_inode(
@@ -292,7 +288,7 @@ impl StorageBackend {
         &self,
         key: &str,
         trace_id: &TraceId,
-    ) -> Result<Option<Bytes>, FuseError> {
+    ) -> Result<Option<Bytes>, FsError> {
         let resp = nss_rpc_retry!(
             self.nss_client.borrow(),
             delete_inode(
@@ -315,7 +311,7 @@ impl StorageBackend {
         src_key: &str,
         dst_key: &str,
         trace_id: &TraceId,
-    ) -> Result<(), FuseError> {
+    ) -> Result<(), FsError> {
         let result = nss_rpc_retry!(
             self.nss_client.borrow(),
             rename_object(
@@ -332,8 +328,8 @@ impl StorageBackend {
 
         match result {
             Ok(()) => Ok(()),
-            Err(RpcError::NotFound) => Err(FuseError::NotFound),
-            Err(RpcError::AlreadyExists) => Err(FuseError::AlreadyExists),
+            Err(RpcError::NotFound) => Err(FsError::NotFound),
+            Err(RpcError::AlreadyExists) => Err(FsError::AlreadyExists),
             Err(e) => Err(e.into()),
         }
     }
@@ -344,7 +340,7 @@ impl StorageBackend {
         src_key: &str,
         dst_key: &str,
         trace_id: &TraceId,
-    ) -> Result<(), FuseError> {
+    ) -> Result<(), FsError> {
         let result = nss_rpc_retry!(
             self.nss_client.borrow(),
             rename_folder(
@@ -361,8 +357,8 @@ impl StorageBackend {
 
         match result {
             Ok(()) => Ok(()),
-            Err(RpcError::NotFound) => Err(FuseError::NotFound),
-            Err(RpcError::AlreadyExists) => Err(FuseError::AlreadyExists),
+            Err(RpcError::NotFound) => Err(FsError::NotFound),
+            Err(RpcError::AlreadyExists) => Err(FsError::AlreadyExists),
             Err(e) => Err(e.into()),
         }
     }
@@ -388,7 +384,7 @@ impl StorageBackend {
 
     /// Create a directory marker in NSS.
     /// Stores a minimal ObjectLayout with size=0 because NSS rejects empty values.
-    pub async fn put_dir_marker(&self, key: &str, trace_id: &TraceId) -> Result<(), FuseError> {
+    pub async fn put_dir_marker(&self, key: &str, trace_id: &TraceId) -> Result<(), FsError> {
         let layout = create_dir_marker_layout();
         let value: Vec<u8> =
             rkyv::api::high::to_bytes_in::<_, rkyv::rancor::Error>(&layout, Vec::new())?;

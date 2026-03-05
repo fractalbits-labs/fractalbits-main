@@ -87,12 +87,11 @@ impl Filesystem for FuseServer {
         fh: Option<u64>,
         set_attr: SetAttr,
     ) -> FsResult<ReplyAttr> {
-        // Only handle truncate to zero
-        if let Some(0) = set_attr.size {
+        if let Some(new_size) = set_attr.size {
             let fh_id = fh.ok_or(libc::ENOSYS)?;
             let attr = self
                 .vfs
-                .vfs_setattr_truncate(inode, fh_id)
+                .vfs_setattr_size(inode, fh_id, new_size)
                 .await
                 .map_err(fs_err)?;
             return Ok(ReplyAttr {
@@ -141,6 +140,10 @@ impl Filesystem for FuseServer {
     }
 
     async fn flush(&self, _req: Request, _inode: u64, fh: u64, _lock_owner: u64) -> FsResult<()> {
+        self.vfs.vfs_flush(fh).await.map_err(fs_err)
+    }
+
+    async fn fsync(&self, _req: Request, _inode: u64, fh: u64, _datasync: bool) -> FsResult<()> {
         self.vfs.vfs_flush(fh).await.map_err(fs_err)
     }
 
@@ -284,6 +287,16 @@ impl Filesystem for FuseServer {
     }
 
     async fn releasedir(&self, _req: Request, _inode: u64, _fh: u64, _flags: u32) -> FsResult<()> {
+        Ok(())
+    }
+
+    async fn fsyncdir(
+        &self,
+        _req: Request,
+        _inode: u64,
+        _fh: u64,
+        _datasync: bool,
+    ) -> FsResult<()> {
         Ok(())
     }
 

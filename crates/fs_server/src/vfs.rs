@@ -765,19 +765,24 @@ impl VfsCore {
         }
     }
 
-    /// Handle truncate-to-zero via setattr. Returns updated attr.
-    pub async fn vfs_setattr_truncate(&self, inode: u64, fh: u64) -> Result<VfsAttr, FsError> {
+    /// Handle size changes via setattr (truncate, extend, or truncate-to-zero).
+    pub async fn vfs_setattr_size(
+        &self,
+        inode: u64,
+        fh: u64,
+        new_size: u64,
+    ) -> Result<VfsAttr, FsError> {
         let mut handle = self.file_handles.get_mut(&fh).ok_or(FsError::BadFd)?;
-        if let Some(ref mut wb) = handle.write_buf {
-            wb.data.clear();
+        let wb = handle.write_buf.get_or_insert_with(|| WriteBuffer {
+            data: BytesMut::new(),
+            dirty: false,
+        });
+        let new_size = new_size as usize;
+        if new_size != wb.data.len() {
+            wb.data.resize(new_size, 0);
             wb.dirty = true;
-        } else {
-            handle.write_buf = Some(WriteBuffer {
-                data: BytesMut::new(),
-                dirty: true,
-            });
         }
-        Ok(self.make_new_file_attr(inode, 0))
+        Ok(self.make_new_file_attr(inode, new_size as u64))
     }
 
     pub async fn vfs_open(&self, inode: u64, flags: u32) -> Result<u64, FsError> {

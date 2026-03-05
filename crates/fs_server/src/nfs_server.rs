@@ -106,7 +106,7 @@ impl Nfs3Filesystem for NfsAdapter {
                 .vfs_open(fh.ino(), libc::O_WRONLY as u32 | libc::O_TRUNC as u32)
                 .await
                 .map_err(fs_err_to_nfs)?;
-            let result = self.vfs.vfs_setattr_truncate(fh.ino(), open_fh).await;
+            let result = self.vfs.vfs_setattr_size(fh.ino(), open_fh, 0).await;
             let _ = self.vfs.vfs_release(open_fh).await;
             let attr = result.map_err(fs_err_to_nfs)?;
             let fattr = vfs_attr_to_fattr3(&attr, self.fsid);

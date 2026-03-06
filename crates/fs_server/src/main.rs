@@ -24,36 +24,7 @@ struct Opt {
     #[clap(short = 'c', long = "config", help = "Config file path")]
     config_file: Option<PathBuf>,
 
-    #[clap(
-        short = 'b',
-        long = "bucket",
-        env = "FS_SERVER_BUCKET_NAME",
-        help = "Bucket name (overrides config)"
-    )]
-    bucket: Option<String>,
-
-    #[clap(
-        short = 'm',
-        long = "mount",
-        env = "FS_SERVER_MOUNT_POINT",
-        help = "Mount point (overrides config)"
-    )]
-    mount_point: Option<String>,
-
-    #[clap(
-        short = 'r',
-        long = "read-write",
-        env = "FS_SERVER_READ_WRITE",
-        help = "Enable read-write mode"
-    )]
-    read_write: bool,
-
-    #[clap(
-        long = "mode",
-        env = "FS_SERVER_MODE",
-        default_value = "fuse",
-        help = "Server mode: fuse or nfs"
-    )]
+    #[clap(long = "mode", default_value = "fuse", help = "Server mode: fuse or nfs")]
     mode: String,
 }
 
@@ -80,7 +51,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let opt = Opt::parse();
-    let server_mode = match opt.mode.as_str() {
+    let mode_str = std::env::var("FS_SERVER_MODE").unwrap_or(opt.mode);
+    let server_mode = match mode_str.as_str() {
         "nfs" => ServerMode::Nfs,
         _ => ServerMode::Fuse,
     };
@@ -88,26 +60,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg: Config = match opt.config_file {
         Some(config_file) => ::config::Config::builder()
             .add_source(::config::File::from(config_file).required(true))
-            .add_source(::config::Environment::with_prefix("FS_SERVER"))
             .build()?
             .try_deserialize()?,
-        None => ::config::Config::builder()
-            .add_source(::config::Environment::with_prefix("FS_SERVER"))
-            .build()?
-            .try_deserialize()
-            .unwrap_or_default(),
+        None => Config::default(),
     };
-
-    // CLI overrides
-    if let Some(bucket) = opt.bucket {
-        cfg.bucket_name = bucket;
-    }
-    if let Some(mount_point) = opt.mount_point {
-        cfg.mount_point = mount_point;
-    }
-    if opt.read_write {
-        cfg.read_write = true;
-    }
+    cfg.apply_env_overrides();
 
     let mount_point = cfg.mount_point.clone();
     let read_write = cfg.read_write;

@@ -14,79 +14,29 @@ pub struct Config {
     pub bucket_name: String,
     pub mount_point: String,
 
-    #[serde(default = "default_nfs_port")]
     pub nfs_port: u16,
 
-    #[serde(default = "default_rpc_request_timeout")]
     pub rpc_request_timeout_seconds: u64,
-    #[serde(default = "default_rpc_connection_timeout")]
     pub rpc_connection_timeout_seconds: u64,
-    #[serde(default = "default_rss_rpc_timeout")]
     pub rss_rpc_timeout_seconds: u64,
-    #[serde(default = "default_worker_threads")]
     #[allow(dead_code)]
     pub worker_threads: usize,
-    #[serde(default)]
     pub allow_other: bool,
-    #[serde(default)]
     #[allow(dead_code)]
     pub auto_unmount: bool,
 
-    #[serde(default = "default_dir_cache_ttl")]
     pub dir_cache_ttl_seconds: u64,
-    #[serde(default = "default_attr_cache_ttl")]
     #[allow(dead_code)]
     pub attr_cache_ttl_seconds: u64,
-    #[serde(default = "default_block_cache_size_mb")]
     #[allow(dead_code)]
     pub block_cache_size_mb: u64,
-    #[serde(default)]
     pub read_write: bool,
 
-    #[serde(default)]
     pub disk_cache_enabled: bool,
-    #[serde(default = "default_disk_cache_path")]
     pub disk_cache_path: String,
-    #[serde(default = "default_disk_cache_size_gb")]
     pub disk_cache_size_gb: u64,
-    #[serde(default)]
     pub passthrough_enabled: bool,
-    #[serde(default = "default_passthrough_max_object_size_gb")]
     pub passthrough_max_object_size_gb: u64,
-}
-
-fn default_rpc_request_timeout() -> u64 {
-    30
-}
-fn default_rpc_connection_timeout() -> u64 {
-    5
-}
-fn default_rss_rpc_timeout() -> u64 {
-    30
-}
-fn default_worker_threads() -> usize {
-    2
-}
-fn default_dir_cache_ttl() -> u64 {
-    5
-}
-fn default_attr_cache_ttl() -> u64 {
-    5
-}
-fn default_block_cache_size_mb() -> u64 {
-    256
-}
-fn default_nfs_port() -> u16 {
-    2049
-}
-fn default_disk_cache_path() -> String {
-    "/var/cache/fractalbits/".to_string()
-}
-fn default_disk_cache_size_gb() -> u64 {
-    50
-}
-fn default_passthrough_max_object_size_gb() -> u64 {
-    10
 }
 
 impl Config {
@@ -110,6 +60,31 @@ impl Config {
     pub fn attr_cache_ttl(&self) -> Duration {
         Duration::from_secs(self.attr_cache_ttl_seconds)
     }
+
+    /// Override config fields from FS_SERVER_* environment variables.
+    pub fn apply_env_overrides(&mut self) {
+        if let Ok(v) = std::env::var("FS_SERVER_BUCKET_NAME") {
+            self.bucket_name = v;
+        }
+        if let Ok(v) = std::env::var("FS_SERVER_MOUNT_POINT") {
+            self.mount_point = v;
+        }
+        if let Ok(v) = std::env::var("FS_SERVER_READ_WRITE") {
+            self.read_write = v.parse().unwrap_or(self.read_write);
+        }
+        if let Ok(v) = std::env::var("FS_SERVER_DISK_CACHE_ENABLED") {
+            self.disk_cache_enabled = v.parse().unwrap_or(self.disk_cache_enabled);
+        }
+        if let Ok(v) = std::env::var("FS_SERVER_DISK_CACHE_PATH") {
+            self.disk_cache_path = v;
+        }
+        if let Ok(v) = std::env::var("FS_SERVER_DISK_CACHE_SIZE_GB") {
+            self.disk_cache_size_gb = v.parse().unwrap_or(self.disk_cache_size_gb);
+        }
+        if let Ok(v) = std::env::var("FS_SERVER_NFS_PORT") {
+            self.nfs_port = v.parse().unwrap_or(self.nfs_port);
+        }
+    }
 }
 
 impl Default for Config {
@@ -118,22 +93,22 @@ impl Default for Config {
             rss_addrs: vec!["127.0.0.1:8086".to_string()],
             bucket_name: "default".to_string(),
             mount_point: "/mnt/fractalbits".to_string(),
-            rpc_request_timeout_seconds: default_rpc_request_timeout(),
-            rpc_connection_timeout_seconds: default_rpc_connection_timeout(),
-            rss_rpc_timeout_seconds: default_rss_rpc_timeout(),
-            worker_threads: default_worker_threads(),
+            rpc_request_timeout_seconds: 30,
+            rpc_connection_timeout_seconds: 5,
+            rss_rpc_timeout_seconds: 30,
+            worker_threads: 2,
             allow_other: false,
             auto_unmount: false,
-            dir_cache_ttl_seconds: default_dir_cache_ttl(),
-            attr_cache_ttl_seconds: default_attr_cache_ttl(),
-            block_cache_size_mb: default_block_cache_size_mb(),
-            nfs_port: default_nfs_port(),
+            dir_cache_ttl_seconds: 5,
+            attr_cache_ttl_seconds: 5,
+            block_cache_size_mb: 256,
+            nfs_port: 2049,
             read_write: false,
             disk_cache_enabled: false,
-            disk_cache_path: default_disk_cache_path(),
-            disk_cache_size_gb: default_disk_cache_size_gb(),
+            disk_cache_path: "/var/cache/fractalbits/".to_string(),
+            disk_cache_size_gb: 50,
             passthrough_enabled: false,
-            passthrough_max_object_size_gb: default_passthrough_max_object_size_gb(),
+            passthrough_max_object_size_gb: 10,
         }
     }
 }

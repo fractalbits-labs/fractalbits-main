@@ -13,7 +13,8 @@ fractal-nfs = { path = "fractal-nfs" }
 compio-runtime.workspace = true
 compio-net.workspace = true
 compio-io.workspace = true
-compio-buf = { git = "https://github.com/compio-rs/compio", branch = "master" }
+compio-buf = "0.8"
+compio-fs = "0.11"
 
 rpc_client_common = { workspace = true, default-features = false, features = ["compio-runtime"] }
 rpc_client_bss = { workspace = true, default-features = false, features = ["compio-runtime"] }
@@ -46,3 +47,6 @@ rand.workspace = true
 xxhash-rust.workspace = true
 libc = "0.2"
 nix = { version = "0.31", features = ["fs"] }
+
+[dev-dependencies]
+compio-macros = "0.1"

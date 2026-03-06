@@ -1,9 +1,10 @@
-use std::fs::{self, File, OpenOptions};
 use std::io;
-use std::os::unix::fs::{FileExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
+use compio_buf::BufResult;
+use compio_fs::{File, OpenOptions};
+use compio_io::{AsyncReadAt, AsyncWriteAt};
 use uuid::Uuid;
 
 /// Local NVMe disk cache for block data.
@@ -31,7 +32,7 @@ impl DiskCache {
         block_size: u64,
     ) -> io::Result<Self> {
         let cache_dir = cache_dir.into();
-        fs::create_dir_all(&cache_dir)?;
+        std::fs::create_dir_all(&cache_dir)?;
 
         // Verify filesystem type supports sparse file hole detection
         verify_filesystem(&cache_dir)?;
@@ -45,9 +46,15 @@ impl DiskCache {
 
     /// Read a cached block. Returns None if the block is not cached or
     /// if checksum verification fails.
-    pub fn get(&self, blob_id: Uuid, vol: u16, block: u32, content_length: u64) -> Option<Bytes> {
+    pub async fn get(
+        &self,
+        blob_id: Uuid,
+        vol: u16,
+        block: u32,
+        content_length: u64,
+    ) -> Option<Bytes> {
         let path = self.cache_file_path(blob_id, vol);
-        let file = File::open(&path).ok()?;
+        let file = File::open(&path).await.ok()?;
         let fd = std::os::fd::AsRawFd::as_raw_fd(&file);
 
         // Check if block is populated (data, not a hole)
@@ -61,21 +68,21 @@ impl DiskCache {
         let block_len = (block_end - block_offset) as usize;
 
         // Read block data
-        let mut data = vec![0u8; block_len];
-        if file.read_exact_at(&mut data, block_offset).is_err() {
+        let buf = vec![0u8; block_len];
+        let BufResult(r, data) = file.read_at(buf, block_offset).await;
+        if r.ok()? != block_len {
             return None;
         }
 
         // Read checksum from checksum region
         let checksum_offset = content_length + block as u64 * 8;
-        let mut checksum_buf = [0u8; 8];
-        if file
-            .read_exact_at(&mut checksum_buf, checksum_offset)
-            .is_err()
-        {
+        let buf = vec![0u8; 8];
+        let BufResult(r, checksum_buf) = file.read_at(buf, checksum_offset).await;
+        if r.ok()? != 8 {
             return None;
         }
-        let stored_checksum = u64::from_le_bytes(checksum_buf);
+
+        let stored_checksum = u64::from_le_bytes(checksum_buf[..8].try_into().ok()?);
 
         // Verify checksum
         let computed = xxhash_rust::xxh3::xxh3_64(&data);
@@ -84,7 +91,7 @@ impl DiskCache {
                 %blob_id, vol, block,
                 "disk cache checksum mismatch, deleting cache file"
             );
-            let _ = fs::remove_file(&path);
+            let _ = compio_fs::remove_file(&path).await;
             return None;
         }
 
@@ -92,7 +99,7 @@ impl DiskCache {
     }
 
     /// Write a block to cache. Creates the cache file if it doesn't exist.
-    pub fn insert(
+    pub async fn insert(
         &self,
         blob_id: Uuid,
         vol: u16,
@@ -102,12 +109,13 @@ impl DiskCache {
         checksum: u64,
     ) {
         let path = self.cache_file_path(blob_id, vol);
-        let file = match OpenOptions::new()
+        let mut file = match OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
             .open(&path)
+            .await
         {
             Ok(f) => f,
             Err(e) => {
@@ -119,21 +127,24 @@ impl DiskCache {
         let block_offset = block as u64 * self.block_size;
 
         // Write block data
-        if let Err(e) = file.write_all_at(data, block_offset) {
+        let BufResult(r, _) = file.write_at(data.to_vec(), block_offset).await;
+        if let Err(e) = r {
             tracing::warn!(%blob_id, vol, block, error = %e, "failed to write cache data");
             return;
         }
 
         // Write checksum in checksum region
         let checksum_offset = content_length + block as u64 * 8;
-        let checksum_bytes = checksum.to_le_bytes();
-        if let Err(e) = file.write_all_at(&checksum_bytes, checksum_offset) {
+        let BufResult(r, _) = file
+            .write_at(checksum.to_le_bytes().to_vec(), checksum_offset)
+            .await;
+        if let Err(e) = r {
             tracing::warn!(%blob_id, vol, block, error = %e, "failed to write cache checksum");
             return;
         }
 
         // Ensure data + checksum are persisted
-        if let Err(e) = file.sync_data() {
+        if let Err(e) = file.sync_data().await {
             tracing::warn!(%blob_id, vol, block, error = %e, "failed to sync cache file");
         }
     }
@@ -145,7 +156,7 @@ impl DiskCache {
         }
 
         let path = self.cache_file_path(blob_id, vol);
-        let file = match File::open(&path) {
+        let file = match std::fs::File::open(&path) {
             Ok(f) => f,
             Err(_) => return false,
         };
@@ -174,64 +185,77 @@ impl DiskCache {
     }
 
     /// Evict LRU cache files until usage is at or below `target_bytes`.
-    pub fn evict_to(&self, target_bytes: u64) {
-        let entries = match fs::read_dir(&self.cache_dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
+    pub async fn evict_to(&self, target_bytes: u64) {
+        let cache_dir = self.cache_dir.clone();
+        let _ = compio_runtime::spawn_blocking(move || {
+            use std::os::unix::fs::MetadataExt;
 
-        // Collect (path, disk_usage, atime)
-        let mut files: Vec<(PathBuf, u64, i64)> = Vec::new();
-        let mut total_usage: u64 = 0;
+            let entries = match std::fs::read_dir(&cache_dir) {
+                Ok(e) => e,
+                Err(_) => return,
+            };
 
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
+            // Collect (path, disk_usage, atime)
+            let mut files: Vec<(PathBuf, u64, i64)> = Vec::new();
+            let mut total_usage: u64 = 0;
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    let disk_bytes = meta.blocks() * 512;
+                    let atime = meta.atime();
+                    total_usage += disk_bytes;
+                    files.push((path, disk_bytes, atime));
+                }
             }
-            if let Ok(meta) = fs::metadata(&path) {
-                let disk_bytes = meta.blocks() * 512;
-                let atime = meta.atime();
-                total_usage += disk_bytes;
-                files.push((path, disk_bytes, atime));
-            }
-        }
 
-        if total_usage <= target_bytes {
-            return;
-        }
-
-        // Sort by atime ascending (oldest first = LRU)
-        files.sort_by_key(|f| f.2);
-
-        for (path, disk_bytes, _) in &files {
             if total_usage <= target_bytes {
-                break;
+                return;
             }
-            if fs::remove_file(path).is_ok() {
-                total_usage = total_usage.saturating_sub(*disk_bytes);
-                tracing::info!(path = %path.display(), "evicted cache file");
+
+            // Sort by atime ascending (oldest first = LRU)
+            files.sort_by_key(|f| f.2);
+
+            for (path, disk_bytes, _) in &files {
+                if total_usage <= target_bytes {
+                    break;
+                }
+                if std::fs::remove_file(path).is_ok() {
+                    total_usage = total_usage.saturating_sub(*disk_bytes);
+                    tracing::info!(path = %path.display(), "evicted cache file");
+                }
             }
-        }
+        })
+        .await;
     }
 
     /// Get current disk usage of the cache directory in bytes.
-    pub fn current_usage(&self) -> u64 {
-        let entries = match fs::read_dir(&self.cache_dir) {
-            Ok(e) => e,
-            Err(_) => return 0,
-        };
+    pub async fn current_usage(&self) -> u64 {
+        let cache_dir = self.cache_dir.clone();
+        compio_runtime::spawn_blocking(move || {
+            use std::os::unix::fs::MetadataExt;
 
-        let mut total: u64 = 0;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file()
-                && let Ok(meta) = fs::metadata(&path)
-            {
-                total += meta.blocks() * 512;
+            let entries = match std::fs::read_dir(&cache_dir) {
+                Ok(e) => e,
+                Err(_) => return 0,
+            };
+
+            let mut total: u64 = 0;
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file()
+                    && let Ok(meta) = std::fs::metadata(&path)
+                {
+                    total += meta.blocks() * 512;
+                }
             }
-        }
-        total
+            total
+        })
+        .await
+        .unwrap_or(0)
     }
 }
 
@@ -274,6 +298,7 @@ fn verify_filesystem(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::FileExt;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     static TEST_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -282,13 +307,13 @@ mod tests {
         let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir =
             std::env::temp_dir().join(format!("test_disk_cache_{}_{}", std::process::id(), id));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
-    #[test]
-    fn test_insert_and_get() {
+    #[compio_macros::test]
+    async fn test_insert_and_get() {
         let dir = test_cache_dir();
         let cache = DiskCache::new(&dir, 1, 1024).unwrap();
 
@@ -298,29 +323,31 @@ mod tests {
         let checksum = xxhash_rust::xxh3::xxh3_64(&data);
         let content_length = 4096u64; // 4 blocks of 1024
 
-        cache.insert(blob_id, vol, 0, content_length, &data, checksum);
+        cache
+            .insert(blob_id, vol, 0, content_length, &data, checksum)
+            .await;
 
-        let result = cache.get(blob_id, vol, 0, content_length);
+        let result = cache.get(blob_id, vol, 0, content_length).await;
         assert!(result.is_some());
         assert_eq!(result.unwrap().as_ref(), &data[..]);
 
-        let _ = fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_get_missing_block() {
+    #[compio_macros::test]
+    async fn test_get_missing_block() {
         let dir = test_cache_dir();
         let cache = DiskCache::new(&dir, 1, 1024).unwrap();
 
         let blob_id = Uuid::new_v4();
-        let result = cache.get(blob_id, 1, 0, 4096);
+        let result = cache.get(blob_id, 1, 0, 4096).await;
         assert!(result.is_none());
 
-        let _ = fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_get_hole_block() {
+    #[compio_macros::test]
+    async fn test_get_hole_block() {
         let dir = test_cache_dir();
         let cache = DiskCache::new(&dir, 1, 1024).unwrap();
 
@@ -331,16 +358,18 @@ mod tests {
         let content_length = 8192u64;
 
         // Insert block 5, try to get block 3 (should be a hole)
-        cache.insert(blob_id, vol, 5, content_length, &data, checksum);
+        cache
+            .insert(blob_id, vol, 5, content_length, &data, checksum)
+            .await;
 
-        let result = cache.get(blob_id, vol, 3, content_length);
+        let result = cache.get(blob_id, vol, 3, content_length).await;
         assert!(result.is_none());
 
-        let _ = fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_checksum_corruption() {
+    #[compio_macros::test]
+    async fn test_checksum_corruption() {
         let dir = test_cache_dir();
         let cache = DiskCache::new(&dir, 1, 1024).unwrap();
 
@@ -350,25 +379,27 @@ mod tests {
         let checksum = xxhash_rust::xxh3::xxh3_64(&data);
         let content_length = 4096u64;
 
-        cache.insert(blob_id, vol, 0, content_length, &data, checksum);
+        cache
+            .insert(blob_id, vol, 0, content_length, &data, checksum)
+            .await;
 
-        // Corrupt data on disk
+        // Corrupt data on disk (use std::fs for direct corruption)
         let path = cache.cache_file_path(blob_id, vol);
-        let file = OpenOptions::new().write(true).open(&path).unwrap();
+        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         file.write_all_at(&[0u8; 10], 0).unwrap();
         file.sync_all().unwrap();
         drop(file);
 
         // get should return None and delete the file
-        let result = cache.get(blob_id, vol, 0, content_length);
+        let result = cache.get(blob_id, vol, 0, content_length).await;
         assert!(result.is_none());
         assert!(!path.exists());
 
-        let _ = fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_is_complete() {
+    #[compio_macros::test]
+    async fn test_is_complete() {
         let dir = test_cache_dir();
         // Use block_size >= fs block size (4096) so SEEK_DATA/SEEK_HOLE
         // can distinguish individual blocks
@@ -383,7 +414,9 @@ mod tests {
         for block in 0..3 {
             let data = vec![block as u8; block_size as usize];
             let checksum = xxhash_rust::xxh3::xxh3_64(&data);
-            cache.insert(blob_id, vol, block, content_length, &data, checksum);
+            cache
+                .insert(blob_id, vol, block, content_length, &data, checksum)
+                .await;
         }
 
         assert!(cache.is_complete(blob_id, vol, content_length));
@@ -393,16 +426,18 @@ mod tests {
         for block in [0, 2] {
             let data = vec![block as u8; block_size as usize];
             let checksum = xxhash_rust::xxh3::xxh3_64(&data);
-            cache.insert(blob_id2, vol, block, content_length, &data, checksum);
+            cache
+                .insert(blob_id2, vol, block, content_length, &data, checksum)
+                .await;
         }
 
         assert!(!cache.is_complete(blob_id2, vol, content_length));
 
-        let _ = fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_evict() {
+    #[compio_macros::test]
+    async fn test_evict() {
         let dir = test_cache_dir();
         let cache = DiskCache::new(&dir, 1, 1024).unwrap();
 
@@ -411,19 +446,19 @@ mod tests {
             let blob_id = Uuid::from_u128(i as u128 + 1);
             let data = vec![i as u8; 4096];
             let checksum = xxhash_rust::xxh3::xxh3_64(&data);
-            cache.insert(blob_id, 1, 0, 8192, &data, checksum);
+            cache.insert(blob_id, 1, 0, 8192, &data, checksum).await;
         }
 
         // Evict to 0 bytes -- should remove everything
-        cache.evict_to(0);
+        cache.evict_to(0).await;
 
-        let remaining: Vec<_> = fs::read_dir(&dir)
+        let remaining: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().is_file())
             .collect();
         assert!(remaining.is_empty());
 
-        let _ = fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -385,8 +385,9 @@ impl VfsCore {
     ) -> Result<Bytes, FsError> {
         // Try disk cache
         if let Some(dc) = &self.disk_cache
-            && let Some(cached) =
-                dc.get(blob_guid.blob_id, blob_guid.volume_id, block_num, file_size)
+            && let Some(cached) = dc
+                .get(blob_guid.blob_id, blob_guid.volume_id, block_num, file_size)
+                .await
         {
             return Ok(cached);
         }
@@ -406,7 +407,8 @@ impl VfsCore {
                 file_size,
                 &data,
                 checksum,
-            );
+            )
+            .await;
         }
 
         Ok(data)

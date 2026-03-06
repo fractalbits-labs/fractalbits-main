@@ -24,7 +24,11 @@ struct Opt {
     #[clap(short = 'c', long = "config", help = "Config file path")]
     config_file: Option<PathBuf>,
 
-    #[clap(long = "mode", default_value = "fuse", help = "Server mode: fuse or nfs")]
+    #[clap(
+        long = "mode",
+        default_value = "fuse",
+        help = "Server mode: fuse or nfs"
+    )]
     mode: String,
 }
 

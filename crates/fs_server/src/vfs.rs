@@ -8,7 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::backend::{BackendConfig, StorageBackend};
-use crate::cache::{BlockCache, DirCache, DirEntry};
+use crate::cache::{DirCache, DirEntry};
+use crate::disk_cache::DiskCache;
 use crate::error::FsError;
 use crate::inode::{EntryType, InodeTable, ROOT_INODE};
 use data_types::object_layout::{
@@ -83,7 +84,7 @@ struct FileHandle {
 pub struct VfsCore {
     backend_config: Arc<BackendConfig>,
     inodes: Arc<InodeTable>,
-    block_cache: BlockCache,
+    disk_cache: Option<DiskCache>,
     dir_cache: DirCache,
     file_handles: DashMap<u64, FileHandle>,
     next_fh: AtomicU64,
@@ -99,12 +100,36 @@ impl VfsCore {
         inodes: Arc<InodeTable>,
         read_write: bool,
     ) -> Self {
-        let block_cache_size_mb = backend_config.config.block_cache_size_mb;
-        let dir_cache_ttl = backend_config.config.dir_cache_ttl();
+        let config = &backend_config.config;
+        let dir_cache_ttl = config.dir_cache_ttl();
+
+        let disk_cache = if config.disk_cache_enabled {
+            match DiskCache::new(
+                &config.disk_cache_path,
+                config.disk_cache_size_gb,
+                DEFAULT_BLOCK_SIZE as u64,
+            ) {
+                Ok(dc) => {
+                    tracing::info!(
+                        path = %config.disk_cache_path,
+                        size_gb = config.disk_cache_size_gb,
+                        "disk cache enabled"
+                    );
+                    Some(dc)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to init disk cache, falling back to no cache");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Self {
             backend_config,
             inodes,
-            block_cache: BlockCache::new(block_cache_size_mb),
+            disk_cache,
             dir_cache: DirCache::new(dir_cache_ttl),
             file_handles: DashMap::new(),
             next_fh: AtomicU64::new(1),
@@ -242,6 +267,47 @@ impl VfsCore {
         }
     }
 
+    // ── Cache helpers ──
+
+    /// Read a block, checking disk cache first. On miss, fetches from backend
+    /// and populates disk cache.
+    async fn read_block_cached(
+        &self,
+        blob_guid: data_types::DataBlobGuid,
+        block_num: u32,
+        block_content_len: usize,
+        file_size: u64,
+        trace_id: &TraceId,
+    ) -> Result<Bytes, FsError> {
+        // Try disk cache
+        if let Some(dc) = &self.disk_cache
+            && let Some(cached) =
+                dc.get(blob_guid.blob_id, blob_guid.volume_id, block_num, file_size)
+        {
+            return Ok(cached);
+        }
+
+        // Cache miss: fetch from backend
+        let (data, checksum) = self
+            .backend()
+            .read_block(blob_guid, block_num, block_content_len, trace_id)
+            .await?;
+
+        // Populate disk cache
+        if let Some(dc) = &self.disk_cache {
+            dc.insert(
+                blob_guid.blob_id,
+                blob_guid.volume_id,
+                block_num,
+                file_size,
+                &data,
+                checksum,
+            );
+        }
+
+        Ok(data)
+    }
+
     // ── Read helpers ──
 
     async fn preload_file_content(
@@ -291,24 +357,15 @@ impl VfsCore {
             let block_start = block_num as u64 * block_size;
             let block_content_len = std::cmp::min(block_size, file_size - block_start) as usize;
 
-            let block_data = if let Some(cached) =
-                self.block_cache
-                    .get(blob_guid.blob_id, blob_guid.volume_id, block_num)
-            {
-                cached
-            } else {
-                let (data, _checksum) = self
-                    .backend()
-                    .read_block(blob_guid, block_num, block_content_len, &trace_id)
-                    .await?;
-                self.block_cache.insert(
-                    blob_guid.blob_id,
-                    blob_guid.volume_id,
+            let block_data = self
+                .read_block_cached(
+                    blob_guid,
                     block_num,
-                    data.clone(),
-                );
-                data
-            };
+                    block_content_len,
+                    file_size,
+                    &trace_id,
+                )
+                .await?;
 
             let slice_start = (offset - block_start) as usize;
             let slice_end = std::cmp::min((read_end - block_start) as usize, block_data.len());
@@ -322,24 +379,15 @@ impl VfsCore {
             let block_start = block_num as u64 * block_size;
             let block_content_len = std::cmp::min(block_size, file_size - block_start) as usize;
 
-            let block_data = if let Some(cached) =
-                self.block_cache
-                    .get(blob_guid.blob_id, blob_guid.volume_id, block_num)
-            {
-                cached
-            } else {
-                let (data, _checksum) = self
-                    .backend()
-                    .read_block(blob_guid, block_num, block_content_len, &trace_id)
-                    .await?;
-                self.block_cache.insert(
-                    blob_guid.blob_id,
-                    blob_guid.volume_id,
+            let block_data = self
+                .read_block_cached(
+                    blob_guid,
                     block_num,
-                    data.clone(),
-                );
-                data
-            };
+                    block_content_len,
+                    file_size,
+                    &trace_id,
+                )
+                .await?;
 
             let slice_start = if block_num == first_block {
                 (offset - block_start) as usize
@@ -409,24 +457,15 @@ impl VfsCore {
                     let block_content_len =
                         std::cmp::min(block_size, part_size - block_start) as usize;
 
-                    let block_data = if let Some(cached) =
-                        self.block_cache
-                            .get(blob_guid.blob_id, blob_guid.volume_id, block_num)
-                    {
-                        cached
-                    } else {
-                        let (data, _checksum) = self
-                            .backend()
-                            .read_block(blob_guid, block_num, block_content_len, &trace_id)
-                            .await?;
-                        self.block_cache.insert(
-                            blob_guid.blob_id,
-                            blob_guid.volume_id,
+                    let block_data = self
+                        .read_block_cached(
+                            blob_guid,
                             block_num,
-                            data.clone(),
-                        );
-                        data
-                    };
+                            block_content_len,
+                            part_size,
+                            &trace_id,
+                        )
+                        .await?;
 
                     let slice_start = if block_num == first_block {
                         (part_read_start - block_start) as usize

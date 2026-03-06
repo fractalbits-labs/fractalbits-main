@@ -38,18 +38,16 @@ pub struct Config {
     #[allow(dead_code)]
     pub attr_cache_ttl_seconds: u64,
     #[serde(default = "default_block_cache_size_mb")]
+    #[allow(dead_code)]
     pub block_cache_size_mb: u64,
     #[serde(default)]
     pub read_write: bool,
 
     #[serde(default)]
-    #[allow(dead_code)]
     pub disk_cache_enabled: bool,
     #[serde(default = "default_disk_cache_path")]
-    #[allow(dead_code)]
     pub disk_cache_path: String,
     #[serde(default = "default_disk_cache_size_gb")]
-    #[allow(dead_code)]
     pub disk_cache_size_gb: u64,
     #[serde(default)]
     #[allow(dead_code)]

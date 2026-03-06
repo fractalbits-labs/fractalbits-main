@@ -50,10 +50,8 @@ pub struct Config {
     #[serde(default = "default_disk_cache_size_gb")]
     pub disk_cache_size_gb: u64,
     #[serde(default)]
-    #[allow(dead_code)]
     pub passthrough_enabled: bool,
     #[serde(default = "default_passthrough_max_object_size_gb")]
-    #[allow(dead_code)]
     pub passthrough_max_object_size_gb: u64,
 }
 

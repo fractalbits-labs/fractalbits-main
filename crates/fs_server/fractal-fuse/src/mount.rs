@@ -136,6 +136,7 @@ pub struct MountOptions {
     pub handle_killpriv: bool,
     pub write_back: bool,
     pub force_readdir_plus: bool,
+    pub passthrough: bool,
 }
 
 impl MountOptions {
@@ -190,6 +191,11 @@ impl MountOptions {
 
     pub fn force_readdir_plus(mut self, rdp: bool) -> Self {
         self.force_readdir_plus = rdp;
+        self
+    }
+
+    pub fn passthrough(mut self, pt: bool) -> Self {
+        self.passthrough = pt;
         self
     }
 

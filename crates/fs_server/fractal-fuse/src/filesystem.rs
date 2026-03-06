@@ -11,6 +11,9 @@ pub type FsResult<T> = std::result::Result<T, Errno>;
 /// The trait object itself is `Send + Sync` for sharing via Arc across threads.
 #[allow(clippy::too_many_arguments)]
 pub trait Filesystem: Send + Sync + 'static {
+    /// Called after FUSE_INIT to provide the /dev/fuse fd for passthrough ioctls.
+    fn set_fuse_dev_fd(&self, _fd: i32) {}
+
     /// Initialize the filesystem.
     ///
     /// Called once during mount before any other operations. Returns

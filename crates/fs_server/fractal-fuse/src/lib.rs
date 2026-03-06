@@ -4,6 +4,7 @@ pub mod abi;
 pub mod dispatch;
 pub mod filesystem;
 pub mod mount;
+pub mod passthrough;
 pub mod ring;
 pub mod session;
 pub mod types;

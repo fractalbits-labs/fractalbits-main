@@ -142,7 +142,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .fs_name("fractalbits")
                 .read_only(!read_write)
                 .allow_other(cfg.allow_other)
-                .write_back(read_write);
+                .write_back(read_write && !cfg.passthrough_enabled)
+                .passthrough(cfg.passthrough_enabled);
 
             Session::new(mount_options).run(fuse_fs, Path::new(&mount_point))?;
             tracing::info!("FUSE client exited");

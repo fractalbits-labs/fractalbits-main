@@ -36,6 +36,10 @@ fn fs_err(e: FsError) -> Errno {
 }
 
 impl Filesystem for FuseServer {
+    fn set_fuse_dev_fd(&self, fd: i32) {
+        self.vfs.set_fuse_dev_fd(fd);
+    }
+
     async fn init(&self, _req: Request) -> FsResult<ReplyInit> {
         self.vfs.vfs_init();
         Ok(ReplyInit {
@@ -110,10 +114,19 @@ impl Filesystem for FuseServer {
 
     async fn open(&self, _req: Request, inode: u64, flags: u32) -> FsResult<ReplyOpen> {
         let fh = self.vfs.vfs_open(inode, flags).await.map_err(fs_err)?;
+
+        // Try passthrough for fully-cached read-only files
+        let (open_flags, backing_id) = if flags & (libc::O_WRONLY as u32 | libc::O_RDWR as u32) == 0
+        {
+            self.vfs.try_passthrough_for_fh(fh).unwrap_or((0, 0))
+        } else {
+            (0, 0)
+        };
+
         Ok(ReplyOpen {
             fh,
-            flags: 0,
-            backing_id: 0,
+            flags: open_flags,
+            backing_id,
         })
     }
 
@@ -160,6 +173,7 @@ impl Filesystem for FuseServer {
         _lock_owner: u64,
         _flush: bool,
     ) -> FsResult<()> {
+        self.vfs.release_passthrough(fh);
         self.vfs.vfs_release(fh).await.map_err(fs_err)
     }
 

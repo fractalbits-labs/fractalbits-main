@@ -4,7 +4,7 @@ use data_types::TraceId;
 use rkyv::api::high::to_bytes_in;
 use std::cell::Cell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::backend::{BackendConfig, StorageBackend};
@@ -79,6 +79,7 @@ struct FileHandle {
     s3_key: String,
     layout: Option<ObjectLayout>,
     write_buf: Option<WriteBuffer>,
+    backing_id: Option<i32>,
 }
 
 pub struct VfsCore {
@@ -89,6 +90,9 @@ pub struct VfsCore {
     file_handles: DashMap<u64, FileHandle>,
     next_fh: AtomicU64,
     read_write: bool,
+    passthrough_enabled: bool,
+    passthrough_max_object_size: u64,
+    fuse_dev_fd: AtomicI32,
     // Tracks blob data for unlinked files that still have open handles.
     // Cleanup is deferred until the last handle is released.
     deferred_blob_cleanup: DashMap<u64, Bytes>,
@@ -126,6 +130,10 @@ impl VfsCore {
             None
         };
 
+        let passthrough_enabled = config.passthrough_enabled;
+        let passthrough_max_object_size =
+            config.passthrough_max_object_size_gb * 1024 * 1024 * 1024;
+
         Self {
             backend_config,
             inodes,
@@ -134,6 +142,9 @@ impl VfsCore {
             file_handles: DashMap::new(),
             next_fh: AtomicU64::new(1),
             read_write,
+            passthrough_enabled,
+            passthrough_max_object_size,
+            fuse_dev_fd: AtomicI32::new(-1),
             deferred_blob_cleanup: DashMap::new(),
         }
     }
@@ -264,6 +275,99 @@ impl VfsCore {
             gid: 0,
             rdev: 0,
             blksize: DEFAULT_BLOCK_SIZE,
+        }
+    }
+
+    // ── Passthrough helpers ──
+
+    pub fn set_fuse_dev_fd(&self, fd: i32) {
+        self.fuse_dev_fd.store(fd, Ordering::Relaxed);
+    }
+
+    /// Try to set up passthrough for a file handle. Returns (open_flags, backing_id)
+    /// if passthrough is activated, or (0, 0) otherwise.
+    pub fn try_passthrough(&self, fh: u64, layout: &ObjectLayout) -> (u32, i32) {
+        if !self.passthrough_enabled {
+            return (0, 0);
+        }
+
+        let dc = match &self.disk_cache {
+            Some(dc) => dc,
+            None => return (0, 0),
+        };
+
+        let file_size = match layout.size() {
+            Ok(s) => s,
+            Err(_) => return (0, 0),
+        };
+
+        // Skip large files
+        if file_size > self.passthrough_max_object_size || file_size == 0 {
+            return (0, 0);
+        }
+
+        let blob_guid = match layout.blob_guid() {
+            Ok(g) => g,
+            Err(_) => return (0, 0),
+        };
+
+        // Check if fully cached
+        if !dc.is_complete(blob_guid.blob_id, blob_guid.volume_id, file_size) {
+            return (0, 0);
+        }
+
+        let fuse_fd = self.fuse_dev_fd.load(Ordering::Relaxed);
+        if fuse_fd < 0 {
+            return (0, 0);
+        }
+
+        // Open the cache file and register as backing fd
+        let cache_path = dc.cache_file_path(blob_guid.blob_id, blob_guid.volume_id);
+        let backing_file = match std::fs::File::open(&cache_path) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to open cache file for passthrough");
+                return (0, 0);
+            }
+        };
+
+        use std::os::fd::AsRawFd;
+        let backing_fd = backing_file.as_raw_fd();
+
+        match fractal_fuse::passthrough::fuse_backing_open(fuse_fd, backing_fd) {
+            Ok(bid) => {
+                tracing::info!(fh, backing_id = bid, "passthrough activated");
+                // Store backing_id in file handle for cleanup
+                if let Some(mut handle) = self.file_handles.get_mut(&fh) {
+                    handle.backing_id = Some(bid);
+                }
+                (fractal_fuse::abi::FOPEN_PASSTHROUGH, bid)
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "passthrough ioctl failed (not supported?)");
+                (0, 0)
+            }
+        }
+    }
+
+    /// Try passthrough for an already-opened file handle.
+    pub fn try_passthrough_for_fh(&self, fh: u64) -> Option<(u32, i32)> {
+        let handle = self.file_handles.get(&fh)?;
+        let layout = handle.layout.as_ref()?;
+        Some(self.try_passthrough(fh, layout))
+    }
+
+    /// Clean up passthrough backing_id on file release.
+    pub fn release_passthrough(&self, fh: u64) {
+        let backing_id = self.file_handles.get(&fh).and_then(|h| h.backing_id);
+
+        if let Some(bid) = backing_id {
+            let fuse_fd = self.fuse_dev_fd.load(Ordering::Relaxed);
+            if fuse_fd >= 0
+                && let Err(e) = fractal_fuse::passthrough::fuse_backing_close(fuse_fd, bid)
+            {
+                tracing::warn!(backing_id = bid, error = %e, "failed to close backing");
+            }
         }
     }
 
@@ -886,6 +990,7 @@ impl VfsCore {
                 s3_key,
                 layout,
                 write_buf,
+                backing_id: None,
             },
         );
 
@@ -1004,6 +1109,7 @@ impl VfsCore {
                     data: BytesMut::new(),
                     dirty: true,
                 }),
+                backing_id: None,
             },
         );
 

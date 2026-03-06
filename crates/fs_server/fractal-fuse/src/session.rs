@@ -119,6 +119,9 @@ impl Session {
             max_write, num_queues, queue_depth
         );
 
+        // Provide fuse fd to filesystem for passthrough ioctls
+        fs.set_fuse_dev_fd(fuse_fd.as_raw_fd());
+
         // Phase 3: Spawn per-CPU ring threads, each with its own compio Runtime
         let fs = Arc::new(fs);
         let fuse_raw_fd = fuse_fd.as_raw_fd();
@@ -338,7 +341,10 @@ fn fuse_init(fuse_fd: BorrowedFd<'_>, opts: &MountOptions) -> io::Result<(u32, u
     if opts.handle_killpriv {
         want_flags |= FUSE_HANDLE_KILLPRIV as u64;
     }
-    if opts.write_back {
+    if opts.passthrough {
+        // FUSE_PASSTHROUGH and FUSE_WRITEBACK_CACHE are mutually exclusive
+        want_flags |= FUSE_PASSTHROUGH;
+    } else if opts.write_back {
         want_flags |= FUSE_WRITEBACK_CACHE as u64;
     }
 
@@ -373,7 +379,7 @@ fn fuse_init(fuse_fd: BorrowedFd<'_>, opts: &MountOptions) -> io::Result<(u32, u
         max_pages: (max_write / 4096).max(1) as u16,
         map_alignment: 0,
         flags2: ((want_flags >> 32) & 0xFFFF_FFFF) as u32,
-        max_stack_depth: 0,
+        max_stack_depth: if opts.passthrough { 1 } else { 0 },
         request_timeout: 0,
         unused: [0; 11],
     };

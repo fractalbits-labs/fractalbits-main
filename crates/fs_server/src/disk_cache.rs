@@ -1,11 +1,131 @@
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use bytes::Bytes;
 use compio_buf::BufResult;
 use compio_fs::{File, OpenOptions};
 use compio_io::{AsyncReadAt, AsyncWriteAt};
+use lru::LruCache;
 use uuid::Uuid;
+
+/// How often the background evictor checks disk usage.
+const EVICTION_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Start evicting when usage exceeds this fraction of max_size_bytes.
+const HIGH_WATERMARK: f64 = 0.95;
+
+/// Evict down to this fraction of max_size_bytes.
+const LOW_WATERMARK: f64 = 0.90;
+
+// ── In-memory LRU tracker ──────────────────────────────────────────
+
+/// Mutable inner state of the cache tracker, protected by a Mutex.
+struct TrackerInner {
+    /// LRU map from (blob_id, vol) -> approximate disk_bytes.
+    /// The LRU ordering is maintained automatically by `get`/`push`.
+    lru: LruCache<(Uuid, u16), u64>,
+    /// Approximate total disk usage in bytes.
+    total_usage: u64,
+}
+
+/// Tracks cache file access order and approximate total disk usage.
+///
+/// Uses `lru::LruCache` (linked HashMap) for O(1) touch/insert/pop_lru.
+/// All operations hold a `Mutex` for a short critical section (~50ns
+/// of pointer updates), which is negligible at FUSE request rates.
+struct CacheTracker {
+    inner: Mutex<TrackerInner>,
+}
+
+impl CacheTracker {
+    fn new() -> Self {
+        Self {
+            inner: Mutex::new(TrackerInner {
+                lru: LruCache::unbounded(),
+                total_usage: 0,
+            }),
+        }
+    }
+
+    /// Record an access to a cache file (promotes to MRU).
+    fn touch(&self, blob_id: Uuid, vol: u16) {
+        let mut inner = self.inner.lock().expect("tracker lock poisoned");
+        // `get` promotes the entry to the most-recently-used position.
+        let _ = inner.lru.get(&(blob_id, vol));
+    }
+
+    /// Record a new block insertion. Returns the new total_usage.
+    fn record_insert(&self, blob_id: Uuid, vol: u16, added_bytes: u64) -> u64 {
+        let mut inner = self.inner.lock().expect("tracker lock poisoned");
+        // `get` promotes to MRU and returns mutable ref to the value.
+        if let Some(disk_bytes) = inner.lru.get_mut(&(blob_id, vol)) {
+            *disk_bytes += added_bytes;
+        } else {
+            inner.lru.push((blob_id, vol), added_bytes);
+        }
+        inner.total_usage += added_bytes;
+        inner.total_usage
+    }
+
+    fn current_usage(&self) -> u64 {
+        self.inner
+            .lock()
+            .expect("tracker lock poisoned")
+            .total_usage
+    }
+
+    /// Remove a file from tracking. Subtracts tracked bytes from total_usage.
+    fn remove(&self, blob_id: Uuid, vol: u16) {
+        let mut inner = self.inner.lock().expect("tracker lock poisoned");
+        if let Some(disk_bytes) = inner.lru.pop(&(blob_id, vol)) {
+            inner.total_usage = inner.total_usage.saturating_sub(disk_bytes);
+        }
+    }
+
+    /// Pop the least-recently-used entry. Returns its key and tracked bytes.
+    fn pop_lru(&self) -> Option<((Uuid, u16), u64)> {
+        let mut inner = self.inner.lock().expect("tracker lock poisoned");
+        let ((blob_id, vol), disk_bytes) = inner.lru.pop_lru()?;
+        inner.total_usage = inner.total_usage.saturating_sub(disk_bytes);
+        Some(((blob_id, vol), disk_bytes))
+    }
+
+    /// Insert a cold-start entry (appended at LRU end, i.e. oldest).
+    fn insert_cold(&self, blob_id: Uuid, vol: u16, disk_bytes: u64) {
+        let mut inner = self.inner.lock().expect("tracker lock poisoned");
+        inner.lru.push((blob_id, vol), disk_bytes);
+        // Demote to LRU position (oldest). `demote` moves to the back
+        // of the internal list, which is the LRU end.
+        inner.lru.demote(&(blob_id, vol));
+        inner.total_usage += disk_bytes;
+    }
+
+    /// Number of tracked files.
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.inner.lock().expect("tracker lock poisoned").lru.len()
+    }
+
+    /// Peek at the LRU ordering (oldest first) without modifying it.
+    /// Used only in tests.
+    #[cfg(test)]
+    fn peek_lru_order(&self) -> Vec<(Uuid, u16)> {
+        let inner = self.inner.lock().expect("tracker lock poisoned");
+        // `iter()` returns entries from most-recently-used to least.
+        // Reverse to get oldest-first.
+        inner
+            .lru
+            .iter()
+            .rev()
+            .map(|(&(blob_id, vol), _)| (blob_id, vol))
+            .collect()
+    }
+}
+
+// ── DiskCache ──────────────────────────────────────────────────────
 
 /// Local NVMe disk cache for block data.
 ///
@@ -20,12 +140,16 @@ pub struct DiskCache {
     cache_dir: PathBuf,
     max_size_bytes: u64,
     block_size: u64,
+    high_bytes: u64,
+    low_bytes: u64,
+    tracker: Arc<CacheTracker>,
 }
 
 #[allow(dead_code)]
 impl DiskCache {
-    /// Create a new DiskCache. Creates the cache directory if needed and
-    /// verifies the filesystem supports SEEK_DATA (ext4/xfs).
+    /// Create a new DiskCache. Creates the cache directory if needed,
+    /// verifies the filesystem supports SEEK_DATA (ext4/xfs), and
+    /// performs a cold-start scan to populate the in-memory tracker.
     pub fn new(
         cache_dir: impl Into<PathBuf>,
         max_size_gb: u64,
@@ -37,11 +161,61 @@ impl DiskCache {
         // Verify filesystem type supports sparse file hole detection
         verify_filesystem(&cache_dir)?;
 
+        let max_size_bytes = max_size_gb * 1024 * 1024 * 1024;
+        let tracker = Arc::new(CacheTracker::new());
+
+        // Cold-start: populate tracker from existing cache files
+        cold_start_scan(&cache_dir, &tracker);
+
         Ok(Self {
             cache_dir,
-            max_size_bytes: max_size_gb * 1024 * 1024 * 1024,
+            max_size_bytes,
             block_size,
+            high_bytes: (max_size_bytes as f64 * HIGH_WATERMARK) as u64,
+            low_bytes: (max_size_bytes as f64 * LOW_WATERMARK) as u64,
+            tracker,
         })
+    }
+
+    /// Spawn a background evictor task that checks usage every 60s.
+    ///
+    /// The periodic check is O(1) (atomic read of total_usage). Eviction
+    /// only runs when usage exceeds the high watermark (95%), evicting
+    /// down to the low watermark (90%).
+    pub fn spawn_evictor(&self) {
+        let cache_dir = self.cache_dir.clone();
+        let tracker = self.tracker.clone();
+        let high = self.high_bytes;
+        let low = self.low_bytes;
+
+        compio_runtime::spawn(async move {
+            loop {
+                compio_runtime::time::sleep(EVICTION_INTERVAL).await;
+                if tracker.current_usage() > high {
+                    let dir = cache_dir.clone();
+                    let t = tracker.clone();
+                    let _ = compio_runtime::spawn_blocking(move || {
+                        run_eviction(&dir, &t, low);
+                    })
+                    .await;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Fire-and-forget an urgent eviction (e.g. after ENOSPC).
+    fn request_eviction(&self) {
+        let cache_dir = self.cache_dir.clone();
+        let tracker = self.tracker.clone();
+        let low = self.low_bytes;
+        compio_runtime::spawn(async move {
+            let _ = compio_runtime::spawn_blocking(move || {
+                run_eviction(&cache_dir, &tracker, low);
+            })
+            .await;
+        })
+        .detach();
     }
 
     /// Read a cached block. Returns None if the block is not cached or
@@ -91,10 +265,12 @@ impl DiskCache {
                 %blob_id, vol, block,
                 "disk cache checksum mismatch, deleting cache file"
             );
+            self.tracker.remove(blob_id, vol);
             let _ = compio_fs::remove_file(&path).await;
             return None;
         }
 
+        self.tracker.touch(blob_id, vol);
         Some(Bytes::from(data))
     }
 
@@ -124,11 +300,18 @@ impl DiskCache {
             }
         };
 
+        // Check if this block is already cached (avoid double-counting usage).
+        let fd = std::os::fd::AsRawFd::as_raw_fd(&file);
+        let new_block = !is_block_populated(fd, block, self.block_size);
+
         let block_offset = block as u64 * self.block_size;
 
         // Write block data
         let BufResult(r, _) = file.write_at(data.to_vec(), block_offset).await;
         if let Err(e) = r {
+            if e.kind() == io::ErrorKind::StorageFull {
+                self.request_eviction();
+            }
             tracing::warn!(%blob_id, vol, block, error = %e, "failed to write cache data");
             return;
         }
@@ -139,6 +322,9 @@ impl DiskCache {
             .write_at(checksum.to_le_bytes().to_vec(), checksum_offset)
             .await;
         if let Err(e) = r {
+            if e.kind() == io::ErrorKind::StorageFull {
+                self.request_eviction();
+            }
             tracing::warn!(%blob_id, vol, block, error = %e, "failed to write cache checksum");
             return;
         }
@@ -146,6 +332,16 @@ impl DiskCache {
         // Ensure data + checksum are persisted
         if let Err(e) = file.sync_data().await {
             tracing::warn!(%blob_id, vol, block, error = %e, "failed to sync cache file");
+        }
+
+        // Update tracker after successful write
+        if new_block {
+            let new_total = self.tracker.record_insert(blob_id, vol, data.len() as u64);
+            if new_total > self.high_bytes {
+                self.request_eviction();
+            }
+        } else {
+            self.tracker.touch(blob_id, vol);
         }
     }
 
@@ -185,79 +381,29 @@ impl DiskCache {
     }
 
     /// Evict LRU cache files until usage is at or below `target_bytes`.
-    pub async fn evict_to(&self, target_bytes: u64) {
+    /// Runs on a blocking thread pool. The returned handle can be awaited
+    /// when the caller needs to know eviction finished.
+    pub fn evict_to(&self, target_bytes: u64) -> compio_runtime::JoinHandle<()> {
         let cache_dir = self.cache_dir.clone();
-        let _ = compio_runtime::spawn_blocking(move || {
-            use std::os::unix::fs::MetadataExt;
-
-            let entries = match std::fs::read_dir(&cache_dir) {
-                Ok(e) => e,
-                Err(_) => return,
-            };
-
-            // Collect (path, disk_usage, atime)
-            let mut files: Vec<(PathBuf, u64, i64)> = Vec::new();
-            let mut total_usage: u64 = 0;
-
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
-                if let Ok(meta) = std::fs::metadata(&path) {
-                    let disk_bytes = meta.blocks() * 512;
-                    let atime = meta.atime();
-                    total_usage += disk_bytes;
-                    files.push((path, disk_bytes, atime));
-                }
-            }
-
-            if total_usage <= target_bytes {
-                return;
-            }
-
-            // Sort by atime ascending (oldest first = LRU)
-            files.sort_by_key(|f| f.2);
-
-            for (path, disk_bytes, _) in &files {
-                if total_usage <= target_bytes {
-                    break;
-                }
-                if std::fs::remove_file(path).is_ok() {
-                    total_usage = total_usage.saturating_sub(*disk_bytes);
-                    tracing::info!(path = %path.display(), "evicted cache file");
-                }
-            }
+        let tracker = self.tracker.clone();
+        compio_runtime::spawn_blocking(move || {
+            run_eviction(&cache_dir, &tracker, target_bytes);
         })
-        .await;
     }
 
-    /// Get current disk usage of the cache directory in bytes.
-    pub async fn current_usage(&self) -> u64 {
-        let cache_dir = self.cache_dir.clone();
-        compio_runtime::spawn_blocking(move || {
-            use std::os::unix::fs::MetadataExt;
+    /// Get current approximate disk usage of the cache in bytes (O(1)).
+    pub fn current_usage(&self) -> u64 {
+        self.tracker.current_usage()
+    }
 
-            let entries = match std::fs::read_dir(&cache_dir) {
-                Ok(e) => e,
-                Err(_) => return 0,
-            };
-
-            let mut total: u64 = 0;
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file()
-                    && let Ok(meta) = std::fs::metadata(&path)
-                {
-                    total += meta.blocks() * 512;
-                }
-            }
-            total
-        })
-        .await
-        .unwrap_or(0)
+    /// Number of files tracked by the in-memory tracker.
+    #[cfg(test)]
+    fn tracked_file_count(&self) -> usize {
+        self.tracker.len()
     }
 }
+
+// ── Helpers ────────────────────────────────────────────────────────
 
 /// Check if a block is populated (data, not a hole) in the cache file.
 fn is_block_populated(fd: i32, block: u32, block_size: u64) -> bool {
@@ -293,6 +439,80 @@ fn verify_filesystem(path: &Path) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+/// Populate the tracker from existing cache files on startup.
+/// Cold-start files are inserted at the LRU end (oldest = first eviction candidates).
+fn cold_start_scan(cache_dir: &Path, tracker: &CacheTracker) {
+    let entries = match std::fs::read_dir(cache_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let mut count = 0u32;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if let Some((blob_id, vol)) = parse_cache_filename(&path)
+            && let Ok(meta) = std::fs::metadata(&path)
+        {
+            let disk_bytes = meta.blocks() * 512;
+            tracker.insert_cold(blob_id, vol, disk_bytes);
+            count += 1;
+        }
+    }
+    if count > 0 {
+        tracing::info!(
+            count,
+            total_bytes = tracker.current_usage(),
+            "disk cache cold-start scan complete"
+        );
+    }
+}
+
+/// Parse a cache filename (`{uuid_simple}_{vol}`) into its components.
+fn parse_cache_filename(path: &Path) -> Option<(Uuid, u16)> {
+    let name = path.file_name()?.to_str()?;
+    let (blob_str, vol_str) = name.rsplit_once('_')?;
+    let blob_id = Uuid::parse_str(blob_str).ok()?;
+    let vol = vol_str.parse::<u16>().ok()?;
+    Some((blob_id, vol))
+}
+
+/// Evict LRU cache files until usage drops to `target_bytes` or below.
+/// Pops entries from the LRU end in O(1) per file. Each `pop_lru` call
+/// holds the tracker Mutex only for pointer updates (~50ns), then releases
+/// it before the blocking `remove_file` syscall.
+fn run_eviction(cache_dir: &Path, tracker: &CacheTracker, target_bytes: u64) {
+    if tracker.current_usage() <= target_bytes {
+        return;
+    }
+
+    tracing::info!(
+        current_usage = tracker.current_usage(),
+        target_bytes,
+        "disk cache eviction started"
+    );
+
+    let mut evicted = 0u64;
+
+    while tracker.current_usage() > target_bytes {
+        let Some(((blob_id, vol), _disk_bytes)) = tracker.pop_lru() else {
+            break;
+        };
+
+        let path = cache_dir.join(format!("{}_{}", blob_id.as_simple(), vol));
+        let _ = std::fs::remove_file(&path);
+        evicted += 1;
+    }
+
+    tracing::info!(
+        evicted_files = evicted,
+        remaining_bytes = tracker.current_usage(),
+        "disk cache eviction complete"
+    );
 }
 
 #[cfg(test)]
@@ -395,6 +615,9 @@ mod tests {
         assert!(result.is_none());
         assert!(!path.exists());
 
+        // Tracker should also be cleaned up
+        assert_eq!(cache.tracked_file_count(), 0);
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -449,8 +672,12 @@ mod tests {
             cache.insert(blob_id, 1, 0, 8192, &data, checksum).await;
         }
 
-        // Evict to 0 bytes -- should remove everything
-        cache.evict_to(0).await;
+        assert_eq!(cache.tracked_file_count(), 3);
+        assert!(cache.current_usage() > 0);
+
+        // Evict to 0 bytes -- should remove everything.
+        // Await the handle so the test can verify the result.
+        cache.evict_to(0).await.unwrap();
 
         let remaining: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
@@ -459,6 +686,209 @@ mod tests {
             .collect();
         assert!(remaining.is_empty());
 
+        // Tracker should be empty too
+        assert_eq!(cache.tracked_file_count(), 0);
+        assert_eq!(cache.current_usage(), 0);
+
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[compio_macros::test]
+    async fn test_tracker_touch_updates_lru() {
+        let dir = test_cache_dir();
+        let block_size = 8192u64;
+        let cache = DiskCache::new(&dir, 1, block_size).unwrap();
+        let content_length = 3 * block_size;
+
+        // Insert 3 files: blob1, blob2, blob3 (one block each)
+        let blobs: Vec<Uuid> = (1..=3).map(|i| Uuid::from_u128(i)).collect();
+        for (i, blob_id) in blobs.iter().enumerate() {
+            let data = vec![i as u8 + 1; block_size as usize];
+            let checksum = xxhash_rust::xxh3::xxh3_64(&data);
+            cache
+                .insert(*blob_id, 1, 0, content_length, &data, checksum)
+                .await;
+        }
+
+        // Access blob1 via get(), making it most recently used
+        let _ = cache.get(blobs[0], 1, 0, content_length).await;
+
+        // LRU order should have blob2 and blob3 first (older access)
+        let lru = cache.tracker.peek_lru_order();
+        assert_eq!(lru.len(), 3);
+        // blob1 should be last (most recently accessed)
+        assert_eq!(lru[2].0, blobs[0]);
+        // blob2 and blob3 should be first two (order between them
+        // depends on insert order, but both before blob1)
+        let first_two: Vec<Uuid> = lru[..2].iter().map(|e| e.0).collect();
+        assert!(first_two.contains(&blobs[1]));
+        assert!(first_two.contains(&blobs[2]));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[compio_macros::test]
+    async fn test_cold_start_scan() {
+        let dir = test_cache_dir();
+        let block_size = 8192u64;
+        let content_length = 3 * block_size;
+
+        // Phase 1: Create cache files with a DiskCache instance
+        {
+            let cache = DiskCache::new(&dir, 1, block_size).unwrap();
+            for i in 0..3 {
+                let blob_id = Uuid::from_u128(i as u128 + 100);
+                let data = vec![i as u8 + 1; block_size as usize];
+                let checksum = xxhash_rust::xxh3::xxh3_64(&data);
+                cache
+                    .insert(blob_id, 1, 0, content_length, &data, checksum)
+                    .await;
+            }
+            assert_eq!(cache.tracked_file_count(), 3);
+            assert!(cache.current_usage() > 0);
+        }
+
+        // Phase 2: Create a new DiskCache over the same directory.
+        // The cold-start scan should find the 3 existing files.
+        let cache2 = DiskCache::new(&dir, 1, block_size).unwrap();
+        assert_eq!(cache2.tracked_file_count(), 3);
+        assert!(cache2.current_usage() > 0);
+
+        // Cold-start files should have last_access = 0, making them
+        // oldest in LRU order. Verify by inserting a new file and
+        // checking it's last in LRU.
+        let new_blob = Uuid::from_u128(999);
+        let data = vec![77u8; block_size as usize];
+        let checksum = xxhash_rust::xxh3::xxh3_64(&data);
+        cache2
+            .insert(new_blob, 1, 0, content_length, &data, checksum)
+            .await;
+
+        let lru = cache2.tracker.peek_lru_order();
+        assert_eq!(lru.len(), 4);
+        // The new blob should be last (highest access counter)
+        assert_eq!(lru[3].0, new_blob);
+        // All cold-start blobs should be first (last_access = 0)
+        for entry in &lru[..3] {
+            assert_ne!(entry.0, new_blob);
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[compio_macros::test]
+    async fn test_insert_tracks_usage() {
+        let dir = test_cache_dir();
+        let block_size = 8192u64;
+        let cache = DiskCache::new(&dir, 1, block_size).unwrap();
+        let content_length = 3 * block_size;
+
+        assert_eq!(cache.current_usage(), 0);
+
+        let blob_id = Uuid::new_v4();
+        let data = vec![42u8; block_size as usize];
+        let checksum = xxhash_rust::xxh3::xxh3_64(&data);
+        cache
+            .insert(blob_id, 1, 0, content_length, &data, checksum)
+            .await;
+
+        // Usage should be approximately block_size bytes
+        assert!(cache.current_usage() >= block_size);
+        assert_eq!(cache.tracked_file_count(), 1);
+
+        // Insert another block in the same file
+        let data2 = vec![43u8; block_size as usize];
+        let checksum2 = xxhash_rust::xxh3::xxh3_64(&data2);
+        cache
+            .insert(blob_id, 1, 1, content_length, &data2, checksum2)
+            .await;
+
+        // Usage should increase (still 1 file, but more bytes)
+        assert!(cache.current_usage() >= 2 * block_size);
+        assert_eq!(cache.tracked_file_count(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[compio_macros::test]
+    async fn test_reinsert_same_block_no_double_count() {
+        let dir = test_cache_dir();
+        let block_size = 8192u64;
+        let cache = DiskCache::new(&dir, 1, block_size).unwrap();
+        let content_length = 3 * block_size;
+
+        let blob_id = Uuid::new_v4();
+        let data = vec![42u8; block_size as usize];
+        let checksum = xxhash_rust::xxh3::xxh3_64(&data);
+
+        cache
+            .insert(blob_id, 1, 0, content_length, &data, checksum)
+            .await;
+        let usage_after_first = cache.current_usage();
+
+        // Re-insert the same block -- should NOT double-count
+        cache
+            .insert(blob_id, 1, 0, content_length, &data, checksum)
+            .await;
+        let usage_after_second = cache.current_usage();
+
+        assert_eq!(usage_after_first, usage_after_second);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[compio_macros::test]
+    async fn test_evict_respects_lru_order() {
+        let dir = test_cache_dir();
+        let block_size = 8192u64;
+        let cache = DiskCache::new(&dir, 1, block_size).unwrap();
+        let content_length = 3 * block_size;
+
+        // Insert blob1, blob2, blob3 in order
+        let blob1 = Uuid::from_u128(1);
+        let blob2 = Uuid::from_u128(2);
+        let blob3 = Uuid::from_u128(3);
+
+        for blob_id in [blob1, blob2, blob3] {
+            let data = vec![0u8; block_size as usize];
+            let checksum = xxhash_rust::xxh3::xxh3_64(&data);
+            cache
+                .insert(blob_id, 1, 0, content_length, &data, checksum)
+                .await;
+        }
+
+        // Touch blob1 to make it most recently used
+        let _ = cache.get(blob1, 1, 0, content_length).await;
+
+        // Evict enough to remove 1-2 files but not all.
+        // Set target to keep only ~1 file worth of data.
+        let one_file_bytes = cache.current_usage() / 3;
+        cache.evict_to(one_file_bytes).await.unwrap();
+
+        // blob1 should survive (most recently accessed)
+        assert!(
+            cache.cache_file_path(blob1, 1).exists(),
+            "blob1 should survive eviction (most recently accessed)"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_parse_cache_filename() {
+        let uuid = Uuid::from_u128(0x12345678_1234_1234_1234_123456789abc);
+        let path = PathBuf::from(format!("/tmp/cache/{}_{}", uuid.as_simple(), 42));
+        let result = parse_cache_filename(&path);
+        assert_eq!(result, Some((uuid, 42)));
+
+        // Invalid filenames
+        assert_eq!(
+            parse_cache_filename(&PathBuf::from("/tmp/cache/invalid")),
+            None
+        );
+        assert_eq!(
+            parse_cache_filename(&PathBuf::from("/tmp/cache/abc_def")),
+            None
+        );
     }
 }

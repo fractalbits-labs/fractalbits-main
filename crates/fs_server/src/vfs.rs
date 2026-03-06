@@ -819,6 +819,9 @@ impl VfsCore {
     // ── Public VFS operations ──
 
     pub fn vfs_init(&self) {
+        if let Some(dc) = &self.disk_cache {
+            dc.spawn_evictor();
+        }
         tracing::info!("Filesystem initialized");
     }
 

@@ -443,7 +443,7 @@ fn serialize_response(entry: &mut RingEntry, unique: u64, _opcode: u32, result: 
             let out = fuse_open_out {
                 fh: reply.fh,
                 open_flags: reply.flags,
-                backing_id: 0,
+                backing_id: reply.backing_id,
             };
             write_payload_struct(entry, unique, &out);
         }

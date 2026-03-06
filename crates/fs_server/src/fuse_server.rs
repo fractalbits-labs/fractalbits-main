@@ -110,7 +110,11 @@ impl Filesystem for FuseServer {
 
     async fn open(&self, _req: Request, inode: u64, flags: u32) -> FsResult<ReplyOpen> {
         let fh = self.vfs.vfs_open(inode, flags).await.map_err(fs_err)?;
-        Ok(ReplyOpen { fh, flags: 0 })
+        Ok(ReplyOpen {
+            fh,
+            flags: 0,
+            backing_id: 0,
+        })
     }
 
     async fn read(
@@ -228,7 +232,11 @@ impl Filesystem for FuseServer {
 
     async fn opendir(&self, _req: Request, inode: u64, _flags: u32) -> FsResult<ReplyOpen> {
         let fh = self.vfs.vfs_opendir(inode).map_err(fs_err)?;
-        Ok(ReplyOpen { fh, flags: 0 })
+        Ok(ReplyOpen {
+            fh,
+            flags: 0,
+            backing_id: 0,
+        })
     }
 
     async fn readdir(

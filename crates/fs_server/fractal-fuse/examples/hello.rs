@@ -107,7 +107,11 @@ impl Filesystem for HelloFs {
 
     async fn open(&self, _req: Request, inode: u64, _flags: u32) -> FsResult<ReplyOpen> {
         if inode == HELLO_INO {
-            Ok(ReplyOpen { fh: 0, flags: 0 })
+            Ok(ReplyOpen {
+                fh: 0,
+                flags: 0,
+                backing_id: 0,
+            })
         } else {
             Err(ENOENT)
         }
@@ -214,7 +218,11 @@ impl Filesystem for HelloFs {
     }
 
     async fn opendir(&self, _req: Request, _inode: u64, _flags: u32) -> FsResult<ReplyOpen> {
-        Ok(ReplyOpen { fh: 0, flags: 0 })
+        Ok(ReplyOpen {
+            fh: 0,
+            flags: 0,
+            backing_id: 0,
+        })
     }
 
     async fn statfs(&self, _req: Request, _inode: u64) -> FsResult<ReplyStatfs> {

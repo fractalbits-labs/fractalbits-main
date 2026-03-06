@@ -240,6 +240,7 @@ pub struct ReplyAttr {
 pub struct ReplyOpen {
     pub fh: u64,
     pub flags: u32,
+    pub backing_id: i32,
 }
 
 #[derive(Debug)]

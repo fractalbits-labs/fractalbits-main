@@ -13,8 +13,8 @@ fractal-nfs = { path = "fractal-nfs" }
 compio-runtime.workspace = true
 compio-net.workspace = true
 compio-io.workspace = true
-compio-buf = "0.8"
-compio-fs = "0.11"
+compio-buf.workspace = true
+compio-fs.workspace = true
 
 rpc_client_common = { workspace = true, default-features = false, features = ["compio-runtime"] }
 rpc_client_bss = { workspace = true, default-features = false, features = ["compio-runtime"] }
@@ -33,21 +33,21 @@ metrics_wrapper.workspace = true
 prost.workspace = true
 bytes.workspace = true
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber.workspace = true
 thiserror.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rkyv.workspace = true
-moka = { version = "0.12", features = ["sync"] }
+moka = { workspace = true, features = ["sync"] }
 dashmap.workspace = true
 uuid.workspace = true
 config.workspace = true
 rand.workspace = true
 xxhash-rust.workspace = true
 lru.workspace = true
-libc = "0.2"
-nix = { version = "0.31", features = ["fs"] }
+libc.workspace = true
+nix.workspace = true
 
 [dev-dependencies]
-compio-macros = "0.1"
+compio-macros.workspace = true

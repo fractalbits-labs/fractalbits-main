@@ -7,11 +7,11 @@ license = "Apache-2.0"
 repository = "https://github.com/fractalbits-labs/fractalbits-main"
 
 [dependencies]
-compio-runtime = { version = "0.11", features = ["time"] }
-compio-net = "0.11"
-compio-io = "0.9"
-compio-buf = "0.8"
-bytes = "1"
-tracing = "0.1"
-libc = "0.2"
-socket2 = { version = "0.6", features = ["all"] }
+compio-runtime.workspace = true
+compio-net.workspace = true
+compio-io.workspace = true
+compio-buf.workspace = true
+bytes.workspace = true
+tracing.workspace = true
+libc.workspace = true
+socket2.workspace = true

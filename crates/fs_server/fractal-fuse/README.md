@@ -33,13 +33,6 @@ userspace filesystem I/O with zero-copy buffer registration.
 
 ## Usage
 
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-fractal-fuse = "0.2"
-```
-
 Implement the `Filesystem` trait and run a session:
 
 ```rust,no_run

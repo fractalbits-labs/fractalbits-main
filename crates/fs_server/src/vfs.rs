@@ -16,7 +16,7 @@ use data_types::object_layout::{
     MpuState, ObjectCoreMetaData, ObjectLayout, ObjectMetaData, ObjectState,
 };
 pub const TTL: Duration = Duration::from_secs(1);
-pub const DEFAULT_BLOCK_SIZE: u32 = 1024 * 1024 - 256;
+pub const DEFAULT_BLOCK_SIZE: u32 = 128 * 1024;
 
 /// Protocol-agnostic file/directory attributes.
 #[derive(Debug, Clone, Copy)]

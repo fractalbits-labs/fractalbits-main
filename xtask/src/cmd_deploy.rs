@@ -4,6 +4,7 @@ mod build;
 mod common;
 mod create_cluster;
 pub mod gcp;
+pub mod oci;
 mod upload;
 
 pub use build::build;

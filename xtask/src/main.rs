@@ -381,6 +381,18 @@ pub enum DeployCommand {
 
         #[clap(
             long,
+            long_help = "OCI compartment OCID (overrides OCI_COMPARTMENT_OCID env var)"
+        )]
+        oci_compartment: Option<String>,
+
+        #[clap(
+            long,
+            long_help = "OCI region (overrides OCI_REGION env var, default: us-ashburn-1)"
+        )]
+        oci_region: Option<String>,
+
+        #[clap(
+            long,
             value_enum,
             long_help = "BSS storage allocation mode (sparse, reserve_space, write_zero)",
             default_value = "write_zero"
@@ -393,7 +405,7 @@ pub enum DeployCommand {
         #[clap(
             long,
             value_enum,
-            long_help = "Cloud provider (aws or gcp)",
+            long_help = "Cloud provider (aws, gcp, or oci)",
             default_value = "aws"
         )]
         target: CloudProvider,
@@ -406,6 +418,18 @@ pub enum DeployCommand {
             long_help = "GCP zone (overrides GCP_ZONE env var, default: us-central1-a)"
         )]
         gcp_zone: Option<String>,
+
+        #[clap(
+            long,
+            long_help = "OCI compartment OCID (overrides OCI_COMPARTMENT_OCID env var)"
+        )]
+        oci_compartment: Option<String>,
+
+        #[clap(
+            long,
+            long_help = "OCI region (overrides OCI_REGION env var, default: us-ashburn-1)"
+        )]
+        oci_region: Option<String>,
 
         #[clap(
             long,
@@ -514,6 +538,7 @@ pub enum CloudProvider {
     #[default]
     Aws,
     Gcp,
+    Oci,
 }
 
 #[derive(AsRefStr, EnumString, Copy, Clone, Default, PartialEq, clap::ValueEnum)]
@@ -902,6 +927,8 @@ async fn main() -> CmdResult {
                 deploy_os,
                 gcp_project,
                 gcp_zone,
+                oci_compartment,
+                oci_region,
                 bss_storage_alloc_mode,
             } => {
                 let vpc_config = cmd_deploy::VpcConfig {
@@ -926,23 +953,29 @@ async fn main() -> CmdResult {
                     deploy_os,
                     gcp_project,
                     gcp_zone,
+                    oci_compartment,
+                    oci_region,
                     bss_storage_alloc_mode,
                 };
                 match target {
                     CloudProvider::Aws => cmd_deploy::aws::create_vpc(vpc_config)?,
                     CloudProvider::Gcp => cmd_deploy::gcp::create_vpc(vpc_config)?,
+                    CloudProvider::Oci => cmd_deploy::oci::create_vpc(vpc_config)?,
                 }
             }
             DeployCommand::DestroyVpc {
                 target,
                 gcp_project,
                 gcp_zone,
+                oci_compartment,
+                oci_region,
                 delete_project,
             } => match target {
                 CloudProvider::Aws => cmd_deploy::aws::destroy_vpc()?,
                 CloudProvider::Gcp => {
                     cmd_deploy::gcp::destroy_vpc(gcp_project, gcp_zone, delete_project)?
                 }
+                CloudProvider::Oci => cmd_deploy::oci::destroy_vpc(oci_compartment, oci_region)?,
             },
             DeployCommand::BootstrapProgress {
                 target,

@@ -191,6 +191,7 @@ fn build_terraform_vars(
             RssBackend::Etcd => "etcd",
             RssBackend::Ddb => "ddb",
             RssBackend::Firestore => "firestore",
+            RssBackend::OciNosql => "oci_nosql",
         },
     );
     if config.with_bench {

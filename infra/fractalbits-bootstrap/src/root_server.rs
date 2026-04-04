@@ -337,6 +337,10 @@ fn initialize_observer_state(
             "observer_state",
             &fields_json,
         )?;
+    } else if config.is_oci_nosql_backend() {
+        let escaped = observer_state_json.replace('"', r#"\""#);
+        let row_json = format!(r#"{{"id":"observer_state","value":"{escaped}","version":1}}"#);
+        crate::oci::oci_nosql_put_row(config, "fractalbits-service-discovery", &row_json)?;
     } else {
         let region = get_current_aws_region()?;
         // Escape JSON for DynamoDB attribute value
@@ -385,6 +389,18 @@ fn initialize_bss_volume_groups(
             .collect()
     } else if config.is_firestore_backend() {
         info!("Getting BSS nodes from bootstrap config...");
+        // Wait for BSS nodes to complete instances-ready stage via workflow
+        info!("Waiting for {total_bss_nodes} BSS node(s) to be ready...");
+        MetadataVgReadyStage::wait_for_instances_ready(barrier, total_bss_nodes + 1)
+            .unwrap_or_default(); // Best effort - RSS already counted
+        let bss_ips = get_service_ips_with_backend(config, "bss-server", total_bss_nodes);
+        bss_ips
+            .into_iter()
+            .enumerate()
+            .map(|(i, ip)| (format!("bss-{}", i + 1), ip))
+            .collect()
+    } else if config.is_oci_nosql_backend() {
+        info!("Getting BSS nodes from workflow stage completions...");
         // Wait for BSS nodes to complete instances-ready stage via workflow
         info!("Waiting for {total_bss_nodes} BSS node(s) to be ready...");
         MetadataVgReadyStage::wait_for_instances_ready(barrier, total_bss_nodes + 1)
@@ -478,6 +494,20 @@ fn initialize_bss_volume_groups(
             BSS_METADATA_VG_CONFIG_KEY,
             &meta_fields,
         )?;
+    } else if config.is_oci_nosql_backend() {
+        let data_escaped = bss_data_vg_config_json
+            .replace('"', r#"\""#)
+            .replace('\n', "");
+        let data_row =
+            format!(r#"{{"id":"bss-data-vg-config","value":"{data_escaped}","version":1}}"#);
+        crate::oci::oci_nosql_put_row(config, "fractalbits-service-discovery", &data_row)?;
+
+        let meta_escaped = bss_metadata_vg_config_json
+            .replace('"', r#"\""#)
+            .replace('\n', "");
+        let meta_row =
+            format!(r#"{{"id":"bss-metadata-vg-config","value":"{meta_escaped}","version":1}}"#);
+        crate::oci::oci_nosql_put_row(config, "fractalbits-service-discovery", &meta_row)?;
     } else {
         let region = get_current_aws_region()?;
         let bss_data_vg_config_item = format!(
@@ -654,6 +684,12 @@ fn initialize_az_status(config: &BootstrapConfig, remote_az: &str) -> CmdResult 
         let az_status_json =
             format!(r#"{{"status":{{"{local_az}":"Normal","{remote_az}":"Normal"}}}}"#);
         run_cmd!($etcdctl --endpoints=$etcd_endpoints put $key $az_status_json >/dev/null)?;
+    } else if config.is_oci_nosql_backend() {
+        let az_status_json =
+            format!(r#"{{"status":{{"{local_az}":"Normal","{remote_az}":"Normal"}}}}"#);
+        let escaped = az_status_json.replace('"', r#"\""#);
+        let row_json = format!(r#"{{"id":"az_status","value":"{escaped}","version":1}}"#);
+        crate::oci::oci_nosql_put_row(config, "fractalbits-service-discovery", &row_json)?;
     } else {
         let region = get_current_aws_region()?;
         let az_status_item = format!(
@@ -744,6 +780,8 @@ fn create_rss_config(config: &BootstrapConfig, nss_endpoint: &str, ha_enabled: b
         "etcd"
     } else if config.is_firestore_backend() {
         "firestore"
+    } else if config.is_oci_nosql_backend() {
+        "oci_nosql"
     } else {
         "ddb"
     };
@@ -758,6 +796,9 @@ fn create_rss_config(config: &BootstrapConfig, nss_endpoint: &str, ha_enabled: b
         format!(
             "\n# Firestore configuration\nfirestore_project_id = \"{project_id}\"\nfirestore_database_id = \"{database_id}\""
         )
+    } else if config.is_oci_nosql_backend() {
+        let compartment = &config.oci.as_ref().unwrap().compartment_ocid;
+        format!("\n# OCI NoSQL configuration\noci_nosql_compartment = \"{compartment}\"")
     } else {
         String::new()
     };

@@ -53,6 +53,11 @@ pub fn get_volume_dev(volume_id: &str) -> String {
     if let Some(device_name) = volume_id.strip_prefix("gcp:") {
         return format!("/dev/disk/by-id/google-{device_name}");
     }
+    // OCI block volume: paravirtualized attachment uses /dev/oracleoci/oraclevd{x}
+    // The journal volume is the first non-boot attachment (typically oraclevdb)
+    if volume_id.strip_prefix("oci:").is_some() {
+        return "/dev/oracleoci/oraclevdb".to_string();
+    }
     // AWS EBS: sanitize vol-07451bc901d5e1e09 → vol07451bc901d5e1e09
     let volume_id = &volume_id.replace("-", "");
     format!("/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_{volume_id}")

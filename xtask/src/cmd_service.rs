@@ -242,6 +242,9 @@ pub fn init_service(
                     init_firestore()?;
                 }
             }
+            RssBackend::OciNosql => {
+                // OCI NoSQL has no local emulator to start
+            }
         }
 
         // Start RSS service since admin now connects via RPC
@@ -259,6 +262,7 @@ pub fn init_service(
             RssBackend::Ddb => stop_service(ServiceName::DdbLocal)?,
             RssBackend::Etcd => stop_service(ServiceName::Etcd)?,
             RssBackend::Firestore => stop_service(ServiceName::FirestoreEmulator)?,
+            RssBackend::OciNosql => {} // No local service to stop
         }
         Ok(())
     };
@@ -716,9 +720,10 @@ fn all_services(
     sort: bool,
 ) -> Vec<ServiceName> {
     let rss_backend_service = match rss_backend {
-        RssBackend::Ddb => ServiceName::DdbLocal,
-        RssBackend::Etcd => ServiceName::Etcd,
-        RssBackend::Firestore => ServiceName::FirestoreEmulator,
+        RssBackend::Ddb => Some(ServiceName::DdbLocal),
+        RssBackend::Etcd => Some(ServiceName::Etcd),
+        RssBackend::Firestore => Some(ServiceName::FirestoreEmulator),
+        RssBackend::OciNosql => None, // No local backend service
     };
     // Mirrord service is only needed for NVMe journal or S3ExpressMultiAz
     let with_mirrord =
@@ -776,7 +781,9 @@ fn all_services(
             services
         }
     };
-    services.push(rss_backend_service);
+    if let Some(svc) = rss_backend_service {
+        services.push(svc);
+    }
     if sort {
         services.sort_by_key(|s| s.as_ref().to_string());
     }
@@ -788,6 +795,8 @@ fn get_rss_backend_setting() -> RssBackend {
         RssBackend::Etcd
     } else if run_cmd!(grep -q "RSS_BACKEND=firestore" data/etc/rss.service &>/dev/null).is_ok() {
         RssBackend::Firestore
+    } else if run_cmd!(grep -q "RSS_BACKEND=oci_nosql" data/etc/rss.service &>/dev/null).is_ok() {
+        RssBackend::OciNosql
     } else {
         RssBackend::Ddb
     }
@@ -1026,6 +1035,9 @@ fn start_all_services() -> CmdResult {
             start_service(ServiceName::FirestoreEmulator)?;
             // Firestore emulator is in-memory only, so re-seed data on every start
             seed_firestore_emulator()?;
+        }
+        RssBackend::OciNosql => {
+            info!("OCI NoSQL backend - no local supporting service to start");
         }
     }
 
@@ -1338,6 +1350,7 @@ Environment="MINIO_REGION=localdev""##
             RssBackend::Firestore => {
                 "After=firestore_emulator.service\nWants=firestore_emulator.service\n".to_string()
             }
+            RssBackend::OciNosql => String::new(), // No local dependency
         },
         ServiceName::ApiServer => {
             match init_config.data_blob_storage {
@@ -1593,6 +1606,10 @@ fn register_local_api_server() -> CmdResult {
                     -d $doc_json
                     >/dev/null
             ).ok(); // Ignore error if already exists
+        }
+        RssBackend::OciNosql => {
+            // TODO: OCI NoSQL service discovery registration
+            info!("OCI NoSQL service discovery registration not yet implemented for local dev");
         }
     }
 

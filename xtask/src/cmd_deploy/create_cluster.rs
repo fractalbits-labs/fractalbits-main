@@ -301,6 +301,7 @@ impl InputClusterConfig {
             global,
             aws: None,
             gcp: None,
+            oci: None,
             endpoints: Some(endpoints),
             resources,
             etcd,

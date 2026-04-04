@@ -55,12 +55,14 @@ fn create_etcd_register_service(
         DeployTarget::OnPrem => "hostname".to_string(),
         DeployTarget::Aws => "ec2-metadata -i | awk '{print $2}'".to_string(),
         DeployTarget::Gcp => "curl -sf -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/name".to_string(),
+        DeployTarget::Oci => "curl -sf -H 'Authorization: Bearer Oracle' http://169.254.169.254/opc/v2/instance/displayName".to_string(),
     };
 
     let get_private_ip_cmd = match config.global.deploy_target {
         DeployTarget::OnPrem => "hostname -I | awk '{print $1}'".to_string(),
         DeployTarget::Aws => "ec2-metadata -o | awk '{print $2}'".to_string(),
         DeployTarget::Gcp => "curl -sf -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/ip".to_string(),
+        DeployTarget::Oci => "curl -sf -H 'Authorization: Bearer Oracle' http://169.254.169.254/opc/v2/vnics/0/privateIp".to_string(),
     };
 
     let systemd_unit_content = format!(
@@ -136,6 +138,7 @@ fn create_etcd_deregister_service(
         DeployTarget::OnPrem => "hostname".to_string(),
         DeployTarget::Aws => "ec2-metadata -i | awk '{print $2}'".to_string(),
         DeployTarget::Gcp => "curl -sf -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/name".to_string(),
+        DeployTarget::Oci => "curl -sf -H 'Authorization: Bearer Oracle' http://169.254.169.254/opc/v2/instance/displayName".to_string(),
     };
 
     let systemd_unit_content = format!(

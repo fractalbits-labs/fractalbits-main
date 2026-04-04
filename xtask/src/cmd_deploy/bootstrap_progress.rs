@@ -13,6 +13,7 @@ const TIMEOUT_SECS: u64 = 1500; // 25 minutes (storage_alloc_mode=.write_zero is
 enum CloudAccess {
     AwsS3 { bucket: String },
     Gcs { bucket: String },
+    Oci { bucket: String },
 }
 
 impl CloudAccess {
@@ -28,6 +29,16 @@ impl CloudAccess {
         })
     }
 
+    fn for_oci(oci_compartment: Option<&str>) -> Result<Self, Error> {
+        let compartment = super::oci::resolve_oci_compartment(oci_compartment)?;
+        Ok(Self::Oci {
+            bucket: format!(
+                "fractalbits-deploy-staging-{}",
+                &compartment[..12.min(compartment.len())]
+            ),
+        })
+    }
+
     fn download(&self, key: &str) -> Result<String, Error> {
         match self {
             Self::AwsS3 { bucket } => {
@@ -37,6 +48,9 @@ impl CloudAccess {
             Self::Gcs { bucket } => {
                 let gs_path = format!("gs://{bucket}/{key}");
                 run_fun!(gcloud storage cat $gs_path 2>/dev/null)
+            }
+            Self::Oci { bucket } => {
+                run_fun!(oci os object get --bucket-name $bucket --name $key --file /dev/stdout 2>/dev/null)
             }
         }
     }
@@ -50,6 +64,9 @@ impl CloudAccess {
             Self::Gcs { bucket } => {
                 let gs_prefix = format!("gs://{bucket}/{prefix}**");
                 run_fun!(gcloud storage ls $gs_prefix 2>/dev/null).unwrap_or_default()
+            }
+            Self::Oci { bucket } => {
+                run_fun!(oci os object list --bucket-name $bucket --prefix $prefix --all 2>/dev/null).unwrap_or_default()
             }
         }
     }
@@ -74,7 +91,7 @@ impl StageCache {
     fn fetch(access: &CloudAccess, cluster_id: &str) -> Self {
         let prefix = format!("workflow/{cluster_id}/stages/");
         let output = access.list_recursive(&prefix);
-        let is_gcs = matches!(access, CloudAccess::Gcs { .. });
+        let is_gcs = matches!(access, CloudAccess::Gcs { .. } | CloudAccess::Oci { .. });
         let lines = output.lines().map(|s| s.to_string()).collect();
         Self { lines, is_gcs }
     }
@@ -120,6 +137,15 @@ pub fn show_progress_with_bucket(
                 }
             } else {
                 CloudAccess::for_gcp(gcp_project)?
+            }
+        }
+        DeployTarget::Oci => {
+            if let Some(bucket) = gcs_bucket {
+                CloudAccess::Oci {
+                    bucket: bucket.to_string(),
+                }
+            } else {
+                CloudAccess::for_oci(None)?
             }
         }
         DeployTarget::OnPrem => {

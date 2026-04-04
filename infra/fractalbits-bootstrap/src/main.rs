@@ -11,6 +11,7 @@ mod etcd_server;
 mod gcp;
 mod gui_server;
 mod nss_server;
+mod oci;
 mod root_server;
 mod stage_helpers;
 mod workflow;

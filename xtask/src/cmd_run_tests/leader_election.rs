@@ -12,6 +12,7 @@ pub fn run_leader_election_tests(backend: RssBackend) -> CmdResult {
         RssBackend::Ddb => "DynamoDB",
         RssBackend::Etcd => "etcd",
         RssBackend::Firestore => "Firestore",
+        RssBackend::OciNosql => "OCI NoSQL",
     };
     info!("Running leader election tests with {backend_name} backend...");
 
@@ -179,6 +180,10 @@ fn setup_test_table(table_name: &str, backend: RssBackend) -> CmdResult {
             run_cmd! { ignore curl -sf -X DELETE $url >/dev/null; }?;
             sleep(Duration::from_secs(1));
         }
+        RssBackend::OciNosql => {
+            // TODO: OCI NoSQL test table setup
+            sleep(Duration::from_secs(1));
+        }
     }
     Ok(())
 }
@@ -210,6 +215,9 @@ fn cleanup_test_table(table_name: &str, backend: RssBackend) -> CmdResult {
             let url = firestore_leader_doc_url();
             run_cmd! { ignore curl -sf -X DELETE $url >/dev/null; }?;
         }
+        RssBackend::OciNosql => {
+            // TODO: OCI NoSQL test table cleanup
+        }
     }
     Ok(())
 }
@@ -219,6 +227,7 @@ fn get_current_leader(table_name: &str, backend: RssBackend) -> Option<String> {
         RssBackend::Ddb => get_current_leader_ddb(table_name),
         RssBackend::Etcd => get_current_leader_etcd(table_name),
         RssBackend::Firestore => get_current_leader_firestore(),
+        RssBackend::OciNosql => None, // TODO: OCI NoSQL leader query
     }
 }
 
@@ -616,6 +625,10 @@ fn test_fence_token_prevents_split_brain(backend: RssBackend) -> CmdResult {
             )
             .expect("Failed to create manual leader in Firestore");
         }
+        RssBackend::OciNosql => {
+            // TODO: OCI NoSQL manual leader creation for fence token test
+            unimplemented!("OCI NoSQL fence token test not yet implemented");
+        }
     }
 
     // Try to start an instance - it should not become leader due to fence token
@@ -709,6 +722,10 @@ fn test_clock_skew_detection(backend: RssBackend) -> CmdResult {
             )
             .expect("Failed to create skewed leader in Firestore");
         }
+        RssBackend::OciNosql => {
+            // TODO: OCI NoSQL skewed leader creation for clock skew test
+            unimplemented!("OCI NoSQL clock skew test not yet implemented");
+        }
     }
 
     // Start an instance - it should detect clock skew
@@ -754,11 +771,12 @@ fn start_test_root_server_instance(
         RssBackend::Ddb => "ddb",
         RssBackend::Etcd => "etcd",
         RssBackend::Firestore => "firestore",
+        RssBackend::OciNosql => "oci_nosql",
     };
 
     // For etcd, use the key prefix instead of table name
     let leader_table_or_prefix = match backend {
-        RssBackend::Ddb | RssBackend::Firestore => table_name.to_string(),
+        RssBackend::Ddb | RssBackend::Firestore | RssBackend::OciNosql => table_name.to_string(),
         RssBackend::Etcd => {
             get_etcd_key_prefix(table_name.trim_start_matches("fractalbits-leader-election-test-"))
         }
@@ -881,6 +899,7 @@ fn test_manual_leadership_resignation(backend: RssBackend) -> CmdResult {
         RssBackend::Ddb => "DDB",
         RssBackend::Etcd => "etcd",
         RssBackend::Firestore => "Firestore",
+        RssBackend::OciNosql => "OCI NoSQL",
     };
 
     // Note: We expect either the second instance to be leader, or no leader (if the second instance

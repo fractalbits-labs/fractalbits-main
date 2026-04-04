@@ -28,7 +28,7 @@ pub enum ServiceType {
 /// Each instance gets its role via `--role` (and optional sub-args) in UserData/startup-script.
 #[derive(Debug, Parser)]
 pub struct CliArgs {
-    /// Bucket URI (s3:// or gs://) — positional, always first
+    /// Bucket URI (s3://, gs://, or oci://) — positional, always first
     pub bucket_uri: String,
 
     /// Service role: root_server, nss_server, api_server, bss_server, gui_server,

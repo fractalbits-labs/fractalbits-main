@@ -297,6 +297,24 @@ fn parse_listing_filenames(output: &str, deploy_target: DeployTarget) -> Vec<Str
             })
             .filter(|s| !s.is_empty())
             .collect(),
+        DeployTarget::Oci => {
+            // OCI `oci os object list` returns JSON: {"data": [{"name": "path/to/file"}, ...]}
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(output) {
+                parsed["data"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|obj| obj["name"].as_str())
+                            .filter_map(|name| name.rsplit('/').next())
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            }
+        }
         _ => {
             // AWS S3 listing: "2024-01-01 00:00:00    123 filename.json"
             output

@@ -81,7 +81,7 @@ fn get_observer_state(backend: RssBackend) -> Option<ObserverPersistentState> {
     match backend {
         RssBackend::Etcd => get_observer_state_from_etcd(),
         RssBackend::Ddb => get_observer_state_from_ddb(),
-        RssBackend::Firestore => get_observer_state_from_firestore(),
+        RssBackend::Firestore | RssBackend::OciNosql => get_observer_state_from_firestore(),
     }
 }
 

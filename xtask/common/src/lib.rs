@@ -137,6 +137,7 @@ pub enum DeployTarget {
     #[default]
     Aws,
     Gcp,
+    Oci,
 }
 
 #[derive(
@@ -224,6 +225,7 @@ pub enum RssBackend {
     #[default]
     Ddb,
     Firestore,
+    OciNosql,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, strum::AsRefStr, clap::ValueEnum)]
@@ -333,6 +335,20 @@ pub struct ClusterGcpConfig {
     pub firestore_database: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterOciConfig {
+    pub tenancy_ocid: String,
+    pub compartment_ocid: String,
+    pub region: String,
+    pub availability_domain: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_ad: Option<String>,
+    pub vcn_id: String,
+    pub subnet_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nosql_compartment: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ClusterEndpointsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -368,6 +384,8 @@ pub struct BootstrapClusterConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gcp: Option<ClusterGcpConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oci: Option<ClusterOciConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoints: Option<ClusterEndpointsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resources: Option<ClusterResourcesConfig>,
@@ -394,6 +412,10 @@ impl BootstrapClusterConfig {
 
     pub fn is_firestore_backend(&self) -> bool {
         self.global.rss_backend == RssBackend::Firestore
+    }
+
+    pub fn is_oci_nosql_backend(&self) -> bool {
+        self.global.rss_backend == RssBackend::OciNosql
     }
 
     /// Returns the S3/GCS URI for downloading binaries and config.

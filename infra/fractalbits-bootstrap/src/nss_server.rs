@@ -167,14 +167,18 @@ pub fn bootstrap(
             nvme_journal::format()?;
         }
         JournalType::Ebs => {
-            // On GCP, the pd_ssd journal disk is pre-attached as device "nss-journal".
-            // No volume_id is passed via CLI; use the fixed GCP device name instead.
-            let gcp_default;
+            // On GCP/OCI, the journal disk is pre-attached as a named device.
+            // No volume_id is passed via CLI; use the fixed device name instead.
+            let cloud_default;
             let volume_id = match volume_id {
                 Some(v) => v,
                 None if config.global.deploy_target == DeployTarget::Gcp => {
-                    gcp_default = "gcp:nss-journal".to_string();
-                    &gcp_default
+                    cloud_default = "gcp:nss-journal".to_string();
+                    &cloud_default
+                }
+                None if config.global.deploy_target == DeployTarget::Oci => {
+                    cloud_default = "oci:nss-journal".to_string();
+                    &cloud_default
                 }
                 None => {
                     return Err(Error::other("volume_id required for ebs journal type"));
@@ -290,13 +294,17 @@ fn setup_configs(
     // For NVMe: journal at /data/local/journal/
     let (volume_dev, shared_dir) = match journal_type {
         JournalType::Ebs => {
-            // On GCP, pd_ssd is pre-attached as "nss-journal"; no volume_id from CLI.
-            let gcp_default;
+            // On GCP/OCI, journal disk is pre-attached as a named device; no volume_id from CLI.
+            let cloud_default;
             let vid = match volume_id {
                 Some(v) => v,
                 None if config.global.deploy_target == DeployTarget::Gcp => {
-                    gcp_default = "gcp:nss-journal".to_string();
-                    &gcp_default
+                    cloud_default = "gcp:nss-journal".to_string();
+                    &cloud_default
+                }
+                None if config.global.deploy_target == DeployTarget::Oci => {
+                    cloud_default = "oci:nss-journal".to_string();
+                    &cloud_default
                 }
                 None => return Err(Error::other("volume_id required for EBS")),
             };

@@ -72,7 +72,7 @@ pub fn common_setup(target: DeployTarget) -> CmdResult {
             crate::aws::install_cloudwatch_agent(os)?;
             install_packages(&[perf_pkg, "lldb"])?;
         }
-        DeployTarget::OnPrem | DeployTarget::Gcp => {
+        DeployTarget::OnPrem | DeployTarget::Gcp | DeployTarget::Oci => {
             install_packages(&[perf_pkg, "lldb"])?;
         }
     }
@@ -96,6 +96,7 @@ fn download_binary(config: &BootstrapConfig, file_name: &str) -> CmdResult {
     // - AWS CPU-specific binaries: {bucket}/{arch}/{cpu}/{binary}
     let cloud_path = if config.global.deploy_target == DeployTarget::OnPrem
         || config.global.deploy_target == DeployTarget::Gcp
+        || config.global.deploy_target == DeployTarget::Oci
         || config.global.use_generic_binaries
         || SHARED_BINARIES.contains(&file_name)
     {
@@ -303,6 +304,7 @@ pub fn get_instance_id(deploy_target: DeployTarget) -> FunResult {
         DeployTarget::OnPrem => run_fun!(hostname),
         DeployTarget::Aws => crate::aws::get_aws_instance_id(),
         DeployTarget::Gcp => crate::gcp::get_gcp_instance_id(),
+        DeployTarget::Oci => oci_imds_get("instance/displayName"),
     }
 }
 
@@ -311,7 +313,15 @@ pub fn get_private_ip(deploy_target: DeployTarget) -> FunResult {
         DeployTarget::OnPrem => run_fun!(hostname -I | awk r"{print $1}"),
         DeployTarget::Aws => crate::aws::get_aws_private_ip(),
         DeployTarget::Gcp => crate::gcp::get_gcp_private_ip(),
+        DeployTarget::Oci => oci_imds_get("vnics/0/privateIp"),
     }
+}
+
+/// Fetch a value from the OCI Instance Metadata Service (IMDS v2).
+fn oci_imds_get(path: &str) -> FunResult {
+    let auth_header = "Authorization: Bearer Oracle";
+    let url = format!("http://169.254.169.254/opc/v2/{path}");
+    run_fun!(curl -sf -H $auth_header $url)
 }
 
 pub fn get_private_ip_from_config(config: &BootstrapConfig, instance_id: &str) -> FunResult {
@@ -519,6 +529,8 @@ pub fn register_service(config: &BootstrapConfig, service_id: &str) -> CmdResult
         crate::etcd::create_etcd_register_and_deregister_service(config, service_id)
     } else if config.is_firestore_backend() {
         crate::gcp::create_firestore_register_and_deregister_service(config, service_id)
+    } else if config.is_oci_nosql_backend() {
+        crate::oci::create_oci_nosql_register_and_deregister_service(config, service_id)
     } else {
         crate::aws::create_ddb_register_and_deregister_service(service_id)
     }
@@ -534,6 +546,8 @@ pub fn get_service_ips_with_backend(
         crate::etcd::get_service_ips_etcd(&endpoints, service_id, expected_count)
     } else if config.is_firestore_backend() {
         crate::gcp::get_service_ips_firestore(config, service_id, expected_count)
+    } else if config.is_oci_nosql_backend() {
+        crate::oci::get_service_ips_oci_nosql(config, service_id, expected_count)
     } else {
         crate::aws::get_service_ips(service_id, expected_count)
     }

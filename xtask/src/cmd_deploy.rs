@@ -1,3 +1,4 @@
+pub mod alicloud;
 pub mod aws;
 pub mod bootstrap_progress;
 mod build;

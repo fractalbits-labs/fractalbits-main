@@ -381,6 +381,18 @@ pub enum DeployCommand {
 
         #[clap(
             long,
+            long_help = "Alicloud region (overrides ALICLOUD_REGION env var, default: cn-shanghai)"
+        )]
+        alicloud_region: Option<String>,
+
+        #[clap(
+            long,
+            long_help = "Alicloud zone (overrides ALICLOUD_ZONE env var, default: {region}-b)"
+        )]
+        alicloud_zone: Option<String>,
+
+        #[clap(
+            long,
             value_enum,
             long_help = "BSS storage allocation mode (sparse, reserve_space, write_zero)",
             default_value = "write_zero"
@@ -406,6 +418,18 @@ pub enum DeployCommand {
             long_help = "GCP zone (overrides GCP_ZONE env var, default: us-central1-a)"
         )]
         gcp_zone: Option<String>,
+
+        #[clap(
+            long,
+            long_help = "Alicloud region (overrides ALICLOUD_REGION env var, default: cn-shanghai)"
+        )]
+        alicloud_region: Option<String>,
+
+        #[clap(
+            long,
+            long_help = "Alicloud zone (overrides ALICLOUD_ZONE env var, default: {region}-b)"
+        )]
+        alicloud_zone: Option<String>,
 
         #[clap(
             long,
@@ -514,6 +538,7 @@ pub enum CloudProvider {
     #[default]
     Aws,
     Gcp,
+    Alicloud,
 }
 
 #[derive(AsRefStr, EnumString, Copy, Clone, Default, PartialEq, clap::ValueEnum)]
@@ -902,6 +927,8 @@ async fn main() -> CmdResult {
                 deploy_os,
                 gcp_project,
                 gcp_zone,
+                alicloud_region,
+                alicloud_zone,
                 bss_storage_alloc_mode,
             } => {
                 let vpc_config = cmd_deploy::VpcConfig {
@@ -926,22 +953,30 @@ async fn main() -> CmdResult {
                     deploy_os,
                     gcp_project,
                     gcp_zone,
+                    alicloud_region,
+                    alicloud_zone,
                     bss_storage_alloc_mode,
                 };
                 match target {
                     CloudProvider::Aws => cmd_deploy::aws::create_vpc(vpc_config)?,
                     CloudProvider::Gcp => cmd_deploy::gcp::create_vpc(vpc_config)?,
+                    CloudProvider::Alicloud => cmd_deploy::alicloud::create_vpc(vpc_config)?,
                 }
             }
             DeployCommand::DestroyVpc {
                 target,
                 gcp_project,
                 gcp_zone,
+                alicloud_region,
+                alicloud_zone,
                 delete_project,
             } => match target {
                 CloudProvider::Aws => cmd_deploy::aws::destroy_vpc()?,
                 CloudProvider::Gcp => {
                     cmd_deploy::gcp::destroy_vpc(gcp_project, gcp_zone, delete_project)?
+                }
+                CloudProvider::Alicloud => {
+                    cmd_deploy::alicloud::destroy_vpc(alicloud_region, alicloud_zone)?
                 }
             },
             DeployCommand::BootstrapProgress {

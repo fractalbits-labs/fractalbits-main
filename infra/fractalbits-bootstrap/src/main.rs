@@ -1,3 +1,4 @@
+mod alicloud;
 mod api_server;
 mod aws;
 mod bench_client;

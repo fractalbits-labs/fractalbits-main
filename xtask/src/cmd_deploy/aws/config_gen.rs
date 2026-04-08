@@ -61,6 +61,7 @@ pub fn generate_bootstrap_config(vpc_config: &VpcConfig) -> Result<BootstrapClus
         },
         aws: Some(aws_config),
         gcp: None,
+        alicloud: None,
         endpoints: None,
         resources: None,
         etcd: if vpc_config.rss_backend == crate::RssBackend::Etcd {

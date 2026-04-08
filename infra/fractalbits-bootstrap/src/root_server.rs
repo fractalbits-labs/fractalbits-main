@@ -758,6 +758,17 @@ fn create_rss_config(config: &BootstrapConfig, nss_endpoint: &str, ha_enabled: b
         format!(
             "\n# Firestore configuration\nfirestore_project_id = \"{project_id}\"\nfirestore_database_id = \"{database_id}\""
         )
+    } else if config.global.deploy_target == DeployTarget::Alicloud
+        && config.global.rss_backend == xtask_common::RssBackend::Ddb
+    {
+        // Alicloud uses PolarDB for DynamoDB-compatible API; configure the endpoint
+        if let Some(alicloud) = &config.alicloud
+            && let Some(endpoint) = &alicloud.polardb_ddb_endpoint
+        {
+            format!("\n# PolarDB-DDB endpoint for Alicloud\nddb_endpoint = \"{endpoint}\"")
+        } else {
+            String::new()
+        }
     } else {
         String::new()
     };

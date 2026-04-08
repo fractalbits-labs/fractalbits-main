@@ -137,6 +137,7 @@ pub enum DeployTarget {
     #[default]
     Aws,
     Gcp,
+    Alicloud,
 }
 
 #[derive(
@@ -333,6 +334,17 @@ pub struct ClusterGcpConfig {
     pub firestore_database: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterAlicloudConfig {
+    pub region: String,
+    pub zone_id: String,
+    pub vpc_id: String,
+    pub vswitch_id: String,
+    pub security_group_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polardb_ddb_endpoint: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ClusterEndpointsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -367,6 +379,8 @@ pub struct BootstrapClusterConfig {
     pub aws: Option<ClusterAwsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gcp: Option<ClusterGcpConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alicloud: Option<ClusterAlicloudConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoints: Option<ClusterEndpointsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -13,6 +13,7 @@ const TIMEOUT_SECS: u64 = 1500; // 25 minutes (storage_alloc_mode=.write_zero is
 enum CloudAccess {
     AwsS3 { bucket: String },
     Gcs { bucket: String },
+    Alicloud { bucket: String },
 }
 
 impl CloudAccess {
@@ -28,6 +29,12 @@ impl CloudAccess {
         })
     }
 
+    fn for_alicloud(region: &str) -> Self {
+        Self::Alicloud {
+            bucket: format!("fractalbits-deploy-{region}"),
+        }
+    }
+
     fn download(&self, key: &str) -> Result<String, Error> {
         match self {
             Self::AwsS3 { bucket } => {
@@ -37,6 +44,10 @@ impl CloudAccess {
             Self::Gcs { bucket } => {
                 let gs_path = format!("gs://{bucket}/{key}");
                 run_fun!(gcloud storage cat $gs_path 2>/dev/null)
+            }
+            Self::Alicloud { bucket } => {
+                let oss_path = format!("oss://{bucket}/{key}");
+                run_fun!(aliyun oss cat $oss_path 2>/dev/null)
             }
         }
     }
@@ -50,6 +61,10 @@ impl CloudAccess {
             Self::Gcs { bucket } => {
                 let gs_prefix = format!("gs://{bucket}/{prefix}**");
                 run_fun!(gcloud storage ls $gs_prefix 2>/dev/null).unwrap_or_default()
+            }
+            Self::Alicloud { bucket } => {
+                let oss_prefix = format!("oss://{bucket}/{prefix}");
+                run_fun!(aliyun oss ls $oss_prefix 2>/dev/null).unwrap_or_default()
             }
         }
     }
@@ -74,7 +89,10 @@ impl StageCache {
     fn fetch(access: &CloudAccess, cluster_id: &str) -> Self {
         let prefix = format!("workflow/{cluster_id}/stages/");
         let output = access.list_recursive(&prefix);
-        let is_gcs = matches!(access, CloudAccess::Gcs { .. });
+        let is_gcs = matches!(
+            access,
+            CloudAccess::Gcs { .. } | CloudAccess::Alicloud { .. }
+        );
         let lines = output.lines().map(|s| s.to_string()).collect();
         Self { lines, is_gcs }
     }
@@ -121,6 +139,10 @@ pub fn show_progress_with_bucket(
             } else {
                 CloudAccess::for_gcp(gcp_project)?
             }
+        }
+        DeployTarget::Alicloud => {
+            let region = super::alicloud::resolve_alicloud_region(None);
+            CloudAccess::for_alicloud(&region)
         }
         DeployTarget::OnPrem => {
             return Err(Error::other(

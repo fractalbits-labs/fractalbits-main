@@ -9,6 +9,10 @@ pub fn upload(deploy_target: DeployTarget) -> CmdResult {
             let project_id = super::gcp::resolve_gcp_project(None)?;
             upload_gcp(&project_id)
         }
+        DeployTarget::Alicloud => {
+            let region = super::alicloud::resolve_alicloud_region(None);
+            upload_alicloud(&region)
+        }
         DeployTarget::Aws | DeployTarget::OnPrem => upload_to_aws(deploy_target),
     }
 }
@@ -22,8 +26,8 @@ pub fn upload_to_aws(deploy_target: DeployTarget) -> CmdResult {
 
     // Sync binaries based on deploy target
     match deploy_target {
-        DeployTarget::OnPrem | DeployTarget::Gcp => {
-            // On-prem/GCP: sync only generic binaries (baseline CPU)
+        DeployTarget::OnPrem | DeployTarget::Gcp | DeployTarget::Alicloud => {
+            // On-prem/GCP/Alicloud: sync only generic binaries (baseline CPU)
             for arch in ["x86_64", "aarch64"] {
                 let src = format!("prebuilt/deploy/generic/{arch}");
                 let dst = format!("s3://{bucket_name}/{arch}");
@@ -103,6 +107,34 @@ pub fn upload_gcp(project_id: &str) -> CmdResult {
     Ok(())
 }
 
+/// Upload binaries directly to Alicloud OSS.
+pub fn upload_alicloud(region: &str) -> CmdResult {
+    let bucket_name = format!("fractalbits-deploy-{region}");
+    let target = xtask_common::DeployTarget::Alicloud;
+
+    cloud_storage::ensure_bucket(&bucket_name, target)?;
+
+    // Alicloud: sync generic binaries per arch
+    for arch in ["x86_64", "aarch64"] {
+        let src = format!("prebuilt/deploy/generic/{arch}");
+        if std::path::Path::new(&src).exists() {
+            let dst = format!("oss://{bucket_name}/{arch}");
+            info!("Syncing generic binaries for {arch} to {dst}");
+            cloud_storage::sync_up(&src, &dst)?;
+        }
+    }
+
+    // Sync UI if it exists
+    if std::path::Path::new("prebuilt/deploy/ui").exists() {
+        let ui_dst = format!("oss://{bucket_name}/ui");
+        info!("Syncing UI to {ui_dst}");
+        cloud_storage::sync_up("prebuilt/deploy/ui", &ui_dst)?;
+    }
+
+    info!("Syncing all binaries to OSS is done");
+    Ok(())
+}
+
 /// Upload binaries to on-prem Docker S3 endpoint.
 #[allow(dead_code)] // Used by on-prem Docker S3 path
 pub fn upload_with_endpoint(deploy_target: DeployTarget, s3_endpoint: Option<&str>) -> CmdResult {
@@ -156,8 +188,8 @@ echo "=== Bootstrap completed at $(date) ==="
 
     // Sync binaries based on deploy target
     match deploy_target {
-        DeployTarget::OnPrem | DeployTarget::Gcp => {
-            // On-prem/GCP: sync only generic binaries (baseline CPU)
+        DeployTarget::OnPrem | DeployTarget::Gcp | DeployTarget::Alicloud => {
+            // On-prem/GCP/Alicloud: sync only generic binaries (baseline CPU)
             for arch in ["x86_64", "aarch64"] {
                 run_cmd! {
                     info "Syncing generic binaries for $arch to S3 bucket $bucket_name";

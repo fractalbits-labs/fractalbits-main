@@ -6,6 +6,7 @@ use super::DeployTarget;
 pub fn bucket_uri(bucket: &str, target: DeployTarget) -> String {
     match target {
         DeployTarget::Gcp => format!("gs://{bucket}"),
+        DeployTarget::Alicloud => format!("oss://{bucket}"),
         _ => format!("s3://{bucket}"),
     }
 }
@@ -15,10 +16,23 @@ pub fn object_uri(bucket: &str, key: &str, target: DeployTarget) -> String {
     format!("{}/{key}", bucket_uri(bucket, target))
 }
 
+/// Parse bucket name from an oss:// URI
+pub fn parse_oss_uri(uri: &str) -> (&str, &str) {
+    let stripped = uri.strip_prefix("oss://").unwrap_or(uri);
+    stripped.split_once('/').unwrap_or((stripped, ""))
+}
+
+/// Parse just the bucket name from an oss:// URI
+pub fn parse_oss_bucket(uri: &str) -> &str {
+    parse_oss_uri(uri).0
+}
+
 /// Download a file from cloud storage (dispatches on URI prefix)
 pub fn download_file(cloud_uri: &str, local_path: &str) -> CmdResult {
     if cloud_uri.starts_with("gs://") {
         run_cmd!(gcloud storage cp $cloud_uri $local_path)
+    } else if cloud_uri.starts_with("oss://") {
+        run_cmd!(aliyun oss cp $cloud_uri $local_path)
     } else {
         run_cmd!(aws s3 cp --no-progress $cloud_uri $local_path)
     }
@@ -28,6 +42,8 @@ pub fn download_file(cloud_uri: &str, local_path: &str) -> CmdResult {
 pub fn cat(cloud_uri: &str) -> FunResult {
     if cloud_uri.starts_with("gs://") {
         run_fun!(gcloud storage cat $cloud_uri 2>/dev/null)
+    } else if cloud_uri.starts_with("oss://") {
+        run_fun!(aliyun oss cat $cloud_uri 2>/dev/null)
     } else {
         run_fun!(aws s3 cp $cloud_uri - 2>/dev/null)
     }
@@ -37,6 +53,8 @@ pub fn cat(cloud_uri: &str) -> FunResult {
 pub fn upload_string(content: &str, cloud_uri: &str) -> CmdResult {
     if cloud_uri.starts_with("gs://") {
         run_cmd!(echo -n $content | gcloud storage cp - $cloud_uri --quiet)
+    } else if cloud_uri.starts_with("oss://") {
+        run_cmd!(echo -n $content | aliyun oss cp - $cloud_uri)
     } else {
         run_cmd!(echo -n $content | aws s3 cp - $cloud_uri --quiet)
     }
@@ -46,6 +64,8 @@ pub fn upload_string(content: &str, cloud_uri: &str) -> CmdResult {
 pub fn upload_file(local_path: &str, cloud_uri: &str) -> CmdResult {
     if cloud_uri.starts_with("gs://") {
         run_cmd!(gcloud storage cp $local_path $cloud_uri --quiet)
+    } else if cloud_uri.starts_with("oss://") {
+        run_cmd!(aliyun oss cp $local_path $cloud_uri)
     } else {
         run_cmd!(aws s3 cp $local_path $cloud_uri --quiet)
     }
@@ -55,6 +75,8 @@ pub fn upload_file(local_path: &str, cloud_uri: &str) -> CmdResult {
 pub fn sync_up(local_dir: &str, cloud_uri: &str) -> CmdResult {
     if cloud_uri.starts_with("gs://") {
         run_cmd!(gcloud storage rsync -r $local_dir $cloud_uri)
+    } else if cloud_uri.starts_with("oss://") {
+        run_cmd!(aliyun oss cp -r $local_dir/ $cloud_uri/ --update)
     } else {
         run_cmd!(aws s3 sync $local_dir $cloud_uri)
     }
@@ -84,6 +106,8 @@ pub fn sync_up_filtered(
 pub fn sync_down(cloud_uri: &str, local_dir: &str) -> CmdResult {
     if cloud_uri.starts_with("gs://") {
         run_cmd!(gcloud storage rsync -r $cloud_uri $local_dir)
+    } else if cloud_uri.starts_with("oss://") {
+        run_cmd!(aliyun oss cp -r $cloud_uri/ $local_dir/)
     } else {
         run_cmd!(aws s3 cp --no-progress $cloud_uri $local_dir --recursive)
     }
@@ -96,6 +120,10 @@ pub fn head_object(bucket: &str, key: &str, target: DeployTarget) -> bool {
             let gs_path = format!("gs://{bucket}/{key}");
             run_cmd!(gcloud storage ls $gs_path 2>/dev/null).is_ok()
         }
+        DeployTarget::Alicloud => {
+            let oss_path = format!("oss://{bucket}/{key}");
+            run_cmd!(aliyun oss stat $oss_path 2>/dev/null).is_ok()
+        }
         _ => run_cmd!(aws s3api head-object --bucket $bucket --key $key &>/dev/null).is_ok(),
     }
 }
@@ -106,6 +134,10 @@ pub fn list_objects(bucket: &str, prefix: &str, target: DeployTarget) -> FunResu
         DeployTarget::Gcp => {
             let gs_prefix = format!("gs://{bucket}/{prefix}");
             run_fun!(gcloud storage ls $gs_prefix 2>/dev/null)
+        }
+        DeployTarget::Alicloud => {
+            let oss_prefix = format!("oss://{bucket}/{prefix}");
+            run_fun!(aliyun oss ls $oss_prefix 2>/dev/null)
         }
         _ => {
             let s3_prefix = format!("s3://{bucket}/{prefix}");
@@ -121,6 +153,10 @@ pub fn delete_object(bucket: &str, key: &str, target: DeployTarget) -> CmdResult
             let gs_path = format!("gs://{bucket}/{key}");
             run_cmd!(gcloud storage rm $gs_path 2>/dev/null)
         }
+        DeployTarget::Alicloud => {
+            let oss_path = format!("oss://{bucket}/{key}");
+            run_cmd!(aliyun oss rm $oss_path 2>/dev/null)
+        }
         _ => {
             let s3_path = format!("s3://{bucket}/{key}");
             run_cmd!(aws s3 rm $s3_path &>/dev/null)
@@ -135,6 +171,13 @@ pub fn ensure_bucket(bucket: &str, target: DeployTarget) -> CmdResult {
             let gs_bucket = format!("gs://{bucket}");
             if run_cmd!(gcloud storage ls $gs_bucket &>/dev/null).is_err() {
                 run_cmd!(gcloud storage buckets create --location=us-central1 $gs_bucket)?;
+            }
+            Ok(())
+        }
+        DeployTarget::Alicloud => {
+            let oss_bucket = format!("oss://{bucket}");
+            if run_cmd!(aliyun oss stat $oss_bucket &>/dev/null).is_err() {
+                run_cmd!(aliyun oss mb $oss_bucket)?;
             }
             Ok(())
         }

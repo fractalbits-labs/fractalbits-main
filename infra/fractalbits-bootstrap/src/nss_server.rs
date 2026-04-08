@@ -168,13 +168,18 @@ pub fn bootstrap(
         }
         JournalType::Ebs => {
             // On GCP, the pd_ssd journal disk is pre-attached as device "nss-journal".
-            // No volume_id is passed via CLI; use the fixed GCP device name instead.
-            let gcp_default;
+            // On Alicloud, the ESSD journal disk is pre-attached as device "nss-journal".
+            // No volume_id is passed via CLI; use the fixed device name instead.
+            let cloud_default;
             let volume_id = match volume_id {
                 Some(v) => v,
                 None if config.global.deploy_target == DeployTarget::Gcp => {
-                    gcp_default = "gcp:nss-journal".to_string();
-                    &gcp_default
+                    cloud_default = "gcp:nss-journal".to_string();
+                    &cloud_default
+                }
+                None if config.global.deploy_target == DeployTarget::Alicloud => {
+                    cloud_default = "alicloud:nss-journal".to_string();
+                    &cloud_default
                 }
                 None => {
                     return Err(Error::other("volume_id required for ebs journal type"));

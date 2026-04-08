@@ -72,7 +72,7 @@ pub fn common_setup(target: DeployTarget) -> CmdResult {
             crate::aws::install_cloudwatch_agent(os)?;
             install_packages(&[perf_pkg, "lldb"])?;
         }
-        DeployTarget::OnPrem | DeployTarget::Gcp => {
+        DeployTarget::OnPrem | DeployTarget::Gcp | DeployTarget::Alicloud => {
             install_packages(&[perf_pkg, "lldb"])?;
         }
     }
@@ -96,6 +96,7 @@ fn download_binary(config: &BootstrapConfig, file_name: &str) -> CmdResult {
     // - AWS CPU-specific binaries: {bucket}/{arch}/{cpu}/{binary}
     let cloud_path = if config.global.deploy_target == DeployTarget::OnPrem
         || config.global.deploy_target == DeployTarget::Gcp
+        || config.global.deploy_target == DeployTarget::Alicloud
         || config.global.use_generic_binaries
         || SHARED_BINARIES.contains(&file_name)
     {
@@ -303,6 +304,7 @@ pub fn get_instance_id(deploy_target: DeployTarget) -> FunResult {
         DeployTarget::OnPrem => run_fun!(hostname),
         DeployTarget::Aws => crate::aws::get_aws_instance_id(),
         DeployTarget::Gcp => crate::gcp::get_gcp_instance_id(),
+        DeployTarget::Alicloud => crate::alicloud::get_alicloud_instance_id(),
     }
 }
 
@@ -311,6 +313,7 @@ pub fn get_private_ip(deploy_target: DeployTarget) -> FunResult {
         DeployTarget::OnPrem => run_fun!(hostname -I | awk r"{print $1}"),
         DeployTarget::Aws => crate::aws::get_aws_private_ip(),
         DeployTarget::Gcp => crate::gcp::get_gcp_private_ip(),
+        DeployTarget::Alicloud => crate::alicloud::get_alicloud_private_ip(),
     }
 }
 

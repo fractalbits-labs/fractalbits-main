@@ -53,6 +53,10 @@ pub fn get_volume_dev(volume_id: &str) -> String {
     if let Some(device_name) = volume_id.strip_prefix("gcp:") {
         return format!("/dev/disk/by-id/google-{device_name}");
     }
+    // Alicloud cloud disk: device name is set in terraform
+    if let Some(device_name) = volume_id.strip_prefix("alicloud:") {
+        return format!("/dev/disk/by-id/virtio-{device_name}");
+    }
     // AWS EBS: sanitize vol-07451bc901d5e1e09 → vol07451bc901d5e1e09
     let volume_id = &volume_id.replace("-", "");
     format!("/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_{volume_id}")

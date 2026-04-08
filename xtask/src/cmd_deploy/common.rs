@@ -24,6 +24,8 @@ pub struct VpcConfig {
     pub deploy_os: crate::DeployOS,
     pub gcp_project: Option<String>,
     pub gcp_zone: Option<String>,
+    pub alicloud_region: Option<String>,
+    pub alicloud_zone: Option<String>,
     pub bss_storage_alloc_mode: crate::BssStorageAllocMode,
 }
 
@@ -135,6 +137,13 @@ pub fn get_bootstrap_bucket_name(deploy_target: DeployTarget) -> FunResult {
             // This fallback should not normally be called for GCP.
             Err(std::io::Error::other(
                 "GCP bootstrap bucket requires project_id; use config generator instead",
+            ))
+        }
+        DeployTarget::Alicloud => {
+            // Alicloud bootstrap bucket is set by the config gen using region.
+            // This fallback should not normally be called for Alicloud.
+            Err(std::io::Error::other(
+                "Alicloud bootstrap bucket requires region; use config generator instead",
             ))
         }
     }

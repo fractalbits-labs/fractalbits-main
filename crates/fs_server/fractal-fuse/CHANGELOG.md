@@ -4,6 +4,8 @@ All notable changes to `fractal-fuse` will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-08
+
 ### Added
 - **FUSE kernel notification API** (`notify.rs`): `FuseNotifier` for
   sending cache invalidation notifications to the kernel via

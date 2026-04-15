@@ -38,7 +38,7 @@ impl BackendConfig {
 
         // 2. Get active NSS address from RSS
         let nss_addr = rss_client
-            .get_active_nss_address(Some(config.rss_rpc_timeout()), &trace_id, 0)
+            .get_active_nss_address(&[], Some(config.rss_rpc_timeout()), &trace_id, 0)
             .await
             .map_err(|e| format!("Failed to get NSS address from RSS: {e}"))?;
         tracing::info!("Got NSS address: {nss_addr}");
@@ -122,7 +122,7 @@ impl StorageBackend {
 
         match self
             .rss_client
-            .get_active_nss_address(Some(self.config.rss_rpc_timeout()), trace_id, 0)
+            .get_active_nss_address(&[], Some(self.config.rss_rpc_timeout()), trace_id, 0)
             .await
         {
             Ok(new_addr) => {

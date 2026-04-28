@@ -137,6 +137,14 @@ pub struct MountOptions {
     pub write_back: bool,
     pub force_readdir_plus: bool,
     pub passthrough: bool,
+    /// Advertise FUSE_POSIX_LOCKS so the kernel routes fcntl(F_SETLK)
+    /// requests to the userspace `getlk`/`setlk` handlers. Leave off
+    /// unless the [`Filesystem`](crate::Filesystem) impl actually
+    /// implements them; otherwise the kernel's local-only lock fallback
+    /// is preferable to userspace ENOSYS.
+    pub posix_locks: bool,
+    /// Same gate for `FUSE_FLOCK_LOCKS` -> the `flock` handler.
+    pub flock_locks: bool,
 }
 
 impl MountOptions {
@@ -196,6 +204,16 @@ impl MountOptions {
 
     pub fn passthrough(mut self, pt: bool) -> Self {
         self.passthrough = pt;
+        self
+    }
+
+    pub fn posix_locks(mut self, pl: bool) -> Self {
+        self.posix_locks = pl;
+        self
+    }
+
+    pub fn flock_locks(mut self, fl: bool) -> Self {
+        self.flock_locks = fl;
         self
     }
 

@@ -172,6 +172,7 @@ impl Filesystem for FuseServer {
         _flags: u32,
         _lock_owner: u64,
         _flush: bool,
+        _flock_release: bool,
     ) -> FsResult<()> {
         self.vfs.release_passthrough(fh);
         self.vfs.vfs_release(fh).await.map_err(fs_err)

@@ -342,3 +342,51 @@ pub struct ReplyStatx {
 pub struct ReplyReadlink {
     pub data: Vec<u8>,
 }
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FileLock {
+    pub start: u64,
+    pub end: u64,
+    /// `F_RDLCK` / `F_WRLCK` / `F_UNLCK` (see fcntl(2))
+    pub typ: u32,
+    pub pid: u32,
+}
+
+impl From<abi::fuse_file_lock> for FileLock {
+    fn from(value: abi::fuse_file_lock) -> Self {
+        Self {
+            start: value.start,
+            end: value.end,
+            typ: value.typ,
+            pid: value.pid,
+        }
+    }
+}
+
+impl From<FileLock> for abi::fuse_file_lock {
+    fn from(value: FileLock) -> Self {
+        Self {
+            start: value.start,
+            end: value.end,
+            typ: value.typ,
+            pid: value.pid,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ReplyLock {
+    pub lock: FileLock,
+}
+
+/// Reply for `getxattr` / `listxattr`.
+///
+/// When the caller passes `size == 0`, it is asking how large its buffer
+/// must be: return [`ReplyXattr::Size`]. Otherwise return the actual
+/// payload via [`ReplyXattr::Data`]; the dispatch layer will surface
+/// `ERANGE` if the data exceeds the caller's buffer.
+#[derive(Debug)]
+pub enum ReplyXattr {
+    Size(u32),
+    Data(Vec<u8>),
+}

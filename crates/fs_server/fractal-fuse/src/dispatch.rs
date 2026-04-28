@@ -262,9 +262,18 @@ async fn dispatch_with_reply<F: Filesystem>(
         },
         FUSE_RELEASE => {
             let arg: &fuse_release_in = entry.header().op_in_as();
-            let flush = arg.release_flags & 1 != 0; // FUSE_RELEASE_FLUSH
+            let flush = arg.release_flags & FUSE_RELEASE_FLUSH != 0;
+            let flock_release = arg.release_flags & FUSE_RELEASE_FLOCK_UNLOCK != 0;
             match fs
-                .release(req, nodeid, arg.fh, arg.flags, arg.lock_owner, flush)
+                .release(
+                    req,
+                    nodeid,
+                    arg.fh,
+                    arg.flags,
+                    arg.lock_owner,
+                    flush,
+                    flock_release,
+                )
                 .await
             {
                 Ok(()) => DispatchResult::Empty,
@@ -396,6 +405,85 @@ async fn dispatch_with_reply<F: Filesystem>(
                 Err(e) => DispatchResult::Error(e),
             }
         }
+        FUSE_SETXATTR => {
+            let arg: &fuse_setxattr_in = entry.header().op_in_as();
+            let payload = entry.payload();
+            // Payload layout: name\0 followed by `arg.size` bytes of value.
+            let name_end = payload
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(payload.len());
+            let name = &payload[..name_end];
+            let value_start = (name_end + 1).min(payload.len());
+            let value_end = (value_start + arg.size as usize).min(payload.len());
+            let value = &payload[value_start..value_end];
+            match fs
+                .setxattr(req, nodeid, OsStr::from_bytes(name), value, arg.flags)
+                .await
+            {
+                Ok(()) => DispatchResult::Empty,
+                Err(e) => DispatchResult::Error(e),
+            }
+        }
+        FUSE_GETXATTR => {
+            let arg: &fuse_getxattr_in = entry.header().op_in_as();
+            let name = extract_name_from_payload(entry);
+            match fs
+                .getxattr(req, nodeid, OsStr::from_bytes(&name), arg.size)
+                .await
+            {
+                Ok(reply) => DispatchResult::Xattr(reply, arg.size),
+                Err(e) => DispatchResult::Error(e),
+            }
+        }
+        FUSE_LISTXATTR => {
+            let arg: &fuse_getxattr_in = entry.header().op_in_as();
+            match fs.listxattr(req, nodeid, arg.size).await {
+                Ok(reply) => DispatchResult::Xattr(reply, arg.size),
+                Err(e) => DispatchResult::Error(e),
+            }
+        }
+        FUSE_REMOVEXATTR => {
+            let name = extract_name_from_payload(entry);
+            match fs.removexattr(req, nodeid, OsStr::from_bytes(&name)).await {
+                Ok(()) => DispatchResult::Empty,
+                Err(e) => DispatchResult::Error(e),
+            }
+        }
+        FUSE_GETLK => {
+            let arg: &fuse_lk_in = entry.header().op_in_as();
+            match fs
+                .getlk(req, nodeid, arg.fh, arg.owner, arg.lk.into())
+                .await
+            {
+                Ok(reply) => DispatchResult::Lock(reply),
+                Err(e) => DispatchResult::Error(e),
+            }
+        }
+        FUSE_SETLK | FUSE_SETLKW => {
+            let arg: &fuse_lk_in = entry.header().op_in_as();
+            let sleep = opcode == FUSE_SETLKW;
+            let result = if arg.lk_flags & FUSE_LK_FLOCK != 0 {
+                // flock: lk.typ encodes F_RDLCK/F_WRLCK/F_UNLCK; convert to
+                // LOCK_SH/LOCK_EX/LOCK_UN, then OR in LOCK_NB if non-blocking.
+                let base = if arg.lk.typ == libc::F_RDLCK as u32 {
+                    libc::LOCK_SH
+                } else if arg.lk.typ == libc::F_WRLCK as u32 {
+                    libc::LOCK_EX
+                } else {
+                    libc::LOCK_UN
+                };
+                let op = if sleep { base } else { base | libc::LOCK_NB };
+                fs.flock(req, nodeid, arg.fh, arg.owner, op as u32).await
+            } else {
+                fs.setlk(req, nodeid, arg.fh, arg.owner, arg.lk.into(), sleep)
+                    .await
+            };
+            match result {
+                Ok(()) => DispatchResult::Empty,
+                Err(e) => DispatchResult::Error(e),
+            }
+        }
         _ => {
             warn!("unsupported FUSE opcode: {}", opcode);
             DispatchResult::Error(ENOSYS)
@@ -420,6 +508,10 @@ enum DispatchResult {
     Readdirplus(Vec<DirectoryEntryPlus>, u32),
     Readlink(ReplyReadlink),
     Lseek(u64),
+    /// `(reply, requested_size)` — the requested_size is needed so we can
+    /// surface ERANGE if the data exceeds the caller's buffer.
+    Xattr(ReplyXattr, u32),
+    Lock(ReplyLock),
 }
 
 /// Serialize a FUSE response into the ring entry buffers.
@@ -659,6 +751,29 @@ fn serialize_response(entry: &mut RingEntry, unique: u64, _opcode: u32, result: 
         }
         DispatchResult::Lseek(offset) => {
             let out = fuse_lseek_out { offset };
+            write_payload_struct(entry, unique, &out);
+        }
+        DispatchResult::Xattr(reply, requested_size) => match reply {
+            ReplyXattr::Size(size) => {
+                let out = fuse_getxattr_out { size, padding: 0 };
+                write_payload_struct(entry, unique, &out);
+            }
+            ReplyXattr::Data(data) => {
+                if data.len() > requested_size as usize {
+                    write_out_header(entry, unique, -ERANGE, 0);
+                    entry.header_mut().ring_ent_in_out.payload_sz = 0;
+                } else {
+                    let n = data.len().min(entry.payload_len());
+                    write_out_header(entry, unique, 0, n as u32);
+                    entry.payload_mut()[..n].copy_from_slice(&data[..n]);
+                    entry.header_mut().ring_ent_in_out.payload_sz = n as u32;
+                }
+            }
+        },
+        DispatchResult::Lock(reply) => {
+            let out = fuse_lk_out {
+                lk: reply.lock.into(),
+            };
             write_payload_struct(entry, unique, &out);
         }
     }

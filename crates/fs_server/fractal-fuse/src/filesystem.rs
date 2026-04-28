@@ -310,7 +310,11 @@ pub trait Filesystem: Send + Sync + 'static {
     ///
     /// Called when the last file descriptor for a file handle is closed.
     /// `flush` indicates whether pending data should be flushed before
-    /// release. After this call, the file handle `fh` is no longer valid.
+    /// release. `flock_release` is set when the kernel needs userspace to
+    /// drop any flock(2)-style lock held on this fh by `lock_owner` (the
+    /// kernel sets `FUSE_RELEASE_FLOCK_UNLOCK` once `FUSE_FLOCK_LOCKS` is
+    /// negotiated; ignore unless flock is actually implemented). After this
+    /// call, the file handle `fh` is no longer valid.
     fn release(
         &self,
         req: Request,
@@ -319,8 +323,9 @@ pub trait Filesystem: Send + Sync + 'static {
         flags: u32,
         lock_owner: u64,
         flush: bool,
+        flock_release: bool,
     ) -> impl std::future::Future<Output = FsResult<()>> {
-        let _ = (req, inode, fh, flags, lock_owner, flush);
+        let _ = (req, inode, fh, flags, lock_owner, flush, flock_release);
         async { Err(ENOSYS) }
     }
 
@@ -531,6 +536,115 @@ pub trait Filesystem: Send + Sync + 'static {
         let _ = (
             req, inode_in, fh_in, off_in, inode_out, fh_out, off_out, length, flags,
         );
+        async { Err(ENOSYS) }
+    }
+
+    /// Set an extended attribute.
+    ///
+    /// `flags` may be `XATTR_CREATE` (fail if key exists) or `XATTR_REPLACE`
+    /// (fail if key absent); see setxattr(2).
+    fn setxattr(
+        &self,
+        req: Request,
+        inode: Inode,
+        name: &OsStr,
+        value: &[u8],
+        flags: u32,
+    ) -> impl std::future::Future<Output = FsResult<()>> {
+        let _ = (req, inode, name, value, flags);
+        async { Err(ENOSYS) }
+    }
+
+    /// Get an extended attribute.
+    ///
+    /// If `size` is 0 the caller is probing for the required buffer size;
+    /// return [`ReplyXattr::Size`]. Otherwise return [`ReplyXattr::Data`]
+    /// with the value bytes; the dispatch layer will return `ERANGE` if the
+    /// data exceeds `size`.
+    fn getxattr(
+        &self,
+        req: Request,
+        inode: Inode,
+        name: &OsStr,
+        size: u32,
+    ) -> impl std::future::Future<Output = FsResult<ReplyXattr>> {
+        let _ = (req, inode, name, size);
+        async { Err(ENOSYS) }
+    }
+
+    /// List extended attribute names for an inode.
+    ///
+    /// Same `size`/return semantics as `getxattr`. The data buffer is a
+    /// sequence of NUL-terminated names.
+    fn listxattr(
+        &self,
+        req: Request,
+        inode: Inode,
+        size: u32,
+    ) -> impl std::future::Future<Output = FsResult<ReplyXattr>> {
+        let _ = (req, inode, size);
+        async { Err(ENOSYS) }
+    }
+
+    /// Remove an extended attribute.
+    fn removexattr(
+        &self,
+        req: Request,
+        inode: Inode,
+        name: &OsStr,
+    ) -> impl std::future::Future<Output = FsResult<()>> {
+        let _ = (req, inode, name);
+        async { Err(ENOSYS) }
+    }
+
+    /// Test for a POSIX file lock (`F_GETLK`).
+    ///
+    /// Inspect-only: returns the conflicting lock if present, or a lock
+    /// with `typ == F_UNLCK` if the requested range is free.
+    fn getlk(
+        &self,
+        req: Request,
+        inode: Inode,
+        fh: u64,
+        owner: u64,
+        lock: FileLock,
+    ) -> impl std::future::Future<Output = FsResult<ReplyLock>> {
+        let _ = (req, inode, fh, owner, lock);
+        async { Err(ENOSYS) }
+    }
+
+    /// Acquire or release a POSIX file lock.
+    ///
+    /// `sleep` distinguishes `F_SETLKW` (block on conflict) from `F_SETLK`
+    /// (return `EAGAIN` immediately). See fcntl(2).
+    fn setlk(
+        &self,
+        req: Request,
+        inode: Inode,
+        fh: u64,
+        owner: u64,
+        lock: FileLock,
+        sleep: bool,
+    ) -> impl std::future::Future<Output = FsResult<()>> {
+        let _ = (req, inode, fh, owner, lock, sleep);
+        async { Err(ENOSYS) }
+    }
+
+    /// Acquire, downgrade, or release a BSD-style flock(2) lock.
+    ///
+    /// `op` is the flock(2) operation: `LOCK_SH` / `LOCK_EX` / `LOCK_UN`,
+    /// optionally OR'd with `LOCK_NB`. The kernel routes flock requests
+    /// via `FUSE_SETLK`/`FUSE_SETLKW` with the `FUSE_LK_FLOCK` flag bit;
+    /// the dispatch layer converts and demultiplexes to this method.
+    fn flock(
+        &self,
+        req: Request,
+        inode: Inode,
+        fh: u64,
+        owner: u64,
+        op: u32,
+    ) -> impl std::future::Future<Output = FsResult<()>> {
+        let _ = (req, inode, fh, owner, op);
         async { Err(ENOSYS) }
     }
 }

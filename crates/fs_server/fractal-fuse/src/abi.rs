@@ -139,6 +139,13 @@ pub const FUSE_WRITE_KILL_SUIDGID: u32 = 1 << 2;
 // GETATTR flags
 pub const FUSE_GETATTR_FH: u32 = 1 << 0;
 
+// Lock flags (fuse_lk_in.lk_flags)
+pub const FUSE_LK_FLOCK: u32 = 1 << 0;
+
+// RELEASE flags (fuse_release_in.release_flags)
+pub const FUSE_RELEASE_FLUSH: u32 = 1 << 0;
+pub const FUSE_RELEASE_FLOCK_UNLOCK: u32 = 1 << 1;
+
 // io_uring protocol constants
 pub const FUSE_URING_IN_OUT_HEADER_SZ: usize = 128;
 pub const FUSE_URING_OP_IN_OUT_SZ: usize = 128;
@@ -476,6 +483,42 @@ pub struct fuse_copy_file_range_in {
     pub flags: u64,
 }
 
+// Extended fuse_setxattr_in layout (FUSE_SETXATTR_EXT).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct fuse_setxattr_in {
+    pub size: u32,
+    pub flags: u32,
+    pub setxattr_flags: u32,
+    pub padding: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct fuse_getxattr_in {
+    pub size: u32,
+    pub padding: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct fuse_file_lock {
+    pub start: u64,
+    pub end: u64,
+    pub typ: u32,
+    pub pid: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct fuse_lk_in {
+    pub fh: u64,
+    pub owner: u64,
+    pub lk: fuse_file_lock,
+    pub lk_flags: u32,
+    pub padding: u32,
+}
+
 // ---------- Response structures ----------
 
 #[repr(C)]
@@ -556,6 +599,19 @@ pub struct fuse_poll_out {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct fuse_lseek_out {
     pub offset: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct fuse_getxattr_out {
+    pub size: u32,
+    pub padding: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct fuse_lk_out {
+    pub lk: fuse_file_lock,
 }
 
 // ---------- Directory entry structures ----------

@@ -328,6 +328,18 @@ fn fuse_init(fuse_fd: BorrowedFd<'_>, opts: &MountOptions) -> io::Result<(u32, u
     want_flags |= FUSE_PARALLEL_DIROPS as u64;
     want_flags |= FUSE_MAX_PAGES as u64;
     want_flags |= FUSE_ATOMIC_O_TRUNC as u64;
+    want_flags |= FUSE_SETXATTR_EXT as u64;
+
+    // Lock advertisement is opt-in: enabling these flags routes all
+    // fcntl/flock calls to userspace, where they ENOSYS unless the
+    // Filesystem impl provides getlk/setlk/flock. Leaving them off lets
+    // the kernel handle local-only locks.
+    if opts.posix_locks {
+        want_flags |= FUSE_POSIX_LOCKS as u64;
+    }
+    if opts.flock_locks {
+        want_flags |= FUSE_FLOCK_LOCKS as u64;
+    }
 
     if opts.dont_mask {
         want_flags |= FUSE_DONT_MASK as u64;

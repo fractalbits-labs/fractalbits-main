@@ -82,6 +82,8 @@ fn fs_err_to_nfs(e: FsError) -> Nfsstat3 {
         FsError::Rpc(_) => Nfsstat3::ServerFault,
         FsError::DataVg(_) => Nfsstat3::Io,
         FsError::InvalidState => Nfsstat3::Io,
+        FsError::NoData => Nfsstat3::Inval,
+        FsError::InvalidArg => Nfsstat3::Inval,
         FsError::Deserialize(_) => Nfsstat3::Io,
         FsError::Internal(_) => Nfsstat3::ServerFault,
     }

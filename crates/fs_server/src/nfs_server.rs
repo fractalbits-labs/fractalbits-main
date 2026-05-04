@@ -78,6 +78,7 @@ fn fs_err_to_nfs(e: FsError) -> Nfsstat3 {
         FsError::ReadOnly => Nfsstat3::Rofs,
         FsError::BadFd => Nfsstat3::Badhandle,
         FsError::Busy => Nfsstat3::Jukebox,
+        FsError::CasConflict => Nfsstat3::Stale,
         FsError::Rpc(_) => Nfsstat3::ServerFault,
         FsError::DataVg(_) => Nfsstat3::Io,
         FsError::InvalidState => Nfsstat3::Io,

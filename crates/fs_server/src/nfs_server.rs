@@ -102,14 +102,17 @@ impl Nfs3Filesystem for NfsAdapter {
     }
 
     async fn setattr(&self, fh: &NfsFh3, attrs: &Sattr3, w: &mut XdrWriter) -> NfsResult {
-        if let Some(0) = attrs.size {
-            // Truncate to zero
+        if let Some(new_size) = attrs.size {
+            // Truncate (any size). Open W briefly so vfs_setattr_size can
+            // route through the sparse WriteBuffer; release flushes the
+            // size change via the override path (O(1) for grow, trim+
+            // tail-zero for shrink).
             let open_fh = self
                 .vfs
-                .vfs_open(fh.ino(), libc::O_WRONLY as u32 | libc::O_TRUNC as u32)
+                .vfs_open(fh.ino(), libc::O_WRONLY as u32)
                 .await
                 .map_err(fs_err_to_nfs)?;
-            let result = self.vfs.vfs_setattr_size(fh.ino(), open_fh, 0).await;
+            let result = self.vfs.vfs_setattr_size(fh.ino(), open_fh, new_size).await;
             let _ = self.vfs.vfs_release(open_fh).await;
             let attr = result.map_err(fs_err_to_nfs)?;
             let fattr = vfs_attr_to_fattr3(&attr, self.fsid);

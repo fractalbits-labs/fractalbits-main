@@ -3,6 +3,7 @@ use crate::{CmdResult, FsServerConfig, InitConfig, ServiceName};
 use aws_sdk_s3::primitives::ByteStream;
 use cmd_lib::*;
 use colored::*;
+use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::time::Duration;
 
@@ -134,6 +135,42 @@ pub async fn run_nfs_tests() -> CmdResult {
 
     println!("\n{}", "=== NFS Test: Rename ===".bold());
     if let Err(e) = test_nfs_rename().await {
+        eprintln!("{}: {}", "Test FAILED".red().bold(), e);
+        return Err(e);
+    }
+
+    println!(
+        "\n{}",
+        "=== NFS Test: Sparse Truncate Up (O(1) extend) ===".bold()
+    );
+    if let Err(e) = test_nfs_sparse_truncate_up().await {
+        eprintln!("{}: {}", "Test FAILED".red().bold(), e);
+        return Err(e);
+    }
+
+    println!(
+        "\n{}",
+        "=== NFS Test: Sparse Partial-Block Overwrite ===".bold()
+    );
+    if let Err(e) = test_nfs_sparse_partial_overwrite().await {
+        eprintln!("{}: {}", "Test FAILED".red().bold(), e);
+        return Err(e);
+    }
+
+    println!(
+        "\n{}",
+        "=== NFS Test: Sparse File Round Trip (truncate + write + holes) ===".bold()
+    );
+    if let Err(e) = test_nfs_sparse_round_trip().await {
+        eprintln!("{}: {}", "Test FAILED".red().bold(), e);
+        return Err(e);
+    }
+
+    println!(
+        "\n{}",
+        "=== NFS Test: Sparse Truncate-Then-Shrink ===".bold()
+    );
+    if let Err(e) = test_nfs_sparse_truncate_shrink().await {
         eprintln!("{}: {}", "Test FAILED".red().bold(), e);
         return Err(e);
     }
@@ -479,5 +516,251 @@ async fn test_nfs_rename() -> CmdResult {
 
     unmount_nfs()?;
     println!("{}", "SUCCESS: NFS rename test passed".green());
+    Ok(())
+}
+
+// Exercises the sparse override path through NFS SETATTR(size=N) with
+// N > current_size. The Linux NFS client maps `set_len` to a SETATTR
+// RPC; before the V1 sparse work this was either unsupported (NFS
+// adapter only honored size=0) or O(N) on the filesystem side.
+async fn test_nfs_sparse_truncate_up() -> CmdResult {
+    let (_ctx, bucket) = setup_test_bucket().await;
+
+    println!("  Step 1: Mount NFS in read-write mode");
+    mount_nfs_rw(&bucket)?;
+
+    println!("  Step 2: Create a small file");
+    let file_path = format!("{}/nfs-sparse-trunc-up.bin", NFS_MOUNT_POINT);
+    std::fs::write(&file_path, b"hello").expect("seed write failed");
+
+    println!("  Step 3: ftruncate up to 16MB (sparse extend, must be O(1))");
+    let f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&file_path)
+        .expect("open for set_len failed");
+    f.set_len(16 * 1024 * 1024)
+        .expect("set_len(16MB) failed -- NFS setattr did not honor non-zero size?");
+    drop(f);
+
+    println!("  Step 4: stat() reports the new size");
+    let meta = std::fs::metadata(&file_path).expect("stat failed");
+    assert_eq!(
+        meta.len(),
+        16 * 1024 * 1024,
+        "stat after set_len should report 16MB"
+    );
+
+    println!("  Step 5: Original bytes are preserved");
+    let read_handle = std::fs::File::open(&file_path).expect("open ro failed");
+    let mut head = vec![0u8; 5];
+    read_handle
+        .read_exact_at(&mut head, 0)
+        .expect("read head failed");
+    assert_eq!(&head, b"hello", "Original bytes lost after sparse extend");
+
+    println!("  Step 6: A 4KB read in the hole returns zeros");
+    let mut hole = vec![0xffu8; 4096];
+    read_handle
+        .read_exact_at(&mut hole, 1024 * 1024)
+        .expect("hole read failed");
+    assert!(
+        hole.iter().all(|&b| b == 0),
+        "Hole region must read as zeros (got first non-zero at offset {})",
+        hole.iter().position(|&b| b != 0).unwrap_or(usize::MAX),
+    );
+    drop(read_handle);
+
+    unmount_nfs()?;
+    println!("{}", "SUCCESS: NFS sparse truncate-up test passed".green());
+    Ok(())
+}
+
+// A small NFS WRITE in the middle of an existing multi-block object
+// must override only the touched block via the V1 flush path. The
+// surrounding bytes (in adjacent blocks AND inside the same block)
+// must survive the per-call open/write/flush/release cycle that NFS
+// goes through for every WRITE RPC.
+async fn test_nfs_sparse_partial_overwrite() -> CmdResult {
+    let (ctx, bucket) = setup_test_bucket().await;
+
+    println!("  Step 1: Upload a 64KB seed object via S3");
+    let key = "nfs-sparse-partial.bin";
+    let original = generate_test_data(key, 64 * 1024);
+    ctx.client
+        .put_object()
+        .bucket(&bucket)
+        .key(key)
+        .body(ByteStream::from(original.clone()))
+        .send()
+        .await
+        .expect("put failed");
+
+    println!("  Step 2: Mount NFS in read-write mode");
+    mount_nfs_rw(&bucket)?;
+
+    println!("  Step 3: Patch 16 bytes at offset 32KB via NFS WRITE");
+    let file_path = format!("{}/{}", NFS_MOUNT_POINT, key);
+    let patch = b"NFS-V1-PARTIAL!!";
+    {
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&file_path)
+            .expect("open RDWR failed");
+        f.write_all_at(patch, 32 * 1024)
+            .expect("write_all_at failed");
+        f.sync_all().expect("sync_all failed");
+    }
+
+    println!("  Step 4: Verify patch landed and surrounding bytes are intact");
+    let actual = std::fs::read(&file_path).expect("read after partial write failed");
+    assert_eq!(actual.len(), original.len(), "Length must match original");
+    assert_eq!(
+        &actual[..32 * 1024],
+        &original[..32 * 1024],
+        "Pre-patch region corrupted"
+    );
+    assert_eq!(
+        &actual[32 * 1024..32 * 1024 + patch.len()],
+        patch,
+        "Patch did not land"
+    );
+    assert_eq!(
+        &actual[32 * 1024 + patch.len()..],
+        &original[32 * 1024 + patch.len()..],
+        "Post-patch region corrupted"
+    );
+
+    unmount_nfs()?;
+    cleanup_objects(&ctx, &bucket, &[key]).await;
+    println!(
+        "{}",
+        "SUCCESS: NFS sparse partial-block overwrite test passed".green()
+    );
+    Ok(())
+}
+
+// Round-trip a sparse file end-to-end via NFS: write head, ftruncate
+// up to 4MB, write a marker near 3MB, then close + reopen + read.
+// Holes must read as zeros (BlockNotFound -> zeros) and the written
+// bytes must be intact. This exercises the sparse extend + override-
+// flush path across multiple NFS RPCs to the same inode.
+async fn test_nfs_sparse_round_trip() -> CmdResult {
+    let (_ctx, bucket) = setup_test_bucket().await;
+
+    println!("  Step 1: Mount NFS rw and create a fresh file");
+    mount_nfs_rw(&bucket)?;
+    let file_path = format!("{}/nfs-sparse-roundtrip.bin", NFS_MOUNT_POINT);
+
+    let marker = b"NFS-END-MARKER-32B-XXXXXXXXXXXXX";
+    let marker_offset: u64 = 3 * 1024 * 1024;
+
+    println!("  Step 2: Create + write head, ftruncate to 4MB, write marker near 3MB");
+    {
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&file_path)
+            .expect("create failed");
+        f.write_all_at(b"head!", 0).expect("write head failed");
+        f.set_len(4 * 1024 * 1024).expect("set_len(4MB) failed");
+        f.write_all_at(marker, marker_offset)
+            .expect("write marker failed");
+        f.sync_all().expect("sync_all failed");
+    }
+
+    println!("  Step 3: Reopen; verify size, head, marker, and hole reads zeros");
+    let meta = std::fs::metadata(&file_path).expect("stat failed");
+    assert_eq!(meta.len(), 4 * 1024 * 1024, "size mismatch after flush");
+
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .open(&file_path)
+        .expect("open ro failed");
+
+    let mut head = vec![0u8; 5];
+    f.read_exact_at(&mut head, 0).expect("read head failed");
+    assert_eq!(&head, b"head!", "head bytes lost");
+
+    let mut hole = vec![0xffu8; 4096];
+    f.read_exact_at(&mut hole, 1024 * 1024)
+        .expect("read hole failed");
+    assert!(
+        hole.iter().all(|&b| b == 0),
+        "hole did not read as zeros (got first non-zero at offset {})",
+        hole.iter().position(|&b| b != 0).unwrap_or(usize::MAX),
+    );
+
+    let mut readback = vec![0u8; marker.len()];
+    f.read_exact_at(&mut readback, marker_offset)
+        .expect("read marker failed");
+    assert_eq!(&readback, marker, "marker mismatch");
+
+    drop(f);
+    unmount_nfs()?;
+    println!("{}", "SUCCESS: NFS sparse round-trip test passed".green());
+    Ok(())
+}
+
+// Truncate down to a non-block-aligned size via NFS, then read past
+// the new EOF on a fresh handle. POSIX shrink-destroys: the original
+// bytes past the new EOF must be gone (file size reflects the shrink,
+// reads past EOF return EOF). Exercises the V1 shrink path through
+// NFS SETATTR(size=N) where N < current_size.
+async fn test_nfs_sparse_truncate_shrink() -> CmdResult {
+    let (ctx, bucket) = setup_test_bucket().await;
+
+    println!("  Step 1: Upload a 64KB seed object via S3 with a recognizable pattern");
+    let key = "nfs-sparse-shrink.bin";
+    let original: Vec<u8> = (0..64 * 1024).map(|i| (i % 251 + 1) as u8).collect();
+    ctx.client
+        .put_object()
+        .bucket(&bucket)
+        .key(key)
+        .body(ByteStream::from(original.clone()))
+        .send()
+        .await
+        .expect("put failed");
+
+    println!("  Step 2: Mount NFS in read-write mode");
+    mount_nfs_rw(&bucket)?;
+    let file_path = format!("{}/{}", NFS_MOUNT_POINT, key);
+
+    println!("  Step 3: Shrink to a non-block-aligned size (5000 bytes)");
+    let shrunk_size: u64 = 5000;
+    {
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&file_path)
+            .expect("open for shrink failed");
+        f.set_len(shrunk_size).expect("set_len(5000) failed");
+        f.sync_all().expect("sync_all failed");
+    }
+
+    println!("  Step 4: stat() reports the shrunk size");
+    let meta = std::fs::metadata(&file_path).expect("stat failed");
+    assert_eq!(meta.len(), shrunk_size, "stat after shrink should be 5000");
+
+    println!("  Step 5: Surviving prefix matches the original");
+    let actual = std::fs::read(&file_path).expect("read after shrink failed");
+    assert_eq!(
+        actual.len() as u64,
+        shrunk_size,
+        "Read length must match new EOF"
+    );
+    assert_eq!(
+        &actual[..],
+        &original[..shrunk_size as usize],
+        "Surviving prefix corrupted by shrink"
+    );
+
+    unmount_nfs()?;
+    cleanup_objects(&ctx, &bucket, &[key]).await;
+    println!(
+        "{}",
+        "SUCCESS: NFS sparse truncate-shrink test passed".green()
+    );
     Ok(())
 }
